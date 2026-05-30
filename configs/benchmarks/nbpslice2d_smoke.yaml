@@ -1,0 +1,74 @@
+name: nbpslice2d_smoke
+case_glob: ${USCT_NBP_SAMPLE_ROOT}/cases/*.h5
+algorithms:
+  - name: straight_sart
+    config: configs/algorithms/straight_sart.yaml
+  - name: straight_sirt
+    config: configs/algorithms/straight_sirt.yaml
+  - name: straight_cgls
+    config: configs/algorithms/straight_cgls.yaml
+  - name: attenuation_sirt
+    config: configs/algorithms/attenuation_sirt.yaml
+  - name: fwi_tiny
+    config: configs/algorithms/fwi_tiny.yaml
+outputs:
+  root: ${USCT_NBP_RUN_ROOT}
+min_cases: 1
+min_records: 5
+expected_statuses:
+  - success
+require_algorithm_case_matrix: true
+required_metrics:
+  straight_sart:
+    - data_residual_norm
+    - data_relative_residual
+    - data_residual_reduction
+    - rmse
+    - water_relative_rmse_improvement
+  straight_sirt:
+    - data_residual_norm
+    - data_relative_residual
+    - data_residual_reduction
+    - rmse
+    - water_relative_rmse_improvement
+  straight_cgls:
+    - data_residual_norm
+    - data_relative_residual
+    - data_residual_reduction
+    - rmse
+    - water_relative_rmse_improvement
+  attenuation_sirt:
+    - data_residual_norm
+    - data_relative_residual
+    - data_residual_reduction
+    - attenuation_input_signal_norm
+  fwi_tiny:
+    - initial_loss
+    - final_loss
+    - loss_decreased
+    - iterations
+thresholds:
+  straight_sart:
+    rmse: 150.0
+    data_relative_residual: 0.8
+  straight_sirt:
+    rmse: 150.0
+    data_relative_residual: 0.8
+  straight_cgls:
+    rmse: 150.0
+    data_relative_residual: 0.8
+  attenuation_sirt:
+    data_relative_residual: 0.9
+minimums:
+  straight_sart:
+    data_residual_reduction: 0.2
+  straight_sirt:
+    data_residual_reduction: 0.2
+  straight_cgls:
+    data_residual_reduction: 0.2
+  attenuation_sirt:
+    attenuation_input_signal_norm: 1.0e-12
+    data_residual_reduction: 0.1
+  fwi_tiny:
+    loss_decreased: 1
+    iterations: 1

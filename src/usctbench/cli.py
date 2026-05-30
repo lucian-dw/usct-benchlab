@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from usctbench.benchmark.runner import evaluate_run, run_algorithm_case, run_benchmark_suite
+from usctbench.data.nbpslice2d import inspect_nbp_slice2d_zip, make_nbp_slice2d_smoke_subset
 from usctbench.data.openbreastus import inspect_openbreastus, write_schema_report
 from usctbench.data.smoke_subset import make_smoke_subset
 from usctbench.registry import list_algorithms
@@ -46,6 +47,19 @@ def build_parser() -> argparse.ArgumentParser:
     smoke_parser.add_argument("--n-transducers", type=int, default=32, help="Synthetic ring transducers for converted speed-map cases.")
     smoke_parser.add_argument("--spacing-m", type=float, default=1.0e-3, help="Assumed pixel spacing for converted speed-map cases.")
     smoke_parser.add_argument("--no-convert-speed-mat", action="store_true", help="Only write the manifest; do not create HDF5 cases.")
+
+    nbp_inspect_parser = data_subparsers.add_parser("inspect-nbpslice2d", help="Inspect an NBPslices2D ZIP archive.")
+    nbp_inspect_parser.add_argument("--zip", required=True, help="NBPslices2D ZIP path.")
+    nbp_inspect_parser.add_argument("--out", default="nbpslice2d_index.json", help="Output index JSON path.")
+
+    nbp_smoke_parser = data_subparsers.add_parser("make-nbp-smoke", help="Create an NBPslices2D smoke benchmark subset.")
+    nbp_smoke_parser.add_argument("--zip", required=True, help="NBPslices2D ZIP path.")
+    nbp_smoke_parser.add_argument("--out", required=True, help="Output smoke subset root.")
+    nbp_smoke_parser.add_argument("--cases-per-type", type=int, default=1, help="Cases to convert for each A/B/C/D density label.")
+    nbp_smoke_parser.add_argument("--converted-shape", type=int, default=64, help="Square image size for converted cases.")
+    nbp_smoke_parser.add_argument("--n-transducers", type=int, default=32, help="Synthetic ring transducers for converted cases.")
+    nbp_smoke_parser.add_argument("--reference-sound-speed-mps", type=float, default=1500.0)
+    nbp_smoke_parser.add_argument("--attenuation-frequency-mhz", type=float, default=1.0)
 
     run_parser = subparsers.add_parser("run", help="Run one algorithm on one case.")
     run_parser.add_argument("algorithm", help="Registered algorithm name.")
@@ -101,6 +115,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 converted_shape=(args.converted_shape, args.converted_shape),
                 spacing_m=(args.spacing_m, args.spacing_m),
                 n_transducers=args.n_transducers,
+            )
+            print(args.out)
+            return 0
+        if args.data_command == "inspect-nbpslice2d":
+            inspect_nbp_slice2d_zip(args.zip, args.out)
+            print(args.out)
+            return 0
+        if args.data_command == "make-nbp-smoke":
+            make_nbp_slice2d_smoke_subset(
+                args.zip,
+                args.out,
+                cases_per_type=args.cases_per_type,
+                converted_shape=(args.converted_shape, args.converted_shape),
+                n_transducers=args.n_transducers,
+                reference_sound_speed_mps=args.reference_sound_speed_mps,
+                attenuation_frequency_mhz=args.attenuation_frequency_mhz,
             )
             print(args.out)
             return 0

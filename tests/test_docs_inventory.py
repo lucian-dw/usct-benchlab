@@ -28,6 +28,7 @@ def test_required_v01_docs_exist():
         "docs/architecture.md",
         "docs/A100_SERVER_SETUP.md",
         "docs/OPENBREASTUS_DATA_PROTOCOL.md",
+        "docs/NBPSLICE2D_DATA_PROTOCOL.md",
         "docs/EVALUATION_ACCEPTANCE_PROTOCOL.md",
         "docs/algorithm_taxonomy.md",
         "docs/EXTERNAL_SOURCES_AND_LICENSES.md",

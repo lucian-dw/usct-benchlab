@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import Any
+import zipfile
 
 import numpy as np
 
@@ -11,6 +13,16 @@ from usctbench.algorithms.ray.straight_projector import StraightRayProjector
 from usctbench.data.synthetic import make_grid, make_ring_geometry
 from usctbench.io.hdf5 import write_case_hdf5
 from usctbench.schema import GeometrySpec, GridSpec, GroundTruthSpec, MeasurementSpec, USCTCase
+
+
+NBP_PIXEL_SPACING_M = 1.0e-4
+NBP_DEFAULT_ATTENUATION_FREQUENCY_MHZ = 1.0
+NBP_DENSITY_CLASSES = {
+    "A": "almost_entirely_fatty",
+    "B": "scattered_fibroglandular",
+    "C": "heterogeneously_dense",
+    "D": "extremely_dense",
+}
 
 
 def convert_speed_mat_volume(
@@ -184,6 +196,95 @@ def kwave_channel_mat_metadata(mat_path: str | Path) -> dict[str, Any] | None:
         return None
 
 
+def convert_nbp_slice2d_mat(
+    mat_path: str | Path,
+    out_dir: str | Path,
+    *,
+    case_id_prefix: str | None = None,
+    output_shape: tuple[int, int] = (64, 64),
+    n_transducers: int = 32,
+    reference_sound_speed_mps: float = 1500.0,
+    attenuation_frequency_mhz: float = NBP_DEFAULT_ATTENUATION_FREQUENCY_MHZ,
+) -> list[dict[str, Any]]:
+    """Convert one NBPslices2D MAT file to a standard feature-domain case."""
+
+    h5py = _h5py()
+    source = Path(mat_path).expanduser().resolve()
+    out_path = Path(out_dir).expanduser().resolve()
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    with h5py.File(source, "r") as handle:
+        case, record = _nbp_handle_to_case_record(
+            handle,
+            case_id=case_id_prefix or _safe_case_id(source.stem),
+            source_path=str(source),
+            source_member=None,
+            output_shape=output_shape,
+            n_transducers=n_transducers,
+            reference_sound_speed_mps=reference_sound_speed_mps,
+            attenuation_frequency_mhz=attenuation_frequency_mhz,
+        )
+    case_path = out_path / f"{case.case_id}.h5"
+    write_case_hdf5(case, case_path)
+    record["path"] = str(case_path)
+    return [record]
+
+
+def convert_nbp_slice2d_zip(
+    zip_path: str | Path,
+    out_dir: str | Path,
+    *,
+    cases_per_type: int = 1,
+    output_shape: tuple[int, int] = (64, 64),
+    n_transducers: int = 32,
+    reference_sound_speed_mps: float = 1500.0,
+    attenuation_frequency_mhz: float = NBP_DEFAULT_ATTENUATION_FREQUENCY_MHZ,
+) -> list[dict[str, Any]]:
+    """Convert selected NBPslices2D MAT members from a ZIP archive."""
+
+    if cases_per_type <= 0:
+        raise ValueError("cases_per_type must be positive")
+
+    h5py = _h5py()
+    source = Path(zip_path).expanduser().resolve()
+    out_path = Path(out_dir).expanduser().resolve()
+    out_path.mkdir(parents=True, exist_ok=True)
+    records: list[dict[str, Any]] = []
+
+    with zipfile.ZipFile(source) as archive:
+        selected = _select_nbp_zip_members(archive.namelist(), cases_per_type=cases_per_type)
+        for member in selected:
+            data = archive.read(member)
+            with h5py.File(io.BytesIO(data), "r") as handle:
+                case_id = _safe_case_id(Path(member).stem)
+                case, record = _nbp_handle_to_case_record(
+                    handle,
+                    case_id=case_id,
+                    source_path=str(source),
+                    source_member=member,
+                    output_shape=output_shape,
+                    n_transducers=n_transducers,
+                    reference_sound_speed_mps=reference_sound_speed_mps,
+                    attenuation_frequency_mhz=attenuation_frequency_mhz,
+                )
+            case_path = out_path / f"{case.case_id}.h5"
+            write_case_hdf5(case, case_path)
+            record["path"] = str(case_path)
+            records.append(record)
+    return records
+
+
+def nbp_slice2d_mat_metadata(mat_path: str | Path) -> dict[str, Any] | None:
+    """Return metadata for a supported NBPslices2D MAT file if present."""
+
+    h5py = _h5py()
+    try:
+        with h5py.File(mat_path, "r") as handle:
+            return _nbp_metadata_from_handle(handle)
+    except Exception:
+        return None
+
+
 def _speed_array_to_case(
     sound_speed_mps: np.ndarray,
     *,
@@ -299,6 +400,124 @@ def _kwave_arrays_to_case(
     )
 
 
+def _nbp_handle_to_case_record(
+    handle: Any,
+    *,
+    case_id: str,
+    source_path: str,
+    source_member: str | None,
+    output_shape: tuple[int, int],
+    n_transducers: int,
+    reference_sound_speed_mps: float,
+    attenuation_frequency_mhz: float,
+) -> tuple[USCTCase, dict[str, Any]]:
+    metadata = _nbp_metadata_from_handle(handle)
+    if metadata is None:
+        raise ValueError("not a supported NBPslices2D MAT file")
+
+    sos_mps_raw = np.asarray(handle["sos"][()], dtype=float) * 1000.0
+    y_power = float(np.asarray(handle["y"][()]).reshape(-1)[0])
+    att_raw = np.asarray(handle["att"][()], dtype=float)
+    attenuation_np_per_m_raw = _nbp_attenuation_to_np_per_m(
+        att_raw,
+        power_law_exponent=y_power,
+        frequency_mhz=attenuation_frequency_mhz,
+    )
+    label_raw = np.asarray(handle["label"][()], dtype=np.uint8)
+    density_raw = np.asarray(handle["den"][()], dtype=float)
+    type_code = int(np.asarray(handle["type"][()]).reshape(-1)[0])
+    density_label = chr(type_code) if 0 <= type_code <= 255 else str(type_code)
+    density_class = NBP_DENSITY_CLASSES.get(density_label, "unknown")
+
+    sound_speed_mps = _downsample_mean(sos_mps_raw, output_shape)
+    attenuation_np_per_m = _downsample_mean(attenuation_np_per_m_raw, output_shape)
+    label_small = _downsample_label(label_raw, output_shape)
+    roi_mask = label_small > 0
+    if not np.any(roi_mask):
+        roi_mask = np.ones(output_shape, dtype=bool)
+
+    spacing_m = (
+        NBP_PIXEL_SPACING_M * sos_mps_raw.shape[0] / float(output_shape[0]),
+        NBP_PIXEL_SPACING_M * sos_mps_raw.shape[1] / float(output_shape[1]),
+    )
+    grid = make_grid(shape=output_shape, spacing_m=spacing_m)
+    grid = grid.model_copy(update={"roi_mask": roi_mask})
+    radius_m = 0.6 * max(grid.shape[0] * grid.spacing_m[0], grid.shape[1] * grid.spacing_m[1])
+    geometry = make_ring_geometry(n_transducers=n_transducers, radius_m=radius_m)
+    projector = StraightRayProjector.from_grid_geometry(grid, geometry)
+
+    delta_slowness = (1.0 / sound_speed_mps) - (1.0 / reference_sound_speed_mps)
+    delta_tof_s = projector.forward(delta_slowness).reshape(projector.ray_shape)
+    attenuation_integral = projector.forward(attenuation_np_per_m).reshape(projector.ray_shape)
+    valid_mask = ~np.eye(projector.ray_shape[0], projector.ray_shape[1], dtype=bool)
+
+    source_ref = f"{source_path}!{source_member}" if source_member else source_path
+    case = USCTCase(
+        case_id=case_id,
+        grid=grid,
+        geometry=geometry,
+        measurement=MeasurementSpec(
+            domain="features",
+            frequencies_hz=np.asarray([attenuation_frequency_mhz * 1.0e6], dtype=float),
+            delta_tof_s=delta_tof_s,
+            log_amp=-attenuation_integral,
+            valid_mask=valid_mask,
+        ),
+        ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed_mps, attenuation_np_per_m=attenuation_np_per_m),
+        metadata={
+            "source_dataset": "NBPslices2D",
+            "source_path": source_path,
+            "source_member": source_member,
+            "source_ref": source_ref,
+            "source_shape": list(sos_mps_raw.shape),
+            "conversion": "nbpslice2d_to_feature_case",
+            "feature_provenance": "surrogate_delta_tof_from_nbp_sound_speed_and_attenuation_line_integral_from_nbp_ground_truth",
+            "measurement_domain": "features",
+            "measurement_limitations": [
+                "NBPslices2D contains acoustic property maps, not measured RF or pressure wavefields",
+                "delta_tof_s was generated with a straight-ray projector from the sound-speed map",
+                "log_amp was generated as a straight-ray line integral from the attenuation map",
+                "synthetic ring geometry was generated because acquisition geometry is not included in the slice files",
+            ],
+            "reference_sound_speed_mps": reference_sound_speed_mps,
+            "density_class": density_class,
+            "density_label": density_label,
+            "nbp_type_code": type_code,
+            "attenuation_frequency_mhz": attenuation_frequency_mhz,
+            "attenuation_power_law_exponent": y_power,
+            "attenuation_source_units": "dB/(MHz^y mm)",
+            "attenuation_conversion": "Np/m = att_dB_per_MHz_y_mm * frequency_mhz**y * ln(10)/20 * 1000",
+            "density_source_units": "g/mm^3",
+            "density_kg_per_m3_min": float(np.nanmin(density_raw) * 1.0e9),
+            "density_kg_per_m3_max": float(np.nanmax(density_raw) * 1.0e9),
+            "label_values": [int(value) for value in sorted(np.unique(label_raw).tolist())],
+            "pixel_spacing_m_assumption": NBP_PIXEL_SPACING_M,
+            "effective_spacing_m": list(spacing_m),
+            "has_simulated_attenuation": True,
+            "attenuation_evidence": "nbp_numerical_phantom_ground_truth_line_integral",
+        },
+    )
+    record = {
+        "case_id": case_id,
+        "source_path": source_path,
+        "source_member": source_member,
+        "source_dataset": "NBPslices2D",
+        "shape": list(sound_speed_mps.shape),
+        "source_shape": list(sos_mps_raw.shape),
+        "conversion": case.metadata["conversion"],
+        "feature_provenance": case.metadata["feature_provenance"],
+        "measurement_limitations": case.metadata["measurement_limitations"],
+        "density_label": density_label,
+        "density_class": density_class,
+        "attenuation_frequency_mhz": attenuation_frequency_mhz,
+        "attenuation_power_law_exponent": y_power,
+        "has_measured_attenuation": False,
+        "has_simulated_attenuation": True,
+        "attenuation_evidence": case.metadata["attenuation_evidence"],
+    }
+    return case, record
+
+
 def _downsample_mean(image: np.ndarray, output_shape: tuple[int, int]) -> np.ndarray:
     """Downsample by centered crop plus block averaging."""
 
@@ -319,6 +538,33 @@ def _downsample_mean(image: np.ndarray, output_shape: tuple[int, int]) -> np.nda
     start_x = (nx - crop_x) // 2
     cropped = image[start_y : start_y + crop_y, start_x : start_x + crop_x]
     return cropped.reshape(out_y, block_y, out_x, block_x).mean(axis=(1, 3))
+
+
+def _downsample_label(label: np.ndarray, output_shape: tuple[int, int]) -> np.ndarray:
+    label = np.asarray(label)
+    ny, nx = label.shape
+    out_y, out_x = output_shape
+    if out_y <= 0 or out_x <= 0:
+        raise ValueError("output_shape must be positive")
+    if out_y > ny or out_x > nx:
+        y_idx = np.linspace(0, ny - 1, out_y).round().astype(int)
+        x_idx = np.linspace(0, nx - 1, out_x).round().astype(int)
+        return label[np.ix_(y_idx, x_idx)].astype(label.dtype, copy=False)
+    block_y = max(1, ny // out_y)
+    block_x = max(1, nx // out_x)
+    crop_y = out_y * block_y
+    crop_x = out_x * block_x
+    start_y = (ny - crop_y) // 2
+    start_x = (nx - crop_x) // 2
+    cropped = label[start_y : start_y + crop_y, start_x : start_x + crop_x]
+    return cropped.reshape(out_y, block_y, out_x, block_x).max(axis=(1, 3))
+
+
+def _nbp_attenuation_to_np_per_m(att_dB_per_mhz_y_mm: np.ndarray, *, power_law_exponent: float, frequency_mhz: float) -> np.ndarray:
+    if frequency_mhz <= 0:
+        raise ValueError("attenuation_frequency_mhz must be positive")
+    dB_per_mm = np.asarray(att_dB_per_mhz_y_mm, dtype=float) * (float(frequency_mhz) ** float(power_law_exponent))
+    return dB_per_mm * (np.log(10.0) / 20.0) * 1000.0
 
 
 def _grid_from_coordinates(shape: tuple[int, int], *, xi: np.ndarray | None, yi: np.ndarray | None) -> GridSpec:
@@ -367,6 +613,54 @@ def _kwave_channel_metadata_from_handle(handle: Any) -> dict[str, Any] | None:
         "channel_shape": list(full_shape),
         "geometry_shape": list(pos_shape),
     }
+
+
+def _nbp_metadata_from_handle(handle: Any) -> dict[str, Any] | None:
+    required = ("sos", "att", "den", "label", "type", "y")
+    if not all(name in handle for name in required):
+        return None
+    sos_shape = tuple(int(v) for v in handle["sos"].shape)
+    att_shape = tuple(int(v) for v in handle["att"].shape)
+    den_shape = tuple(int(v) for v in handle["den"].shape)
+    label_shape = tuple(int(v) for v in handle["label"].shape)
+    if len(sos_shape) != 2 or att_shape != sos_shape or den_shape != sos_shape or label_shape != sos_shape:
+        return None
+    type_code = _read_scalar(handle.get("type"))
+    density_label = chr(int(type_code)) if type_code is not None and 0 <= int(type_code) <= 255 else None
+    return {
+        "format": "nbpslice2d-mat",
+        "sound_speed_dataset": "sos",
+        "attenuation_dataset": "att",
+        "density_dataset": "den",
+        "label_dataset": "label",
+        "sound_speed_shape": list(sos_shape),
+        "attenuation_shape": list(att_shape),
+        "density_shape": list(den_shape),
+        "label_shape": list(label_shape),
+        "type_code": int(type_code) if type_code is not None else None,
+        "density_label": density_label,
+        "density_class": NBP_DENSITY_CLASSES.get(density_label or "", "unknown"),
+        "attenuation_power_law_exponent": _read_scalar(handle.get("y")),
+        "sound_speed_units": "mm/us",
+        "attenuation_units": "dB/(MHz^y mm)",
+        "density_units": "g/mm^3",
+    }
+
+
+def _select_nbp_zip_members(names: list[str], *, cases_per_type: int) -> list[str]:
+    grouped: dict[str, list[str]] = {}
+    for name in names:
+        path = Path(name)
+        if path.suffix.lower() != ".mat":
+            continue
+        if any(part.startswith("__MACOSX") for part in path.parts):
+            continue
+        label = path.stem[:1].upper() or "unknown"
+        grouped.setdefault(label, []).append(name)
+    selected: list[str] = []
+    for label in sorted(grouped):
+        selected.extend(sorted(grouped[label])[:cases_per_type])
+    return selected
 
 
 def _decode_matlab_chars(dataset: Any) -> str | None:

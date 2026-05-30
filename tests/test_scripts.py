@@ -22,6 +22,7 @@ def test_shell_scripts_source_local_env():
         Path("scripts/run_smoke.sh"),
         Path("scripts/run_v01_release_check.sh"),
         Path("scripts/run_fwi_kwave_adapter_smoke.sh"),
+        Path("scripts/run_nbpslice2d_smoke.sh"),
     ]:
         text = path.read_text(encoding="utf-8")
         assert 'if [ -f "$REPO_DIR/.env" ]; then' in text
@@ -49,6 +50,15 @@ def test_fwi_kwave_adapter_smoke_script_runs_adapter_flow():
     assert "fwi_kwave_adapter" in text
     assert "fwi_kwave_adapter_smoke.yaml" in text
     assert "USCT_KWAVE_FWI_RESULT_PATH" in text
+
+
+def test_nbpslice2d_smoke_script_runs_dataset_flow():
+    text = Path("scripts/run_nbpslice2d_smoke.sh").read_text(encoding="utf-8")
+
+    assert "inspect-nbpslice2d" in text
+    assert "make-nbp-smoke" in text
+    assert "nbpslice2d_smoke.yaml" in text
+    assert "USCT_NBP_ZIP_PATH" in text
 
 
 def test_setup_workspace_root_layout_symlinks_resolve_to_workspace_dirs(tmp_path):

@@ -62,6 +62,7 @@ REQUIRED_FILES = [
     "src/usctbench/cli.py",
     "src/usctbench/io/hdf5.py",
     "src/usctbench/data/openbreastus.py",
+    "src/usctbench/data/nbpslice2d.py",
     "src/usctbench/data/smoke_subset.py",
     "src/usctbench/data/features.py",
     "src/usctbench/data/conversion.py",
@@ -75,9 +76,11 @@ REQUIRED_FILES = [
     "scripts/run_smoke.sh",
     "scripts/run_v01_release_check.sh",
     "scripts/run_fwi_kwave_adapter_smoke.sh",
+    "scripts/run_nbpslice2d_smoke.sh",
     "docs/architecture.md",
     "docs/A100_SERVER_SETUP.md",
     "docs/OPENBREASTUS_DATA_PROTOCOL.md",
+    "docs/NBPSLICE2D_DATA_PROTOCOL.md",
     "docs/EVALUATION_ACCEPTANCE_PROTOCOL.md",
     "docs/algorithm_taxonomy.md",
     "docs/EXTERNAL_SOURCES_AND_LICENSES.md",
@@ -88,6 +91,7 @@ REQUIRED_FILES = [
     "configs/benchmarks/openbreastus_smoke.yaml",
     "configs/benchmarks/openbreastus_mini.yaml",
     "configs/benchmarks/fwi_kwave_adapter_smoke.yaml",
+    "configs/benchmarks/nbpslice2d_smoke.yaml",
 ]
 
 REQUIRED_TESTS = [
@@ -105,6 +109,7 @@ REQUIRED_TESTS = [
     "tests/test_fwi_gradient_check.py",
     "tests/test_fwi_loss_decrease.py",
     "tests/test_fwi_kwave_adapter.py",
+    "tests/test_nbpslice2d_conversion.py",
     "tests/test_docs_inventory.py",
     "tests/test_scripts.py",
     "tests/test_v01_audit.py",
