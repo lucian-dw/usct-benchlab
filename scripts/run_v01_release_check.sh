@@ -44,11 +44,23 @@ SMOKE_MANIFEST="$USCT_SAMPLE_ROOT/openbreastus_smoke_manifest.json"
 PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli data inspect-openbreastus --root "$USCT_DATA_ROOT" --out "$INDEX_PATH"
 PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli data make-smoke --root "$USCT_DATA_ROOT" --out "$USCT_SAMPLE_ROOT" --cases-per-density 1
 
-run_root="$(PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli bench --suite "$SMOKE_SUITE" | tail -n 1)"
+set +e
+bench_output="$(PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli bench --suite "$SMOKE_SUITE" 2>&1)"
+bench_status=$?
+set -e
+printf '%s\n' "$bench_output"
+run_root="$(printf '%s\n' "$bench_output" | tail -n 1)"
 echo "V01_RUN_ROOT=$run_root"
+set +e
 PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" scripts/audit_v01_readiness.py \
   --root "$REPO_DIR" \
   --run-dir "$run_root" \
   --openbreastus-index "$INDEX_PATH" \
   --smoke-manifest "$SMOKE_MANIFEST" \
   --require-v01-dod
+audit_status=$?
+set -e
+
+if [ "$bench_status" -ne 0 ] || [ "$audit_status" -ne 0 ]; then
+  exit 1
+fi

@@ -37,6 +37,8 @@ def test_v01_release_check_runs_full_evidence_chain():
     assert "--require-v01-dod" in text
     assert "--openbreastus-index" in text
     assert "--smoke-manifest" in text
+    assert "bench_status=$?" in text
+    assert "audit_status=$?" in text
 
 
 def test_setup_workspace_root_layout_symlinks_resolve_to_workspace_dirs(tmp_path):
