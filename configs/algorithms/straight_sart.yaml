@@ -1,0 +1,7 @@
+name: straight_sart
+parameters:
+  iterations: 10
+  relaxation: 0.5
+  reference_sound_speed_mps: 1500.0
+  sound_speed_bounds_mps: [1300.0, 1700.0]
+

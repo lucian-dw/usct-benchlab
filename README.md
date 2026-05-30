@@ -1,0 +1,28 @@
+# usct-benchlab
+
+`usct-benchlab` is a traditional-first benchmark harness for ultrasound computed tomography (USCT) reconstruction algorithms.
+
+The v0.1 scope is deliberately classical: shared `USCTCase -> ReconstructionResult` I/O, OpenBreastUS inspection, ray-based sound-speed and attenuation baselines, metrics, benchmark reports, and optional wrappers for established external methods.
+
+## Quick start
+
+```bash
+pip install -e ".[dev]"
+usct --help
+pytest -q
+```
+
+## Current v0.1 commands
+
+```bash
+usct data inspect-openbreastus --root "$USCT_DATA_ROOT" --out openbreastus_index.json
+usct data make-smoke --root "$USCT_DATA_ROOT" --out "$USCT_SAMPLE_ROOT" --cases-per-density 1
+usct list-algorithms
+usct run straight_cgls --case case.h5 --config configs/algorithms/straight_cgls.yaml --out runs/manual
+usct eval --run runs/manual --protocol configs/benchmarks/openbreastus_smoke.yaml
+usct bench --suite configs/benchmarks/openbreastus_smoke.yaml
+```
+
+Large datasets, generated runs, external repositories, and checkpoints belong outside Git under the workspace-level `data/`, `runs/`, `external/`, and `checkpoints/` directories.
+
+The OpenBreastUS inspector is intentionally schema-first: it writes an index and schema report from the local tree before any loader assumes case layout or filenames.

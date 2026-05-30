@@ -1,0 +1,14 @@
+name: usctbench
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - h5py
+  - pydantic
+  - pyyaml
+  - pytest
+  - pip:
+      - -e .[dev]
+

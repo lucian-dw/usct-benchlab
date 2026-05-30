@@ -1,0 +1,10 @@
+name: openbreastus_smoke
+case_glob: ${USCT_SAMPLE_ROOT}/**/*.h5
+algorithms:
+  - name: straight_sart
+    config: configs/algorithms/straight_sart.yaml
+  - name: attenuation_sirt
+    config: configs/algorithms/attenuation_sirt.yaml
+outputs:
+  root: ${USCT_RUN_ROOT}
+

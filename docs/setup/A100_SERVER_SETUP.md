@@ -20,10 +20,10 @@ If GitHub SSH fails, fix this before Codex starts. Codex will waste time if it c
 ## 2. Clone the private repository
 
 ```bash
-mkdir -p ~/projects
-cd ~/projects
+mkdir -p ~/usct-benchlab
+cd ~/usct-benchlab
 git clone git@github.com:Math-Wu/usct-benchlab.git
-cd usct-benchlab
+cd code 2>/dev/null || cd usct-benchlab
 git config user.name "Math-Wu"
 git config user.email "wdl200268@gmail.com"
 ```
@@ -32,25 +32,27 @@ If the repo is empty, Codex should initialize the package skeleton.
 
 ## 3. Prepare data and run directories
 
-Recommended layout:
+Recommended layout, without sudo:
 
 ```bash
-sudo mkdir -p /data/openbreastus
-sudo mkdir -p /data/openbreastus_sample
-sudo mkdir -p /data/usctbench_runs
-sudo chown -R $USER:$USER /data/openbreastus /data/openbreastus_sample /data/usctbench_runs
+export USCT_WORKSPACE=$HOME/usct-benchlab
+mkdir -p "$USCT_WORKSPACE/data/openbreastus"
+mkdir -p "$USCT_WORKSPACE/data/openbreastus_sample"
+mkdir -p "$USCT_WORKSPACE/runs/usctbench_runs"
+mkdir -p "$USCT_WORKSPACE/external"
+mkdir -p "$USCT_WORKSPACE/checkpoints"
 ```
 
 Then put the OpenBreastUS dataset under:
 
 ```text
-/data/openbreastus
+$HOME/usct-benchlab/data/openbreastus
 ```
 
 Create a small note for Codex:
 
 ```bash
-cat > /data/openbreastus/README_LOCAL_LAYOUT.txt <<'EOF'
+cat > "$USCT_WORKSPACE/data/openbreastus/README_LOCAL_LAYOUT.txt" <<'EOF'
 This directory contains the locally downloaded OpenBreastUS dataset.
 Do not download the full dataset again.
 Inspect this directory and write an index before assuming paths.
@@ -60,10 +62,7 @@ EOF
 Inside the repo:
 
 ```bash
-mkdir -p data/raw data/processed data/interim runs checkpoints external third_party
-ln -sfn /data/openbreastus data/raw/openbreastus
-ln -sfn /data/openbreastus_sample data/processed/openbreastus_sample
-ln -sfn /data/usctbench_runs runs/a100
+bash scripts/setup_workspace.sh
 ```
 
 ## 4. Environment variables
@@ -72,9 +71,10 @@ Create `.env` locally but do not commit it:
 
 ```bash
 cat > .env <<'EOF'
-USCT_DATA_ROOT=/data/openbreastus
-USCT_SAMPLE_ROOT=/data/openbreastus_sample
-USCT_RUN_ROOT=/data/usctbench_runs
+USCT_WORKSPACE=$HOME/usct-benchlab
+USCT_DATA_ROOT=$HOME/usct-benchlab/data/openbreastus
+USCT_SAMPLE_ROOT=$HOME/usct-benchlab/data/openbreastus_sample
+USCT_RUN_ROOT=$HOME/usct-benchlab/runs/usctbench_runs
 CUDA_VISIBLE_DEVICES=0
 OMP_NUM_THREADS=8
 MKL_NUM_THREADS=8
@@ -98,8 +98,7 @@ python -m pip install -U pip wheel setuptools
 Install core dependencies:
 
 ```bash
-pip install numpy scipy h5py zarr pydantic pyyaml typer rich tqdm matplotlib scikit-image pandas xarray
-pip install pytest pytest-cov ruff mypy pre-commit
+pip install -e ".[dev]"
 ```
 
 Install PyTorch after checking the CUDA driver:
@@ -159,30 +158,6 @@ If the private repo should not contain external source code, keep `external/` ig
 ## 8. Sanity script before Codex starts
 
 ```bash
-cat > scripts/check_server.sh <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-pwd
-hostname
-nvidia-smi || true
-python --version
-python - <<'PY'
-import sys
-print(sys.executable)
-try:
-    import torch
-    print('torch', torch.__version__, 'cuda', torch.cuda.is_available())
-    if torch.cuda.is_available(): print(torch.cuda.get_device_name(0))
-except Exception as e:
-    print('torch import failed:', repr(e))
-PY
-for p in "${USCT_DATA_ROOT:-/data/openbreastus}" "${USCT_SAMPLE_ROOT:-/data/openbreastus_sample}" "${USCT_RUN_ROOT:-/data/usctbench_runs}"; do
-    echo "PATH $p"
-    ls -lah "$p" | head || true
-done
-git status || true
-EOF
-chmod +x scripts/check_server.sh
 ./scripts/check_server.sh
 ```
 

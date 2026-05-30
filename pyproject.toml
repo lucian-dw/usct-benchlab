@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "usct-benchlab"
+version = "0.1.0"
+description = "Traditional-first benchmark harness for ultrasound computed tomography algorithms."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "usct-benchlab contributors" }
+]
+dependencies = [
+  "h5py>=3.8",
+  "numpy>=1.24",
+  "pydantic>=2.0",
+  "PyYAML>=6.0"
+]
+
+[project.optional-dependencies]
+hdf5 = [
+  "h5py>=3.8"
+]
+dev = [
+  "pytest>=8.0"
+]
+
+[project.scripts]
+usct = "usctbench.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
