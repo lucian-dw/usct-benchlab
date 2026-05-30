@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 
 import pytest
 import yaml
@@ -9,6 +10,8 @@ from usctbench.benchmark.runner import run_algorithm_case, run_benchmark_suite
 from usctbench.cli import main
 from usctbench.data.synthetic import make_sound_speed_case
 from usctbench.io.hdf5 import write_case_hdf5
+from usctbench.registry import register_algorithm
+from usctbench.schema import ReconstructionResult
 
 pytest.importorskip("h5py")
 
@@ -191,10 +194,14 @@ def test_bench_runs_suite_on_synthetic_case(tmp_path):
     run_root = tmp_path / "runs" / "unit_run"
     assert (run_root / "straight_cgls" / "synthetic_circular_sos" / "result.h5").exists()
     assert (run_root / "benchmark_summary.csv").exists()
+    assert (run_root / "run_metadata.yaml").exists()
     with (run_root / "benchmark_summary.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert rows[0]["artifacts_complete"] == "True"
     assert rows[0]["peak_memory_mb"]
+    report = (run_root / "benchmark_report.md").read_text(encoding="utf-8")
+    assert "Git commit:" in report
+    assert "USCT_DATA_ROOT:" in report
 
 
 def test_bench_suite_rejects_empty_case_glob(tmp_path):
@@ -226,3 +233,60 @@ def test_run_algorithm_case_classifies_data_failure(tmp_path):
     assert metadata["status"] == "failed"
     assert metadata["error_type"] == "data"
     assert "- Error type: data" in report
+
+
+def test_run_algorithm_case_writes_failure_report_when_artifact_write_fails(tmp_path):
+    class BadMetricAlgorithm:
+        name = "bad_metric"
+
+        def run(self, case, config):
+            return ReconstructionResult(
+                algorithm=self.name,
+                case_id=case.case_id,
+                sound_speed_mps=case.ground_truth.sound_speed_mps,
+                metrics={"not_json": object()},
+            )
+
+    register_algorithm("bad_metric", lambda: BadMetricAlgorithm(), replace=True)
+    case_path = tmp_path / "case.h5"
+    write_case_hdf5(make_sound_speed_case(shape=(8, 8), n_transducers=10), case_path)
+    config = tmp_path / "bad_metric.yaml"
+    config.write_text(yaml.safe_dump({"parameters": {}}), encoding="utf-8")
+
+    out_dir = run_algorithm_case("bad_metric", case_path, config, tmp_path / "run")
+
+    metadata = yaml.safe_load((out_dir / "metadata.yaml").read_text(encoding="utf-8"))
+    metrics = json.loads((out_dir / "metrics.json").read_text(encoding="utf-8"))
+    report = (out_dir / "failure_report.md").read_text(encoding="utf-8")
+    assert metadata["status"] == "failed"
+    assert metadata["error_type"] == "unknown"
+    assert "artifact write failed" in metadata["failure_reason"]
+    assert metrics["artifact_write_failed"] is True
+    assert "- Error type: unknown" in report
+
+
+def test_eval_rejects_zero_attenuation_signal_when_required(tmp_path):
+    run_case = tmp_path / "run" / "attenuation_sirt" / "case001"
+    run_case.mkdir(parents=True)
+    (run_case / "metrics.json").write_text(
+        json.dumps({"data_residual_norm": 0.0, "attenuation_input_signal_norm": 0.0}),
+        encoding="utf-8",
+    )
+    (run_case / "metadata.yaml").write_text(
+        yaml.safe_dump({"algorithm": "attenuation_sirt", "case_id": "case001", "status": "success", "runtime_s": 0.1}),
+        encoding="utf-8",
+    )
+    (run_case / "result.h5").write_text("placeholder", encoding="utf-8")
+    (run_case / "preview.png").write_bytes(b"placeholder")
+    protocol = tmp_path / "protocol.yaml"
+    protocol.write_text(
+        yaml.safe_dump({"minimums": {"attenuation_sirt": {"attenuation_input_signal_norm": 1.0e-12}}}),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["eval", "--run", str(tmp_path / "run"), "--protocol", str(protocol)])
+
+    assert exit_code == 1
+    with (tmp_path / "run" / "benchmark_summary.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert "attenuation_input_signal_norm=0 below min 1e-12" in rows[0]["fail_reasons"]

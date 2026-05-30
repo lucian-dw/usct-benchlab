@@ -22,4 +22,8 @@ def test_attenuation_sirt_reduces_log_amplitude_residual():
 
     assert result.failure_reason is None
     assert final_norm < 0.8 * initial_norm
-
+    assert result.metrics["attenuation_input_signal_norm"] == initial_norm
+    assert result.metrics["attenuation_input_has_signal"] is True
+    assert result.metrics["attenuation_input_is_surrogate"] is False
+    assert result.metrics["data_relative_residual"] < 0.8
+    assert result.metrics["data_residual_reduction"] > 0.2

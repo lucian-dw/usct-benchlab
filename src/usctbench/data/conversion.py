@@ -74,6 +74,11 @@ def convert_speed_mat_volume(
                     "source_dataset": name,
                     "source_index": index,
                     "shape": list(sound_speed.shape),
+                    "conversion": case.metadata["conversion"],
+                    "feature_provenance": case.metadata["feature_provenance"],
+                    "measurement_limitations": case.metadata["measurement_limitations"],
+                    "has_measured_attenuation": False,
+                    "attenuation_evidence": "surrogate_zero_log_amp",
                 }
             )
     return records

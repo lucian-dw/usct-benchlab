@@ -6,7 +6,9 @@ import numpy as np
 
 from usctbench.algorithms.ray._common import (
     cgls_solve,
+    masked_norm,
     reference_sound_speed,
+    residual_metrics,
     run_with_failure_capture,
     slowness_to_sound_speed,
     speed_bounds,
@@ -27,13 +29,11 @@ class StraightRayCGLSAlgorithm:
             iterations = int(config.parameters.get("iterations", 30))
             damping = float(config.parameters.get("damping", 0.0))
             c0 = reference_sound_speed(case, config)
+            initial_norm = masked_norm(target, mask)
             delta_slowness, residual_norms = cgls_solve(projector, target, mask, iterations=iterations, damping=damping)
             sound_speed = slowness_to_sound_speed(delta_slowness, c0, speed_bounds(config))
-            metrics = {
-                "data_residual_norm": residual_norms[-1],
-                "initial_data_residual_norm": residual_norms[0],
-                "iterations": len(residual_norms) - 1,
-            }
+            final_norm = residual_norms[-1] if residual_norms else initial_norm
+            metrics = {**residual_metrics(initial_norm, final_norm), "iterations": len(residual_norms) - 1}
             if case.ground_truth.sound_speed_mps is not None:
                 metrics.update(
                     compute_image_metrics(

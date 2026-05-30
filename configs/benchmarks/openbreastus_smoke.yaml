@@ -15,10 +15,15 @@ require_algorithm_case_matrix: true
 required_metrics:
   straight_sart:
     - data_residual_norm
+    - data_relative_residual
+    - data_residual_reduction
     - rmse
     - water_relative_rmse_improvement
   attenuation_sirt:
     - data_residual_norm
+    - data_relative_residual
+    - data_residual_reduction
+    - attenuation_input_signal_norm
 thresholds:
   straight_sart:
     rmse: 100.0
@@ -28,3 +33,5 @@ thresholds:
 minimums:
   straight_sart:
     water_relative_rmse_improvement: 0.0
+  attenuation_sirt:
+    attenuation_input_signal_norm: 1.0e-12

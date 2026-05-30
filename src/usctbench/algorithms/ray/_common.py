@@ -67,6 +67,26 @@ def apply_mask(values: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return out
 
 
+def masked_norm(values: np.ndarray, mask: np.ndarray) -> float:
+    values = np.asarray(values, dtype=float).reshape(-1)
+    return float(np.linalg.norm(values[mask]))
+
+
+def residual_metrics(initial_norm: float, final_norm: float) -> dict[str, float]:
+    if initial_norm > 0.0:
+        relative = final_norm / initial_norm
+        reduction = 1.0 - relative
+    else:
+        relative = 0.0 if final_norm == 0.0 else float("inf")
+        reduction = 0.0
+    return {
+        "data_residual_norm": float(final_norm),
+        "initial_data_residual_norm": float(initial_norm),
+        "data_relative_residual": float(relative),
+        "data_residual_reduction": float(reduction),
+    }
+
+
 def slowness_to_sound_speed(delta_slowness: np.ndarray, c0: float, bounds_mps: tuple[float, float]) -> np.ndarray:
     low, high = bounds_mps
     min_slowness = 1.0 / high

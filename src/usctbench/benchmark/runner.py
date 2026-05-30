@@ -6,7 +6,11 @@ import csv
 import glob
 import json
 import math
+import os
+import platform
 import resource
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -65,12 +69,29 @@ def run_algorithm_case(
 
     out_dir = out_root / case_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    _write_result_artifacts(
-        result,
-        out_dir,
-        config=config_for_report,
-        peak_memory_mb=max(memory_before_mb, memory_after_mb),
-    )
+    peak_memory_mb = max(memory_before_mb, memory_after_mb)
+    try:
+        _write_result_artifacts(
+            result,
+            out_dir,
+            config=config_for_report,
+            peak_memory_mb=peak_memory_mb,
+        )
+    except Exception as exc:
+        fallback = ReconstructionResult(
+            algorithm=result.algorithm,
+            case_id=result.case_id,
+            runtime_s=result.runtime_s,
+            status=ResultStatus.FAILED,
+            failure_reason=f"artifact write failed: {type(exc).__name__}: {exc}",
+            metrics={"artifact_write_failed": True},
+        )
+        _write_result_artifacts(
+            fallback,
+            out_dir,
+            config=config_for_report,
+            peak_memory_mb=peak_memory_mb,
+        )
     return out_dir
 
 
@@ -109,7 +130,8 @@ def evaluate_run(run_dir: str | Path, protocol_path: str | Path | None = None) -
     summary_csv = run_path / "benchmark_summary.csv"
     _write_summary_csv(records, summary_csv)
     report_md = run_path / "benchmark_report.md"
-    _write_benchmark_report(records, report_md, protocol=protocol, run_checks=run_checks)
+    provenance = _load_yaml(run_path / "run_metadata.yaml") if (run_path / "run_metadata.yaml").exists() else _collect_run_provenance(run_path)
+    _write_benchmark_report(records, report_md, protocol=protocol, run_checks=run_checks, provenance=provenance)
     return {
         "records": records,
         "run_checks": run_checks,
@@ -132,6 +154,8 @@ def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
     output_root = Path(_expand(str(suite.get("outputs", {}).get("root", "runs/usctbench_runs"))))
     run_id = suite.get("run_id") or f"{suite_name}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     run_root = output_root / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+    _write_run_metadata(run_root / "run_metadata.yaml", suite_file=suite_file, suite=suite)
 
     algorithms = suite.get("algorithms", [])
     if not isinstance(algorithms, list) or not algorithms:
@@ -395,7 +419,14 @@ def _write_summary_csv(records: list[dict[str, Any]], path: Path) -> None:
         writer.writerows(records)
 
 
-def _write_benchmark_report(records: list[dict[str, Any]], path: Path, *, protocol: dict[str, Any], run_checks: dict[str, Any]) -> None:
+def _write_benchmark_report(
+    records: list[dict[str, Any]],
+    path: Path,
+    *,
+    protocol: dict[str, Any],
+    run_checks: dict[str, Any],
+    provenance: dict[str, Any],
+) -> None:
     passed = sum(1 for record in records if record.get("pass"))
     runtimes = [float(record["runtime_s"]) for record in records if _is_number(record.get("runtime_s"))]
     memory_values = [float(record["peak_memory_mb"]) for record in records if _is_number(record.get("peak_memory_mb"))]
@@ -407,6 +438,13 @@ def _write_benchmark_report(records: list[dict[str, Any]], path: Path, *, protoc
         f"- Failed: {len(records) - passed}",
         f"- Protocol: {protocol.get('name', 'ad hoc')}",
         f"- Run checks: {'passed' if run_checks.get('passed') else 'failed'}",
+        f"- Git commit: {provenance.get('git', {}).get('commit', 'unknown')}",
+        f"- Git branch: {provenance.get('git', {}).get('branch', 'unknown')}",
+        f"- Hostname: {provenance.get('host', {}).get('hostname', 'unknown')}",
+        f"- Python: {provenance.get('python', {}).get('version', 'unknown')}",
+        f"- USCT_DATA_ROOT: {provenance.get('environment', {}).get('USCT_DATA_ROOT', '')}",
+        f"- USCT_SAMPLE_ROOT: {provenance.get('environment', {}).get('USCT_SAMPLE_ROOT', '')}",
+        f"- USCT_RUN_ROOT: {provenance.get('environment', {}).get('USCT_RUN_ROOT', '')}",
         f"- Runtime total seconds: {sum(runtimes):.6g}" if runtimes else "- Runtime total seconds:",
         f"- Runtime max seconds: {max(runtimes):.6g}" if runtimes else "- Runtime max seconds:",
         f"- Peak memory max MB: {max(memory_values):.6g}" if memory_values else "- Peak memory max MB:",
@@ -432,6 +470,74 @@ def _write_benchmark_report(records: list[dict[str, Any]], path: Path, *, protoc
             f"reasons={record.get('fail_reasons') or record.get('pass_reasons')}"
         )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_run_metadata(path: Path, *, suite_file: Path, suite: dict[str, Any]) -> None:
+    metadata = _collect_run_provenance(path.parent)
+    metadata["suite"] = {
+        "path": str(suite_file),
+        "name": suite.get("name", suite_file.stem),
+        "case_glob": suite.get("case_glob"),
+        "algorithms": [entry.get("name") for entry in suite.get("algorithms", []) if isinstance(entry, dict)],
+    }
+    path.write_text(yaml.safe_dump(metadata, sort_keys=True), encoding="utf-8")
+
+
+def _collect_run_provenance(run_path: Path) -> dict[str, Any]:
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "run_path": str(run_path),
+        "git": {
+            "commit": _run_text(["git", "rev-parse", "HEAD"]),
+            "branch": _run_text(["git", "branch", "--show-current"]),
+            "remote_origin": _run_text(["git", "remote", "get-url", "origin"]),
+        },
+        "host": {
+            "hostname": platform.node(),
+            "platform": platform.platform(),
+        },
+        "python": {
+            "executable": sys.executable,
+            "version": sys.version.replace("\n", " "),
+        },
+        "environment": {
+            key: os.environ.get(key, "")
+            for key in ("USCT_WORKSPACE", "USCT_DATA_ROOT", "USCT_SAMPLE_ROOT", "USCT_RUN_ROOT")
+        },
+        "runtime": {
+            "torch": _torch_info(),
+            "nvidia_smi": _run_text(["nvidia-smi", "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"], timeout_s=5),
+        },
+    }
+
+
+def _torch_info() -> dict[str, Any]:
+    try:
+        import torch
+    except Exception as exc:  # pragma: no cover - depends on optional runtime.
+        return {"available": False, "error": f"{type(exc).__name__}: {exc}"}
+    return {
+        "available": True,
+        "version": getattr(torch, "__version__", "unknown"),
+        "cuda_available": bool(torch.cuda.is_available()),
+    }
+
+
+def _run_text(command: list[str], *, timeout_s: int = 2) -> str:
+    try:
+        proc = subprocess.run(
+            command,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_s,
+            check=False,
+        )
+    except Exception as exc:
+        return f"unavailable: {type(exc).__name__}: {exc}"
+    if proc.returncode != 0:
+        return f"unavailable: {proc.stderr.strip() or proc.stdout.strip()}"
+    return proc.stdout.strip()
 
 
 def _classify_failure(reason: str | None) -> str:

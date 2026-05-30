@@ -5,7 +5,9 @@ from __future__ import annotations
 import numpy as np
 
 from usctbench.algorithms.ray._common import (
+    masked_norm,
     reference_sound_speed,
+    residual_metrics,
     run_with_failure_capture,
     sart_solve,
     slowness_to_sound_speed,
@@ -27,6 +29,7 @@ class StraightRaySARTAlgorithm:
             iterations = int(config.parameters.get("iterations", 10))
             relaxation = float(config.parameters.get("relaxation", 0.5))
             c0 = reference_sound_speed(case, config)
+            initial_norm = masked_norm(target, mask)
             delta_slowness, residual_norms = sart_solve(
                 projector,
                 target,
@@ -35,11 +38,8 @@ class StraightRaySARTAlgorithm:
                 relaxation=relaxation,
             )
             sound_speed = slowness_to_sound_speed(delta_slowness, c0, speed_bounds(config))
-            metrics = {
-                "data_residual_norm": residual_norms[-1] if residual_norms else 0.0,
-                "initial_data_residual_norm": residual_norms[0] if residual_norms else 0.0,
-                "iterations": iterations,
-            }
+            final_norm = residual_norms[-1] if residual_norms else initial_norm
+            metrics = {**residual_metrics(initial_norm, final_norm), "iterations": iterations}
             if case.ground_truth.sound_speed_mps is not None:
                 metrics.update(
                     compute_image_metrics(

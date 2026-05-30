@@ -39,6 +39,8 @@ def test_positive_delay_reconstructs_slower_center():
     assert float(np.mean(center)) < 1495.0
     assert float(np.mean(center)) < float(np.mean(corner))
     assert result.metrics["water_improved"] is True
+    assert 0.0 <= result.metrics["data_relative_residual"] < 1.0
+    assert result.metrics["data_residual_reduction"] > 0.0
 
 
 def test_sirt_and_sart_reconstruct_slower_center():
@@ -74,6 +76,8 @@ def test_sirt_and_sart_reconstruct_slower_center():
         corner = result.sound_speed_mps[:3, :3]
         assert result.failure_reason is None
         assert np.isfinite(result.metrics["data_residual_norm"])
+        assert np.isfinite(result.metrics["data_relative_residual"])
+        assert np.isfinite(result.metrics["data_residual_reduction"])
         assert float(np.mean(center)) < 1495.0
         assert float(np.mean(center)) < float(np.mean(corner))
 

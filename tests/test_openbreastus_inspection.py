@@ -103,4 +103,6 @@ def test_make_smoke_subset_converts_speed_mat_volume(tmp_path):
     assert loaded.metadata["conversion"] == "speed_map_to_straight_ray_surrogate"
     assert loaded.metadata["feature_provenance"] == "surrogate_delta_tof_from_ground_truth_sound_speed"
     assert "log_amp is a zero surrogate" in loaded.metadata["measurement_limitations"][2]
+    assert manifest["converted_cases"][0]["has_measured_attenuation"] is False
+    assert manifest["converted_cases"][0]["attenuation_evidence"] == "surrogate_zero_log_amp"
     assert manifest["case_capability_summary"]["conversion_mode_counts"]["speed_map_to_straight_ray_surrogate"] == 1

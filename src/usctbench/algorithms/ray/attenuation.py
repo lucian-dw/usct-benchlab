@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from usctbench.algorithms.ray._common import run_with_failure_capture, sirt_solve, target_attenuation_integral
+from usctbench.algorithms.ray._common import (
+    masked_norm,
+    residual_metrics,
+    run_with_failure_capture,
+    sirt_solve,
+    target_attenuation_integral,
+)
 from usctbench.algorithms.ray.straight_projector import StraightRayProjector
 from usctbench.metrics.image import compute_image_metrics
 from usctbench.schema import AlgorithmConfig, ReconstructionResult, USCTCase
@@ -20,6 +26,7 @@ class AttenuationSIRTAlgorithm:
             iterations = int(config.parameters.get("iterations", 50))
             relaxation = float(config.parameters.get("relaxation", 0.8))
             upper = float(config.parameters.get("attenuation_upper_np_per_m", 80.0))
+            initial_norm = masked_norm(target, mask)
             attenuation, residual_norms = sirt_solve(
                 projector,
                 target,
@@ -30,9 +37,12 @@ class AttenuationSIRTAlgorithm:
             )
             attenuation = np.clip(attenuation, 0.0, upper)
             final_residual = target - projector.forward(attenuation)
+            final_norm = masked_norm(final_residual, mask)
             metrics = {
-                "data_residual_norm": float(np.linalg.norm(final_residual[mask])),
-                "initial_data_residual_norm": residual_norms[0],
+                **residual_metrics(initial_norm, final_norm),
+                "attenuation_input_signal_norm": initial_norm,
+                "attenuation_input_has_signal": bool(initial_norm > 0.0),
+                "attenuation_input_is_surrogate": _is_surrogate_attenuation_case(case),
                 "iterations": iterations,
             }
             if case.ground_truth.attenuation_np_per_m is not None:
@@ -53,3 +63,8 @@ class AttenuationSIRTAlgorithm:
 
         return run_with_failure_capture(self.name, case, _run)
 
+
+def _is_surrogate_attenuation_case(case: USCTCase) -> bool:
+    text = " ".join(str(item) for item in case.metadata.get("measurement_limitations", []))
+    text = f"{text} {case.metadata.get('attenuation_note', '')} {case.metadata.get('feature_provenance', '')}".lower()
+    return "zero surrogate" in text or "surrogate" in text and "log_amp" in text

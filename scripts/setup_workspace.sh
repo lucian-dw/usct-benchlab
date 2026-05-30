@@ -45,11 +45,11 @@ if [ "$(basename "$REPO_DIR")" = "code" ]; then
   ln -sfn ../../external external/local_external
   ln -sfn ../../checkpoints checkpoints/local_checkpoints
 else
-  ln -sfn ../data/openbreastus data/raw/openbreastus
-  ln -sfn ../data/openbreastus_sample data/processed/openbreastus_sample
-  ln -sfn ../runs/usctbench_runs runs/current
-  ln -sfn ../external external/local_external
-  ln -sfn ../checkpoints checkpoints/local_checkpoints
+  ln -sfn ../openbreastus data/raw/openbreastus
+  ln -sfn ../openbreastus_sample data/processed/openbreastus_sample
+  ln -sfn usctbench_runs runs/current
+  ln -sfn . external/local_external
+  ln -sfn . checkpoints/local_checkpoints
 fi
 
 echo "Workspace prepared."

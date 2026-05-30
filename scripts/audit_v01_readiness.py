@@ -395,6 +395,14 @@ def _check_v01_dod_evidence(
         return
     with summary.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
+    manifest = json.loads(smoke_manifest.read_text(encoding="utf-8"))
+    converted_cases = manifest.get("converted_cases", [])
+    converted_case_ids = {str(record.get("case_id")) for record in converted_cases if record.get("case_id")}
+    attenuation_capable_case_ids = {
+        str(record.get("case_id"))
+        for record in converted_cases
+        if record.get("case_id") and _has_measured_attenuation_evidence(record)
+    }
     required_smoke = {"straight_sart", "attenuation_sirt"}
     passing_smoke = {
         row.get("algorithm")
@@ -402,20 +410,76 @@ def _check_v01_dod_evidence(
         if row.get("algorithm") in required_smoke
         and row.get("status") == "success"
         and row.get("pass") == "True"
+        and row.get("case_id") in converted_case_ids
     }
     missing_smoke = sorted(required_smoke - passing_smoke)
+    attenuation_passing_cases = {
+        str(row.get("case_id"))
+        for row in rows
+        if row.get("algorithm") == "attenuation_sirt"
+        and row.get("status") == "success"
+        and row.get("pass") == "True"
+        and row.get("case_id") in converted_case_ids
+    }
+    missing_attenuation_evidence = not bool(attenuation_passing_cases & attenuation_capable_case_ids)
+    fail_reasons = []
+    if missing_smoke:
+        fail_reasons.append(f"missing passing smoke algorithms on converted cases: {', '.join(missing_smoke)}")
+    if missing_attenuation_evidence:
+        fail_reasons.append("attenuation_sirt has no passing smoke case with measured/non-surrogate attenuation evidence")
     checks.append(
         {
             "name": "v01_dod_evidence",
-            "passed": not missing_smoke,
+            "passed": not fail_reasons,
             "required_smoke_algorithms": sorted(required_smoke),
             "passing_smoke_algorithms": sorted(passing_smoke),
             "missing_smoke_algorithms": missing_smoke,
+            "converted_case_ids": sorted(converted_case_ids),
+            "attenuation_capable_case_ids": sorted(attenuation_capable_case_ids),
+            "attenuation_passing_case_ids": sorted(attenuation_passing_cases),
+            "fail_reasons": fail_reasons,
             "run_dir": str(run_dir),
             "openbreastus_index": str(openbreastus_index),
             "smoke_manifest": str(smoke_manifest),
         }
     )
+
+
+def _has_measured_attenuation_evidence(record: dict[str, Any]) -> bool:
+    if record.get("has_measured_attenuation") is True:
+        return True
+    evidence = str(record.get("attenuation_evidence", "")).lower()
+    if evidence in {"measured", "measured_log_amp", "measured_attenuation", "nonzero_log_amp"}:
+        return True
+    limitations = " ".join(str(item) for item in record.get("measurement_limitations", [])).lower()
+    if "zero surrogate" in evidence or "zero surrogate" in limitations:
+        return False
+    if "surrogate" in evidence and "log_amp" in evidence:
+        return False
+    path = record.get("path")
+    if not path:
+        return False
+    return _hdf5_has_nonzero_log_amp(Path(path))
+
+
+def _hdf5_has_nonzero_log_amp(path: Path) -> bool:
+    try:
+        import h5py
+    except Exception:
+        return False
+    try:
+        with h5py.File(path, "r") as handle:
+            metadata = json.loads(handle.attrs.get("metadata_json", "{}"))
+            limitations = " ".join(str(item) for item in metadata.get("measurement_limitations", [])).lower()
+            note = str(metadata.get("attenuation_note", "")).lower()
+            if "zero surrogate" in limitations or "zero surrogate" in note:
+                return False
+            if "measurement/log_amp" in handle:
+                log_amp = handle["measurement/log_amp"][()]
+                return bool((abs(log_amp) > 0).any())
+    except Exception:
+        return False
+    return False
 
 
 def _pythonpath_env(root: Path) -> dict[str, str]:
