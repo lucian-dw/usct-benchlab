@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# virtual environments
+.venv/
+venv/
+env/
+conda-meta/
+
+# local env
+.env
+.env.*
+!.env.example
+
+# local data and generated outputs
+/data/raw/
+/data/processed/
+/data/interim/
+/runs/
+/checkpoints/
+
+# external cloned repositories
+/external/local_external/
+/third_party/
+
+# large scientific files
+*.h5
+*.hdf5
+*.mat
+*.npy
+*.npz
+*.zarr/
+*.pt
+*.pth
+*.ckpt
+*.pkl
+
+# logs
+*.log
+logs/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
