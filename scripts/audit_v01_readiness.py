@@ -426,7 +426,7 @@ def _check_v01_dod_evidence(
     if missing_smoke:
         fail_reasons.append(f"missing passing smoke algorithms on converted cases: {', '.join(missing_smoke)}")
     if missing_attenuation_evidence:
-        fail_reasons.append("attenuation_sirt has no passing smoke case with measured/non-surrogate attenuation evidence")
+        fail_reasons.append("attenuation_sirt has no passing smoke case with measured or simulated nonzero attenuation evidence")
     checks.append(
         {
             "name": "v01_dod_evidence",
@@ -448,8 +448,17 @@ def _check_v01_dod_evidence(
 def _has_measured_attenuation_evidence(record: dict[str, Any]) -> bool:
     if record.get("has_measured_attenuation") is True:
         return True
+    if record.get("has_simulated_attenuation") is True:
+        return True
     evidence = str(record.get("attenuation_evidence", "")).lower()
-    if evidence in {"measured", "measured_log_amp", "measured_attenuation", "nonzero_log_amp"}:
+    if evidence in {
+        "measured",
+        "measured_log_amp",
+        "measured_attenuation",
+        "nonzero_log_amp",
+        "simulated_ground_truth_line_integral",
+        "kwave_channel_peak_log_amp",
+    }:
         return True
     limitations = " ".join(str(item) for item in record.get("measurement_limitations", [])).lower()
     if "zero surrogate" in evidence or "zero surrogate" in limitations:

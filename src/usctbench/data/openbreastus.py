@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-from .conversion import speed_mat_metadata
+from .conversion import kwave_channel_mat_metadata, speed_mat_metadata
 
 INSPECTOR_VERSION = "0.1"
 SUPPORTED_SUFFIXES = {".h5", ".hdf5", ".mat", ".npy", ".npz", ".json", ".yaml", ".yml", ".txt", ".csv"}
@@ -154,11 +154,12 @@ def _case_record(root: Path, case_id: str, paths: list[Path]) -> dict[str, Any]:
 def _file_record(root: Path, path: Path) -> dict[str, Any]:
     rel = path.relative_to(root).as_posix()
     schema = _schema(path)
+    roles = sorted(set(_roles(path)) | set(_schema_roles(schema)))
     return {
         "path": rel,
         "suffix": path.suffix.lower(),
         "size_bytes": path.stat().st_size,
-        "roles": _roles(path),
+        "roles": roles,
         "frequencies_hz": _frequencies_hz(rel),
         "shape": _shape_from_schema(schema),
         "schema": schema,
@@ -173,14 +174,18 @@ def _case_capabilities(files: list[dict[str, Any]]) -> dict[str, Any]:
     has_reference = "reference" in roles
     has_geometry = "geometry" in roles
     has_mask = "mask" in roles
+    has_kwave_channel_mat = any(bool(file.get("schema", {}).get("kwave_channel_mat")) for file in files)
     has_speed_mat_volume = any(
         "sound_speed" in file["roles"]
         and file["suffix"] == ".mat"
         and isinstance(file.get("schema"), dict)
         and bool(file["schema"].get("largest_3d_dataset"))
+        and not bool(file["schema"].get("kwave_channel_mat"))
         for file in files
     )
     conversion_modes = []
+    if has_kwave_channel_mat:
+        conversion_modes.append("kwave_channel_mat_to_feature_case")
     if has_speed_mat_volume:
         conversion_modes.append("speed_map_to_straight_ray_surrogate")
     if has_wavefield and has_reference and has_geometry:
@@ -192,6 +197,7 @@ def _case_capabilities(files: list[dict[str, Any]]) -> dict[str, Any]:
         "has_reference": has_reference,
         "has_geometry": has_geometry,
         "has_mask": has_mask,
+        "has_kwave_channel_mat": has_kwave_channel_mat,
         "has_speed_mat_volume": has_speed_mat_volume,
         "convertible_to_usct_case": bool(conversion_modes),
         "conversion_modes": conversion_modes,
@@ -203,6 +209,8 @@ def _case_limitations(capabilities: dict[str, Any]) -> list[str]:
     modes = set(capabilities.get("conversion_modes", []))
     if "speed_map_to_straight_ray_surrogate" in modes and "frequency_reference_features" not in modes:
         limitations.append("speed-map-only case: conversion uses surrogate straight-ray travel-time features, not measured RF/wavefield data")
+    if "kwave_channel_mat_to_feature_case" in modes:
+        limitations.append("k-Wave simulation case: attenuation evidence is simulated, not raw measured OpenBreastUS RF data")
     if capabilities.get("has_wavefield") and not capabilities.get("has_reference"):
         limitations.append("wavefield-like data found without an identified water/reference file")
     if capabilities.get("has_wavefield") and not capabilities.get("has_geometry"):
@@ -313,6 +321,10 @@ def _schema(path: Path) -> dict[str, Any]:
                 schema["largest_3d_dataset"] = speed_mat_metadata(path)
             except Exception:
                 schema["largest_3d_dataset"] = None
+            try:
+                schema["kwave_channel_mat"] = kwave_channel_mat_metadata(path)
+            except Exception:
+                schema["kwave_channel_mat"] = None
             return schema
         except Exception as exc:
             return {"format": "hdf5" if suffix != ".mat" else "mat_or_unsupported", "read_error": f"{type(exc).__name__}: {exc}"}
@@ -329,6 +341,12 @@ def _shape_from_schema(schema: dict[str, Any]) -> Any:
     if "largest_3d_dataset" in schema:
         return schema["largest_3d_dataset"]
     return None
+
+
+def _schema_roles(schema: dict[str, Any]) -> list[str]:
+    if schema.get("kwave_channel_mat"):
+        return ["sound_speed", "attenuation", "wavefield", "geometry"]
+    return []
 
 
 def _slug(value: str) -> str:

@@ -40,7 +40,7 @@ thresholds:
     rmse: 100.0
     data_residual_norm: 1.0e-4
   attenuation_sirt:
-    data_residual_norm: 1.0e-4
+    data_relative_residual: 0.8
 minimums:
   straight_cgls:
     water_relative_rmse_improvement: 0.0
@@ -48,3 +48,4 @@ minimums:
     water_relative_rmse_improvement: 0.0
   attenuation_sirt:
     attenuation_input_signal_norm: 1.0e-12
+    data_residual_reduction: 0.2

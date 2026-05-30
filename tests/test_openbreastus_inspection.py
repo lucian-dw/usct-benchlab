@@ -106,3 +106,54 @@ def test_make_smoke_subset_converts_speed_mat_volume(tmp_path):
     assert manifest["converted_cases"][0]["has_measured_attenuation"] is False
     assert manifest["converted_cases"][0]["attenuation_evidence"] == "surrogate_zero_log_amp"
     assert manifest["case_capability_summary"]["conversion_mode_counts"]["speed_map_to_straight_ray_surrogate"] == 1
+
+
+def test_make_smoke_subset_prefers_and_converts_kwave_channel_mat(tmp_path):
+    root = tmp_path / "openbreastus"
+    root.mkdir()
+    with h5py.File(root / "z_speed_only.mat", "w") as handle:
+        handle.create_dataset("breast_train", data=np.ones((8, 8, 1), dtype=np.float32) * 1500.0)
+    _write_kwave_channel_mat(root / "kwave_train_0001.mat")
+
+    out = tmp_path / "smoke"
+    manifest = make_smoke_subset(root, out, cases_per_density=1, converted_shape=(4, 4), n_transducers=6)
+
+    assert [case["case_id"] for case in manifest["cases"]] == ["kwave_train_0001"]
+    assert manifest["case_capability_summary"]["conversion_mode_counts"]["kwave_channel_mat_to_feature_case"] == 1
+    converted = manifest["converted_cases"][0]
+    assert converted["has_simulated_attenuation"] is True
+    assert converted["attenuation_evidence"] == "simulated_ground_truth_line_integral"
+    loaded = read_case_hdf5(converted["path"])
+    assert loaded.grid.shape == (4, 4)
+    assert loaded.measurement.delta_tof_s.shape == (6, 6)
+    assert loaded.measurement.log_amp.shape == (6, 6)
+    assert loaded.ground_truth.sound_speed_mps.shape == (4, 4)
+    assert loaded.ground_truth.attenuation_np_per_m.shape == (4, 4)
+    assert float(np.linalg.norm(loaded.measurement.log_amp)) > 0.0
+    assert loaded.metadata["conversion"] == "kwave_channel_mat_to_feature_case"
+
+
+def _write_kwave_channel_mat(path):
+    angles = np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False)
+    positions_xy = np.column_stack((0.11 * np.cos(angles), 0.11 * np.sin(angles)))
+    sound_speed = np.full((8, 8), 1500.0, dtype=np.float64)
+    sound_speed[3:5, 3:5] = 1450.0
+    attenuation = np.full((8, 8), 0.05, dtype=np.float64)
+    attenuation[2:6, 2:6] = 2.0
+    channel = np.ones((8, 8, 16), dtype=np.float32)
+    time = np.linspace(0.0, 1.0e-4, 16)[:, None]
+    coords = np.linspace(-0.12, 0.12, 8)[:, None]
+    with h5py.File(path, "w") as handle:
+        handle.create_dataset("C", data=sound_speed)
+        handle.create_dataset("atten", data=attenuation)
+        handle.create_dataset("full_dataset", data=channel)
+        handle.create_dataset("time", data=time)
+        handle.create_dataset("transducerPositionsXY", data=positions_xy)
+        handle.create_dataset("xi_orig", data=coords)
+        handle.create_dataset("yi_orig", data=coords)
+        handle.create_dataset("sim_metadata/f_tx", data=np.asarray([[1.0e6]]))
+        handle.create_dataset("sim_metadata/sim_label", data=np.asarray([ord(c) for c in "kwave_train_0001"], dtype=np.uint16)[:, None])
+        handle.create_dataset(
+            "sim_metadata/source_npy_path",
+            data=np.asarray([ord(c) for c in "/tmp/source.npy"], dtype=np.uint16)[:, None],
+        )

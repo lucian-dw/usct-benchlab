@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .conversion import convert_speed_mat_volume
+from .conversion import convert_kwave_channel_mat, convert_speed_mat_volume
 from .openbreastus import inspect_openbreastus, write_schema_report
 
 
@@ -65,7 +65,17 @@ def make_smoke_subset(
         for case in selected:
             for file_record in case["files"]:
                 source = root_path / file_record["path"]
-                if "sound_speed" in file_record.get("roles", []) and source.suffix.lower() == ".mat":
+                if _is_kwave_channel_mat(file_record):
+                    converted_cases.extend(
+                        convert_kwave_channel_mat(
+                            source,
+                            converted_root,
+                            case_id_prefix=case["case_id"],
+                            output_shape=converted_shape,
+                            n_transducers=n_transducers,
+                        )
+                    )
+                elif _is_speed_mat_volume(file_record):
                     converted_cases.extend(
                         convert_speed_mat_volume(
                             source,
@@ -120,5 +130,30 @@ def _select_cases(cases: list[dict[str, Any]], *, cases_per_density: int) -> lis
 
     selected = []
     for density in sorted(by_density):
-        selected.extend(by_density[density][:cases_per_density])
+        ranked = sorted(by_density[density], key=lambda item: (-_conversion_priority(item), item["case_id"]))
+        selected.extend(ranked[:cases_per_density])
     return selected
+
+
+def _conversion_priority(case: dict[str, Any]) -> int:
+    modes = set(case.get("capabilities", {}).get("conversion_modes", []))
+    if "kwave_channel_mat_to_feature_case" in modes:
+        return 30
+    if "frequency_reference_features" in modes:
+        return 20
+    if "speed_map_to_straight_ray_surrogate" in modes:
+        return 10
+    return 0
+
+
+def _is_kwave_channel_mat(file_record: dict[str, Any]) -> bool:
+    return bool(file_record.get("schema", {}).get("kwave_channel_mat"))
+
+
+def _is_speed_mat_volume(file_record: dict[str, Any]) -> bool:
+    return (
+        "sound_speed" in file_record.get("roles", [])
+        and file_record.get("suffix") == ".mat"
+        and bool(file_record.get("schema", {}).get("largest_3d_dataset"))
+        and not _is_kwave_channel_mat(file_record)
+    )

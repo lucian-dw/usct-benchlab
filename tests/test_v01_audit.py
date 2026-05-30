@@ -162,4 +162,4 @@ def test_v01_audit_rejects_surrogate_attenuation_as_dod_evidence(tmp_path):
     assert result["passed"] is False
     dod_check = [check for check in result["checks"] if check["name"] == "v01_dod_evidence"][0]
     assert dod_check["attenuation_capable_case_ids"] == []
-    assert "attenuation_sirt has no passing smoke case with measured/non-surrogate attenuation evidence" in dod_check["fail_reasons"]
+    assert "attenuation_sirt has no passing smoke case with measured or simulated nonzero attenuation evidence" in dod_check["fail_reasons"]

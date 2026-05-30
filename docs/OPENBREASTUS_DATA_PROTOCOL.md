@@ -57,6 +57,16 @@ Converted speed-map cases must include provenance metadata:
 - `feature_provenance: surrogate_delta_tof_from_ground_truth_sound_speed`
 - `measurement_limitations` listing the missing measured wavefield, generated straight-ray features, zero `log_amp` surrogate, and synthetic geometry assumption
 
+For compact k-Wave simulation MAT files with datasets `C`, `atten`, `full_dataset`, and `transducerPositionsXY`, conversion creates a standard `USCTCase` with both sound-speed and attenuation ground truth. The smoke HDF5 stores straight-ray delay features from `C` and attenuation line-integral features from the simulated attenuation map. Metadata records that this is simulated attenuation evidence, not raw measured OpenBreastUS RF data, and the source channel tensor is not copied.
+
+Converted k-Wave cases must include provenance metadata:
+
+- `conversion: kwave_channel_mat_to_feature_case`
+- `feature_provenance: surrogate_delta_tof_from_sound_speed_and_attenuation_line_integral_from_simulated_ground_truth`
+- `attenuation_evidence: simulated_ground_truth_line_integral`
+- `has_simulated_attenuation: true`
+- `measurement_limitations` listing that the source is a k-Wave simulation and that features are generated line integrals
+
 ## Current A100 Evidence
 
 As of the current branch, the configured A100 data root contains:
@@ -72,6 +82,14 @@ breast_train: shape=(480, 480, 7200), dtype=float32
 ```
 
 The current smoke benchmark uses a converted speed-map case, not real RF/wavefield measurements.
+
+A separate local A100 tree currently contains k-Wave USCT simulation MAT files under:
+
+```text
+$HOME/USCT_kwave/Simulations/datasets/kWave_train_6602.mat
+```
+
+Those files are not committed and are not automatically assumed to be part of `$USCT_DATA_ROOT`. To use one for the smoke benchmark, link or copy it into the ignored A100 data root before running `make-smoke`, then regenerate the smoke manifest. The smoke selector prefers attenuation-capable k-Wave cases over speed-only cases within the same inferred density class.
 
 ## Rules
 
