@@ -6,11 +6,18 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$REPO_DIR"
 
+PYTHON_BIN="${PYTHON_BIN:-${PYTHON:-}}"
+if [ -z "$PYTHON_BIN" ]; then
+  PYTHON_BIN="$(command -v python || command -v python3 || true)"
+fi
+
 echo "REPO_DIR=$REPO_DIR"
 echo "HOSTNAME=$(hostname)"
 echo "USER=${USER:-unknown}"
-echo "PYTHON=$(command -v python || true)"
-python --version || true
+echo "PYTHON_BIN=${PYTHON_BIN:-not-found}"
+if [ -n "$PYTHON_BIN" ]; then
+  "$PYTHON_BIN" --version || true
+fi
 
 echo
 echo "Git status:"
@@ -22,7 +29,8 @@ nvidia-smi || true
 
 echo
 echo "Python imports:"
-python - <<'PY'
+if [ -n "$PYTHON_BIN" ]; then
+"$PYTHON_BIN" - <<'PY'
 import importlib
 import sys
 print("executable", sys.executable)
@@ -41,6 +49,9 @@ try:
 except Exception as exc:
     print("torch: optional import failed", repr(exc))
 PY
+else
+  echo "No Python executable found."
+fi
 
 echo
 echo "Workspace paths:"
@@ -52,4 +63,3 @@ for path in \
   echo "PATH $path"
   ls -lah "$path" 2>/dev/null | head || true
 done
-
