@@ -21,6 +21,7 @@ def test_shell_scripts_source_local_env():
         Path("scripts/bootstrap_a100.sh"),
         Path("scripts/run_smoke.sh"),
         Path("scripts/run_v01_release_check.sh"),
+        Path("scripts/run_fwi_kwave_adapter_smoke.sh"),
     ]:
         text = path.read_text(encoding="utf-8")
         assert 'if [ -f "$REPO_DIR/.env" ]; then' in text
@@ -39,6 +40,15 @@ def test_v01_release_check_runs_full_evidence_chain():
     assert "--smoke-manifest" in text
     assert "bench_status=$?" in text
     assert "audit_status=$?" in text
+
+
+def test_fwi_kwave_adapter_smoke_script_runs_adapter_flow():
+    text = Path("scripts/run_fwi_kwave_adapter_smoke.sh").read_text(encoding="utf-8")
+
+    assert "convert_kwave_channel_mat" in text
+    assert "fwi_kwave_adapter" in text
+    assert "fwi_kwave_adapter_smoke.yaml" in text
+    assert "USCT_KWAVE_FWI_RESULT_PATH" in text
 
 
 def test_setup_workspace_root_layout_symlinks_resolve_to_workspace_dirs(tmp_path):

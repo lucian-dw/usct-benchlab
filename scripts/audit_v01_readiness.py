@@ -74,6 +74,7 @@ REQUIRED_FILES = [
     "scripts/bootstrap_a100.sh",
     "scripts/run_smoke.sh",
     "scripts/run_v01_release_check.sh",
+    "scripts/run_fwi_kwave_adapter_smoke.sh",
     "docs/architecture.md",
     "docs/A100_SERVER_SETUP.md",
     "docs/OPENBREASTUS_DATA_PROTOCOL.md",
@@ -86,6 +87,7 @@ REQUIRED_FILES = [
     "docs/V0_1_READINESS_CHECKLIST.md",
     "configs/benchmarks/openbreastus_smoke.yaml",
     "configs/benchmarks/openbreastus_mini.yaml",
+    "configs/benchmarks/fwi_kwave_adapter_smoke.yaml",
 ]
 
 REQUIRED_TESTS = [
