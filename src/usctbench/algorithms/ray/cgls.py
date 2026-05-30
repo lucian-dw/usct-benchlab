@@ -13,7 +13,7 @@ from usctbench.algorithms.ray._common import (
     target_delta_tof,
 )
 from usctbench.algorithms.ray.straight_projector import StraightRayProjector
-from usctbench.metrics.image import compute_image_metrics
+from usctbench.metrics.image import compute_baseline_improvement_metrics, compute_image_metrics
 from usctbench.schema import AlgorithmConfig, ReconstructionResult, USCTCase
 
 
@@ -42,6 +42,14 @@ class StraightRayCGLSAlgorithm:
                         mask=case.grid.roi_mask,
                     )
                 )
+                metrics.update(
+                    compute_baseline_improvement_metrics(
+                        sound_speed,
+                        np.asarray(case.ground_truth.sound_speed_mps, dtype=float),
+                        c0,
+                        mask=case.grid.roi_mask,
+                    )
+                )
             return ReconstructionResult(
                 algorithm=self.name,
                 case_id=case.case_id,
@@ -50,4 +58,3 @@ class StraightRayCGLSAlgorithm:
             )
 
         return run_with_failure_capture(self.name, case, _run)
-

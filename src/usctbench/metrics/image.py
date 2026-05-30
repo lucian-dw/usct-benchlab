@@ -47,6 +47,38 @@ def compute_image_metrics(
     }
 
 
+def compute_baseline_improvement_metrics(
+    prediction: np.ndarray,
+    target: np.ndarray,
+    baseline: float | np.ndarray,
+    *,
+    mask: np.ndarray | None = None,
+    prefix: str = "water_",
+) -> dict[str, float | bool]:
+    """Compare reconstruction RMSE against a baseline image or scalar."""
+
+    pred, truth = _masked_values(prediction, target, mask)
+    baseline_array = np.asarray(baseline, dtype=float)
+    if baseline_array.ndim == 0:
+        base = np.full_like(np.asarray(target, dtype=float), float(baseline_array))
+    else:
+        base = baseline_array
+    base_values, _ = _masked_values(base, target, mask)
+    reconstruction_rmse = math.sqrt(float(np.mean((pred - truth) ** 2)))
+    baseline_rmse = math.sqrt(float(np.mean((base_values - truth) ** 2)))
+    if baseline_rmse == 0.0:
+        relative = math.inf if reconstruction_rmse < baseline_rmse else 0.0
+    else:
+        relative = (baseline_rmse - reconstruction_rmse) / baseline_rmse
+    return {
+        f"{prefix}baseline_rmse": baseline_rmse,
+        f"{prefix}reconstruction_rmse": reconstruction_rmse,
+        f"{prefix}absolute_rmse_improvement": baseline_rmse - reconstruction_rmse,
+        f"{prefix}relative_rmse_improvement": relative,
+        f"{prefix}improved": reconstruction_rmse < baseline_rmse,
+    }
+
+
 def _global_ssim(prediction: np.ndarray, target: np.ndarray, *, data_range: float) -> float:
     """Compute a deterministic global SSIM approximation without SciPy."""
 
@@ -63,4 +95,3 @@ def _global_ssim(prediction: np.ndarray, target: np.ndarray, *, data_range: floa
     if denom == 0:
         return 1.0
     return float(((2.0 * mu_x * mu_y + c1) * (2.0 * cov_xy + c2)) / denom)
-

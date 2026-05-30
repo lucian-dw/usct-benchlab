@@ -38,6 +38,7 @@ def test_positive_delay_reconstructs_slower_center():
     corner = result.sound_speed_mps[:3, :3]
     assert float(np.mean(center)) < 1495.0
     assert float(np.mean(center)) < float(np.mean(corner))
+    assert result.metrics["water_improved"] is True
 
 
 def test_sirt_and_sart_reconstruct_slower_center():

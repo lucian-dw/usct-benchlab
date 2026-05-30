@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from usctbench.algorithms.fwi.losses import gradient_descent, waveform_from_speed
-from usctbench.metrics.image import compute_image_metrics
+from usctbench.metrics.image import compute_baseline_improvement_metrics, compute_image_metrics
 from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
 
 
@@ -55,6 +55,7 @@ class TinyFWIAlgorithm:
             "iterations": steps,
         }
         metrics.update(compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask))
+        metrics.update(compute_baseline_improvement_metrics(sound_speed, truth, initial_speed, mask=case.grid.roi_mask))
         return ReconstructionResult(
             algorithm=self.name,
             case_id=case.case_id,

@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from usctbench.metrics.image import compute_image_metrics
+from usctbench.metrics.image import compute_baseline_improvement_metrics, compute_image_metrics
 
 
 def test_image_metrics_are_zero_or_perfect_for_identical_arrays():
@@ -27,3 +27,12 @@ def test_image_metrics_respect_mask():
 
     assert metrics["rmse"] == 0.0
 
+
+def test_baseline_improvement_metrics_compare_rmse():
+    target = np.array([[1450.0, 1500.0], [1500.0, 1500.0]])
+    prediction = np.array([[1460.0, 1500.0], [1500.0, 1500.0]])
+
+    metrics = compute_baseline_improvement_metrics(prediction, target, 1500.0)
+
+    assert metrics["water_improved"] is True
+    assert metrics["water_reconstruction_rmse"] < metrics["water_baseline_rmse"]

@@ -23,3 +23,4 @@ def test_tiny_fwi_loss_decreases_on_synthetic_case():
     assert result.failure_reason is None
     assert result.metrics["loss_decreased"] is True
     assert result.metrics["final_loss"] < result.metrics["initial_loss"]
+    assert "water_relative_rmse_improvement" in result.metrics
