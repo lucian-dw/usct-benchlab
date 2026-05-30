@@ -518,7 +518,7 @@ def _torch_info() -> dict[str, Any]:
         return {"available": False, "error": f"{type(exc).__name__}: {exc}"}
     return {
         "available": True,
-        "version": getattr(torch, "__version__", "unknown"),
+        "version": str(getattr(torch, "__version__", "unknown")),
         "cuda_available": bool(torch.cuda.is_available()),
     }
 
