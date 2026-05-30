@@ -16,11 +16,13 @@ External USCT code must remain outside Git unless deliberately vendored after li
 | Straight-ray SART reference | `ust-sart` | external clone only |
 | Refraction-corrected GN | public MATLAB refraction-corrected USCT code | external clone only |
 | Ray-Born / r-Wave | public ray-based quantitative ultrasound tomography code | external clone only |
-| Waveform inversion references | classical waveform inversion USCT code | external clone only |
+| Waveform inversion references | `rehmanali1994/WaveformInversionUST` and A100 `$HOME/USCT_kwave` derivative scripts | external clone only |
 
 ## Current Repository State
 
-The current repository contains only native Python baselines and optional adapter shells. It does not vendor external MATLAB packages or full third-party repositories.
+The current repository contains native Python baselines plus optional adapter shells. It does not vendor external MATLAB packages or full third-party repositories.
+
+`fwi_kwave_adapter` reads existing MATLAB v7.3 FWI result files and can optionally launch the external A100 `USCT_kwave` pipeline. The external approach is derived from `rehmanali1994/WaveformInversionUST`, which is MIT licensed upstream. Keep the full MATLAB/k-Wave code and generated FWI datasets/results outside this Git repository.
 
 The v0.1 readiness audit executes the missing-dependency path for the MATLAB
 adapter shells. A valid skip record must include `status=skipped`, a clear

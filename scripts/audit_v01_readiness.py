@@ -27,6 +27,7 @@ ALGORITHM_CONFIGS = {
     "bent_ray_gn": "configs/algorithms/bent_ray_gn.yaml",
     "rwave_adapter": "configs/algorithms/rwave_adapter.yaml",
     "fwi_tiny": "configs/algorithms/fwi_tiny.yaml",
+    "fwi_kwave_adapter": "configs/algorithms/fwi_kwave_adapter.yaml",
 }
 
 ALGORITHM_CARDS = {
@@ -37,6 +38,7 @@ ALGORITHM_CARDS = {
     "bent_ray_gn": "docs/algorithm_cards/bent_ray_gn.md",
     "rwave_adapter": "docs/algorithm_cards/rwave_ray_born.md",
     "fwi_tiny": "docs/algorithm_cards/fwi_tiny.md",
+    "fwi_kwave_adapter": "docs/algorithm_cards/fwi_kwave_adapter.md",
 }
 
 REQUIRED_CARD_SECTIONS = [
@@ -100,6 +102,7 @@ REQUIRED_TESTS = [
     "tests/test_matlab_adapters.py",
     "tests/test_fwi_gradient_check.py",
     "tests/test_fwi_loss_decrease.py",
+    "tests/test_fwi_kwave_adapter.py",
     "tests/test_docs_inventory.py",
     "tests/test_scripts.py",
     "tests/test_v01_audit.py",
