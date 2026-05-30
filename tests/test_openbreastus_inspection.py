@@ -133,6 +133,21 @@ def test_make_smoke_subset_prefers_and_converts_kwave_channel_mat(tmp_path):
     assert loaded.metadata["conversion"] == "kwave_channel_mat_to_feature_case"
 
 
+def test_make_smoke_subset_removes_stale_converted_cases(tmp_path):
+    root = tmp_path / "openbreastus"
+    root.mkdir()
+    _write_kwave_channel_mat(root / "kwave_train_0001.mat")
+    out = tmp_path / "smoke"
+    stale = out / "cases" / "stale_speed_only.h5"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("old", encoding="utf-8")
+
+    manifest = make_smoke_subset(root, out, cases_per_density=1, converted_shape=(4, 4), n_transducers=6)
+
+    assert not stale.exists()
+    assert len(list((out / "cases").glob("*.h5"))) == len(manifest["converted_cases"]) == 1
+
+
 def _write_kwave_channel_mat(path):
     angles = np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False)
     positions_xy = np.column_stack((0.11 * np.cos(angles), 0.11 * np.sin(angles)))

@@ -62,6 +62,7 @@ def make_smoke_subset(
     converted_cases = []
     if convert_speed_mat:
         converted_root = out_path / "cases"
+        _clear_converted_cases(converted_root)
         for case in selected:
             for file_record in case["files"]:
                 source = root_path / file_record["path"]
@@ -157,3 +158,11 @@ def _is_speed_mat_volume(file_record: dict[str, Any]) -> bool:
         and bool(file_record.get("schema", {}).get("largest_3d_dataset"))
         and not _is_kwave_channel_mat(file_record)
     )
+
+
+def _clear_converted_cases(converted_root: Path) -> None:
+    if not converted_root.exists():
+        return
+    for path in converted_root.glob("*.h5"):
+        if path.is_file() or path.is_symlink():
+            path.unlink()
