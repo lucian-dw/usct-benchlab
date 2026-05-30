@@ -44,3 +44,9 @@ It updates all rays simultaneously with row and column path-length normalization
 - slower inclusion produces a slower reconstructed center;
 - data residual remains finite.
 
+## References and Related Code
+
+- Implementation: `src/usctbench/algorithms/ray/sirt.py`
+- Projector: `src/usctbench/algorithms/ray/straight_projector.py`
+- Tests: `tests/test_projector_adjoint.py`, `tests/test_straight_ray_synthetic.py`
+- Background: simultaneous iterative reconstruction for line-integral tomography; see `docs/references.bib` and `docs/algorithm_taxonomy.md`.

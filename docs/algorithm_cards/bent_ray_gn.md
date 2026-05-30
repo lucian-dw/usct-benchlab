@@ -35,3 +35,9 @@ The default config does not execute external code. It returns `skipped` with a c
 - Missing MATLAB or missing entrypoint returns `skipped`, not a crash.
 - A failure report is written by the CLI for skipped runs.
 
+## References and Related Code
+
+- Adapter: `src/usctbench/algorithms/adapters/refraction_gn.py`
+- MATLAB wrapper utilities: `src/usctbench/adapters/matlab.py`
+- Tests: `tests/test_matlab_adapters.py`
+- External source policy and candidate code: `docs/EXTERNAL_SOURCES_AND_LICENSES.md`

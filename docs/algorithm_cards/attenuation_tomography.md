@@ -43,3 +43,9 @@ The reconstructed field is attenuation in `Np/m`.
 - reconstructed attenuation remains non-negative;
 - data residual is reported in `metrics.json`.
 
+## References and Related Code
+
+- Implementation: `src/usctbench/algorithms/ray/attenuation.py`
+- Shared projector and solvers: `src/usctbench/algorithms/ray/straight_projector.py`, `src/usctbench/algorithms/ray/_common.py`
+- Tests: `tests/test_attenuation_synthetic.py`
+- Background: straight-ray log-amplitude attenuation tomography; see `docs/references.bib` and `docs/algorithm_taxonomy.md`.

@@ -39,6 +39,16 @@ ALGORITHM_CARDS = {
     "fwi_tiny": "docs/algorithm_cards/fwi_tiny.md",
 }
 
+REQUIRED_CARD_SECTIONS = [
+    "Physical Assumption",
+    "Input Requirements",
+    "Default Settings",
+    "Expected Failure Modes",
+    "What To Adjust First",
+    "Acceptance Tests",
+    "References and Related Code",
+]
+
 REQUIRED_FILES = [
     "pyproject.toml",
     "README.md",
@@ -105,6 +115,7 @@ def audit_repo(root: Path, *, run_dir: Path | None = None, require_clean: bool =
     _check_files(root, checks, "required_tests", REQUIRED_TESTS)
     _check_files(root, checks, "algorithm_configs", list(ALGORITHM_CONFIGS.values()))
     _check_files(root, checks, "algorithm_cards", list(ALGORITHM_CARDS.values()))
+    _check_algorithm_card_sections(root, checks)
     _check_registered_algorithms(root, checks)
     _check_optional_adapter_skips(root, checks)
     _check_tracked_data(root, checks)
@@ -120,6 +131,31 @@ def audit_repo(root: Path, *, run_dir: Path | None = None, require_clean: bool =
 def _check_files(root: Path, checks: list[dict[str, Any]], name: str, files: list[str]) -> None:
     missing = [path for path in files if not (root / path).exists()]
     checks.append({"name": name, "passed": not missing, "missing": missing})
+
+
+def _check_algorithm_card_sections(root: Path, checks: list[dict[str, Any]]) -> None:
+    missing_sections: dict[str, list[str]] = {}
+    for algorithm, rel_path in ALGORITHM_CARDS.items():
+        path = root / rel_path
+        if not path.exists():
+            missing_sections[algorithm] = REQUIRED_CARD_SECTIONS.copy()
+            continue
+        headings = {
+            line.removeprefix("## ").strip().lower()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.startswith("## ")
+        }
+        missing = [section for section in REQUIRED_CARD_SECTIONS if section.lower() not in headings]
+        if missing:
+            missing_sections[algorithm] = missing
+    checks.append(
+        {
+            "name": "algorithm_card_sections",
+            "passed": not missing_sections,
+            "required_sections": REQUIRED_CARD_SECTIONS,
+            "missing_sections": missing_sections,
+        }
+    )
 
 
 def _check_registered_algorithms(root: Path, checks: list[dict[str, Any]]) -> None:

@@ -44,3 +44,9 @@ It ignores refraction, diffraction, and waveform effects, so it is a baseline ra
 - straight-ray projector adjoint dot-product test passes;
 - positive delay through a slower object reconstructs a slower center.
 
+## References and Related Code
+
+- Implementation: `src/usctbench/algorithms/ray/sart.py`
+- Projector: `src/usctbench/algorithms/ray/straight_projector.py`
+- Tests: `tests/test_projector_adjoint.py`, `tests/test_straight_ray_synthetic.py`
+- Background: classical algebraic reconstruction methods for tomography; see `docs/references.bib` and `docs/algorithm_taxonomy.md`.

@@ -44,3 +44,9 @@ The final sound speed is converted from `1 / c_ref + delta_s` and clipped to con
 - positive delay through a slower object reconstructs slower speed;
 - projector dot-product adjoint test passes.
 
+## References and Related Code
+
+- Implementation: `src/usctbench/algorithms/ray/cgls.py`
+- Projector: `src/usctbench/algorithms/ray/straight_projector.py`
+- Tests: `tests/test_projector_adjoint.py`, `tests/test_straight_ray_synthetic.py`
+- Background: conjugate-gradient least squares for linearized line-integral tomography; see `docs/references.bib` and `docs/algorithm_taxonomy.md`.

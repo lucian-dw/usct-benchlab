@@ -43,3 +43,10 @@ It is not production FWI and does not model diffraction, PMLs, source wavelets, 
 - analytic gradient agrees with finite-difference directional derivative;
 - gradient descent lowers waveform loss on a synthetic case;
 - CLI run writes the standard result artifacts.
+
+## References and Related Code
+
+- Implementation: `src/usctbench/algorithms/fwi/tiny_fwi.py`
+- Gradient helper: `src/usctbench/algorithms/fwi/gradient_check.py`
+- Tests: `tests/test_fwi_gradient_check.py`, `tests/test_fwi_loss_decrease.py`
+- Scope note: this is a tiny synthetic proof-of-life only; see `docs/algorithm_taxonomy.md` for the v0.1 classical-method boundary.

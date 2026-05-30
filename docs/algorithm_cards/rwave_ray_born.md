@@ -35,3 +35,9 @@ The default config is intentionally non-executing. It returns `skipped` until MA
 - Missing MATLAB or missing entrypoint returns `skipped`, not a crash.
 - CLI writes the standard failure report for skipped adapter runs.
 
+## References and Related Code
+
+- Adapter: `src/usctbench/algorithms/adapters/rwave.py`
+- MATLAB wrapper utilities: `src/usctbench/adapters/matlab.py`
+- Tests: `tests/test_matlab_adapters.py`
+- External source policy and candidate code: `docs/EXTERNAL_SOURCES_AND_LICENSES.md`

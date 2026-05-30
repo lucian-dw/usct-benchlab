@@ -26,10 +26,15 @@ def test_v01_audit_repo_passes_without_run_dir():
         "required_tests",
         "algorithm_configs",
         "algorithm_cards",
+        "algorithm_card_sections",
         "registered_algorithms",
         "optional_adapter_skip_evidence",
         "tracked_data_files",
     }
+
+    card_check = [check for check in result["checks"] if check["name"] == "algorithm_card_sections"][0]
+    assert card_check["passed"] is True
+    assert not card_check["missing_sections"]
 
     adapter_check = [check for check in result["checks"] if check["name"] == "optional_adapter_skip_evidence"][0]
     assert adapter_check["passed"] is True
