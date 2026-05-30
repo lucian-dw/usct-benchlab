@@ -1,3 +1,15 @@
+# local data and generated outputs
+/data/
+/runs/
+/checkpoints/
+/external/
+/third_party/
+
+# env
+.env
+.env.*
+!.env.example
+
 # Python
 __pycache__/
 *.py[cod]
@@ -7,28 +19,6 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
-
-# virtual environments
-.venv/
-venv/
-env/
-conda-meta/
-
-# local env
-.env
-.env.*
-!.env.example
-
-# local data and generated outputs
-/data/raw/
-/data/processed/
-/data/interim/
-/runs/
-/checkpoints/
-
-# external cloned repositories
-/external/local_external/
-/third_party/
 
 # large scientific files
 *.h5
