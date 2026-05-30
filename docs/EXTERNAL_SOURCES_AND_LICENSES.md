@@ -22,6 +22,12 @@ External USCT code must remain outside Git unless deliberately vendored after li
 
 The current repository contains only native Python baselines and optional adapter shells. It does not vendor external MATLAB packages or full third-party repositories.
 
+The v0.1 readiness audit executes the missing-dependency path for the MATLAB
+adapter shells. A valid skip record must include `status=skipped`, a clear
+`failure_reason`, `adapter_status=skipped`, and
+`adapter_dependency_available=false`. CLI runs must write a standard
+`failure_report.md` with `Error type: external-dependency`.
+
 ## License Checklist Before Vendoring
 
 1. Record project URL and commit hash.
@@ -29,4 +35,3 @@ The current repository contains only native Python baselines and optional adapte
 3. Confirm whether redistribution is allowed.
 4. Keep large data, examples, and generated artifacts out of Git.
 5. Add an entry to this document and an algorithm card update.
-

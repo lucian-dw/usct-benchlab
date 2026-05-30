@@ -27,8 +27,13 @@ def test_v01_audit_repo_passes_without_run_dir():
         "algorithm_configs",
         "algorithm_cards",
         "registered_algorithms",
+        "optional_adapter_skip_evidence",
         "tracked_data_files",
     }
+
+    adapter_check = [check for check in result["checks"] if check["name"] == "optional_adapter_skip_evidence"][0]
+    assert adapter_check["passed"] is True
+    assert {record["algorithm"] for record in adapter_check["records"]} == {"bent_ray_gn", "rwave_adapter"}
 
 
 def test_v01_audit_run_dir_requires_passing_records(tmp_path):

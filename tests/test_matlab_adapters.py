@@ -18,6 +18,9 @@ def test_matlab_adapters_skip_without_matlab():
         result = adapter.run(case, config)
         assert result.status == "skipped"
         assert result.failure_reason
+        assert result.metrics["adapter_dependency_available"] is False
+        assert result.artifacts["adapter_status"] == "skipped"
+        assert result.artifacts["skip_reason"] == result.failure_reason
 
 
 def test_cli_adapter_skip_writes_failure_report(tmp_path):
@@ -34,5 +37,8 @@ def test_cli_adapter_skip_writes_failure_report(tmp_path):
     assert exit_code == 1
     assert (case_dir / "result.h5").exists()
     assert (case_dir / "failure_report.md").exists()
-    assert "MATLAB executable not found" in (case_dir / "failure_report.md").read_text(encoding="utf-8")
-
+    report = (case_dir / "failure_report.md").read_text(encoding="utf-8")
+    assert "MATLAB executable not found" in report
+    assert "- Error type: external-dependency" in report
+    metadata = yaml.safe_load((case_dir / "metadata.yaml").read_text(encoding="utf-8"))
+    assert metadata["error_type"] == "external-dependency"

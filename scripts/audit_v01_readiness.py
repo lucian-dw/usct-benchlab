@@ -106,6 +106,7 @@ def audit_repo(root: Path, *, run_dir: Path | None = None, require_clean: bool =
     _check_files(root, checks, "algorithm_configs", list(ALGORITHM_CONFIGS.values()))
     _check_files(root, checks, "algorithm_cards", list(ALGORITHM_CARDS.values()))
     _check_registered_algorithms(root, checks)
+    _check_optional_adapter_skips(root, checks)
     _check_tracked_data(root, checks)
     if require_clean:
         _check_git_clean(root, checks)
@@ -149,6 +150,68 @@ def _check_registered_algorithms(root: Path, checks: list[dict[str, Any]]) -> No
             "passed": not missing,
             "registered": sorted(registered),
             "missing": missing,
+        }
+    )
+
+
+def _check_optional_adapter_skips(root: Path, checks: list[dict[str, Any]]) -> None:
+    code = r"""
+import json
+from usctbench.algorithms.adapters.refraction_gn import BentRayGNAdapter
+from usctbench.algorithms.adapters.rwave import RWaveAdapter
+from usctbench.data.synthetic import make_sound_speed_case
+from usctbench.schema import AlgorithmConfig
+
+case = make_sound_speed_case(shape=(8, 8), n_transducers=8)
+config = AlgorithmConfig(parameters={"matlab_bin": "/definitely/missing/matlab"})
+records = []
+for adapter in (BentRayGNAdapter(), RWaveAdapter()):
+    result = adapter.run(case, config)
+    records.append(
+        {
+            "algorithm": result.algorithm,
+            "status": str(result.status),
+            "failure_reason": result.failure_reason or "",
+            "adapter_status": result.artifacts.get("adapter_status"),
+            "adapter_dependency_available": result.metrics.get("adapter_dependency_available"),
+        }
+    )
+print(json.dumps(records, sort_keys=True))
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=_pythonpath_env(root),
+        check=False,
+    )
+    if proc.returncode != 0:
+        checks.append({"name": "optional_adapter_skip_evidence", "passed": False, "error": proc.stderr.strip()})
+        return
+    try:
+        records = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        checks.append({"name": "optional_adapter_skip_evidence", "passed": False, "error": f"invalid JSON: {exc}", "stdout": proc.stdout})
+        return
+    expected = {"bent_ray_gn", "rwave_adapter"}
+    observed = {record.get("algorithm") for record in records}
+    bad_records = [
+        record
+        for record in records
+        if record.get("status") != "skipped"
+        or not record.get("failure_reason")
+        or record.get("adapter_status") != "skipped"
+        or record.get("adapter_dependency_available") is not False
+    ]
+    checks.append(
+        {
+            "name": "optional_adapter_skip_evidence",
+            "passed": observed == expected and not bad_records,
+            "records": records,
+            "missing": sorted(expected - observed),
+            "bad_records": bad_records,
         }
     )
 

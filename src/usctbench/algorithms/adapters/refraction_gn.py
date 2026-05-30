@@ -65,5 +65,6 @@ def _skipped(algorithm: str, case: USCTCase, reason: str) -> ReconstructionResul
         case_id=case.case_id,
         status=ResultStatus.SKIPPED,
         failure_reason=reason,
+        metrics={"adapter_dependency_available": False},
+        artifacts={"adapter_status": "skipped", "skip_reason": reason},
     )
-
