@@ -310,7 +310,8 @@ def _check_run_dir(run_dir: Path, checks: list[dict[str, Any]]) -> None:
     summary = run_dir / "benchmark_summary.csv"
     report = run_dir / "benchmark_report.md"
     run_checks_path = run_dir / "benchmark_run_checks.json"
-    missing = [str(path) for path in (summary, report, run_checks_path) if not path.exists()]
+    run_metadata = run_dir / "run_metadata.yaml"
+    missing = [str(path) for path in (summary, report, run_checks_path, run_metadata) if not path.exists()]
     if missing:
         checks.append({"name": "benchmark_run_artifacts", "passed": False, "missing": missing})
         return
@@ -318,17 +319,24 @@ def _check_run_dir(run_dir: Path, checks: list[dict[str, Any]]) -> None:
     with summary.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     run_checks = json.loads(run_checks_path.read_text(encoding="utf-8"))
+    report_text = report.read_text(encoding="utf-8")
     run_fail_reasons = run_checks.get("fail_reasons", [])
     failed_rows = [row for row in rows if row.get("pass") != "True"]
     missing_reason_rows = [row for row in rows if not row.get("pass_reasons") and not row.get("fail_reasons")]
+    missing_provenance_fields = [
+        field
+        for field in ("Git commit:", "Git branch:", "Hostname:", "Python:", "USCT_DATA_ROOT:", "USCT_SAMPLE_ROOT:", "USCT_RUN_ROOT:")
+        if field not in report_text
+    ]
     checks.append(
         {
             "name": "benchmark_run_artifacts",
-            "passed": bool(rows) and not failed_rows and not missing_reason_rows and not run_fail_reasons,
+            "passed": bool(rows) and not failed_rows and not missing_reason_rows and not run_fail_reasons and not missing_provenance_fields,
             "records": len(rows),
             "failed_rows": failed_rows,
             "missing_reason_rows": missing_reason_rows,
             "run_fail_reasons": run_fail_reasons,
+            "missing_provenance_fields": missing_provenance_fields,
         }
     )
 
