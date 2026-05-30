@@ -41,3 +41,5 @@ python scripts/audit_v01_readiness.py --root . --run-dir "$USCT_RUN_ROOT/<run_id
 
 Use `--require-clean` only when intentionally auditing a clean release checkout; Codex working threads may have user-owned unstaged instruction edits.
 
+`scripts/run_smoke.sh` runs `pytest` everywhere. When `$USCT_SAMPLE_ROOT/cases/*.h5` exists, it also runs `configs/benchmarks/openbreastus_smoke.yaml` and audits the generated run directory.
+
