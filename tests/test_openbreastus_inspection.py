@@ -28,7 +28,35 @@ def test_inspect_openbreastus_indexes_local_tree(tmp_path):
     assert case["density_class"] == "dense"
     assert "sound_speed" in case["roles"]
     assert 500000.0 in case["available_frequencies_hz"]
+    assert case["capabilities"]["has_sound_speed"] is True
+    assert case["capabilities"]["convertible_to_usct_case"] is False
+    assert "no supported automatic USCTCase conversion mode was identified" in case["limitations"]
     assert json.loads(out.read_text(encoding="utf-8"))["cases"][0]["case_id"] == "dense_case001"
+
+
+def test_inspect_openbreastus_records_hdf5_schema_and_capabilities(tmp_path):
+    root = tmp_path / "openbreastus"
+    case_dir = root / "train" / "dense" / "case001"
+    case_dir.mkdir(parents=True)
+    with h5py.File(case_dir / "sound_speed_500kHz.mat", "w") as handle:
+        handle.create_dataset("breast_train", data=np.ones((4, 5, 2), dtype=np.float32) * 1500.0)
+    with h5py.File(case_dir / "rf_reference_500kHz.h5", "w") as handle:
+        handle.create_dataset("reference_wavefield", data=np.ones((2, 3, 4), dtype=np.complex64))
+    (case_dir / "geometry.json").write_text("{}", encoding="utf-8")
+
+    index = inspect_openbreastus(root)
+
+    case = index["cases"][0]
+    assert case["split"] == "train"
+    assert case["capabilities"]["has_speed_mat_volume"] is True
+    assert case["capabilities"]["has_reference"] is True
+    assert case["capabilities"]["has_geometry"] is True
+    assert "speed_map_to_straight_ray_surrogate" in case["capabilities"]["conversion_modes"]
+    assert "frequency_reference_features" in case["capabilities"]["conversion_modes"]
+    speed_file = [file for file in case["files"] if file["path"].endswith("sound_speed_500kHz.mat")][0]
+    assert speed_file["schema"]["format"] == "mat-v7.3-hdf5"
+    assert speed_file["schema"]["datasets"]["breast_train"]["shape"] == [4, 5, 2]
+    assert index["summary"]["capability_counts"]["convertible_to_usct_case"] == 1
 
 
 def test_make_smoke_subset_selects_one_case_per_density(tmp_path):
@@ -47,6 +75,7 @@ def test_make_smoke_subset_selects_one_case_per_density(tmp_path):
     assert (out / "openbreastus_index.json").exists()
     assert (out / "openbreastus_smoke_manifest.json").exists()
     assert (out / "schema_inspection_report.md").exists()
+    assert "case_limitations" in manifest["case_capability_summary"]
 
 
 def test_make_smoke_subset_converts_speed_mat_volume(tmp_path):
@@ -72,3 +101,6 @@ def test_make_smoke_subset_converts_speed_mat_volume(tmp_path):
     assert loaded.measurement.log_amp.shape == (8, 8)
     assert loaded.ground_truth.sound_speed_mps.shape == (4, 4)
     assert loaded.metadata["conversion"] == "speed_map_to_straight_ray_surrogate"
+    assert loaded.metadata["feature_provenance"] == "surrogate_delta_tof_from_ground_truth_sound_speed"
+    assert "log_amp is a zero surrogate" in loaded.metadata["measurement_limitations"][2]
+    assert manifest["case_capability_summary"]["conversion_mode_counts"]["speed_map_to_straight_ray_surrogate"] == 1

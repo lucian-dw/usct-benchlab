@@ -29,7 +29,9 @@ The inspector writes:
 - inferred density class when possible;
 - inferred file roles;
 - frequency hints from filenames;
-- dataset shapes for supported HDF5/MAT/NPY/NPZ files;
+- dataset schema summaries for supported HDF5/MAT/NPY/NPZ files, including shape, dtype, and dataset names where available;
+- per-case capabilities such as sound-speed maps, attenuation maps, wavefields, reference/water data, geometry, masks, and supported conversion modes;
+- per-case limitations when the evidence is speed-only, lacks reference data, lacks geometry, or has no supported automatic converter;
 - warnings when schema evidence is weak.
 
 ## Smoke Subset
@@ -45,8 +47,15 @@ The smoke builder writes:
 - `schema_inspection_report.md`
 - source symlinks under `sources/`
 - converted standard cases under `cases/` when supported
+- a `case_capability_summary` in the manifest with convertible cases, conversion mode counts, and case limitations
 
 For speed-map-only MATLAB v7.3 mirrors such as `breast_train_speed.mat`, conversion creates downsampled standard `USCTCase` HDF5 files with straight-ray surrogate features. Metadata records the speed-only limitation, spacing assumption, and the fact that `log_amp` is a zero surrogate.
+
+Converted speed-map cases must include provenance metadata:
+
+- `conversion: speed_map_to_straight_ray_surrogate`
+- `feature_provenance: surrogate_delta_tof_from_ground_truth_sound_speed`
+- `measurement_limitations` listing the missing measured wavefield, generated straight-ray features, zero `log_amp` surrogate, and synthetic geometry assumption
 
 ## Current A100 Evidence
 
@@ -69,4 +78,3 @@ The current smoke benchmark uses a converted speed-map case, not real RF/wavefie
 - Do not commit dataset files, HDF5 cases, generated previews, run outputs, or symlinks under ignored data/run directories.
 - If the local tree changes, regenerate the index and schema report before updating loaders.
 - If measured wavefield/RF/reference data becomes available, add a schema-specific converter instead of extending the speed-only surrogate path silently.
-

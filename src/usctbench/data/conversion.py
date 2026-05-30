@@ -131,6 +131,14 @@ def _speed_array_to_case(
             "source_index": source_index,
             "source_shape": list(source_shape),
             "conversion": "speed_map_to_straight_ray_surrogate",
+            "feature_provenance": "surrogate_delta_tof_from_ground_truth_sound_speed",
+            "measurement_domain": "features",
+            "measurement_limitations": [
+                "source file contains sound-speed maps only",
+                "delta_tof_s was generated with a straight-ray projector",
+                "log_amp is a zero surrogate and must not be interpreted as measured attenuation",
+                "synthetic ring geometry was generated because measured transducer geometry was unavailable",
+            ],
             "reference_sound_speed_mps": reference_sound_speed_mps,
             "spacing_m_assumption": list(spacing_m),
             "attenuation_note": "log_amp is a zero surrogate because this source file contains speed maps only.",
@@ -180,4 +188,3 @@ def _h5py():
     except ModuleNotFoundError as exc:
         raise RuntimeError("h5py is required for MAT/HDF5 conversion") from exc
     return h5py
-

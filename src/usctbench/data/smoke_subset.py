@@ -85,6 +85,7 @@ def make_smoke_subset(
         "subset_root": str(out_path),
         "cases_per_density": cases_per_density,
         "cases": selected,
+        "case_capability_summary": _capability_summary(selected),
         "converted_cases": converted_cases,
         "notes": [
             "This smoke subset manifest records selected source files without copying large arrays.",
@@ -96,6 +97,20 @@ def make_smoke_subset(
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     write_schema_report(index, out_path / "schema_inspection_report.md")
     return manifest
+
+
+def _capability_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    convertible = [case["case_id"] for case in cases if case.get("capabilities", {}).get("convertible_to_usct_case")]
+    limitations = {case["case_id"]: case.get("limitations", []) for case in cases if case.get("limitations")}
+    modes: dict[str, int] = defaultdict(int)
+    for case in cases:
+        for mode in case.get("capabilities", {}).get("conversion_modes", []):
+            modes[mode] += 1
+    return {
+        "convertible_cases": convertible,
+        "conversion_mode_counts": dict(sorted(modes.items())),
+        "case_limitations": limitations,
+    }
 
 
 def _select_cases(cases: list[dict[str, Any]], *, cases_per_density: int) -> list[dict[str, Any]]:
