@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+
 import pytest
 import yaml
 
@@ -18,6 +20,8 @@ def test_eval_aggregates_run_metrics(tmp_path):
         yaml.safe_dump({"algorithm": "straight_cgls", "case_id": "case001", "status": "success", "runtime_s": 0.1}),
         encoding="utf-8",
     )
+    (run_case / "result.h5").write_text("placeholder", encoding="utf-8")
+    (run_case / "preview.png").write_bytes(b"placeholder")
     protocol = tmp_path / "protocol.yaml"
     protocol.write_text(yaml.safe_dump({"name": "unit", "thresholds": {"rmse": 2.0}}), encoding="utf-8")
 
@@ -25,8 +29,47 @@ def test_eval_aggregates_run_metrics(tmp_path):
 
     assert exit_code == 0
     assert (tmp_path / "run" / "benchmark_summary.csv").exists()
+    with (tmp_path / "run" / "benchmark_summary.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["pass"] == "True"
+    assert rows[0]["fail_reasons"] == ""
+    assert "status is success" in rows[0]["pass_reasons"]
     report = (tmp_path / "run" / "benchmark_report.md").read_text(encoding="utf-8")
     assert "Passed: 1" in report
+    assert "Runtime total seconds" in report
+
+
+def test_eval_records_fail_reasons_and_failure_report_presence(tmp_path):
+    run_case = tmp_path / "run" / "adapter" / "case001"
+    run_case.mkdir(parents=True)
+    (run_case / "metrics.json").write_text('{"rmse": 5.0}', encoding="utf-8")
+    (run_case / "metadata.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "algorithm": "adapter",
+                "case_id": "case001",
+                "status": "skipped",
+                "runtime_s": 0.0,
+                "peak_memory_mb": 12.0,
+                "failure_reason": "missing external dependency",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_case / "result.h5").write_text("placeholder", encoding="utf-8")
+    (run_case / "failure_report.md").write_text("# Failure report\n", encoding="utf-8")
+    protocol = tmp_path / "protocol.yaml"
+    protocol.write_text(yaml.safe_dump({"name": "unit", "thresholds": {"rmse": 2.0}}), encoding="utf-8")
+
+    exit_code = main(["eval", "--run", str(tmp_path / "run"), "--protocol", str(protocol)])
+
+    assert exit_code == 0
+    with (tmp_path / "run" / "benchmark_summary.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["pass"] == "False"
+    assert rows[0]["failure_report_present"] == "True"
+    assert "status is skipped" in rows[0]["fail_reasons"]
+    assert "rmse=5 exceeds max 2" in rows[0]["fail_reasons"]
 
 
 def test_bench_runs_suite_on_synthetic_case(tmp_path):
@@ -59,4 +102,7 @@ def test_bench_runs_suite_on_synthetic_case(tmp_path):
     run_root = tmp_path / "runs" / "unit_run"
     assert (run_root / "straight_cgls" / "synthetic_circular_sos" / "result.h5").exists()
     assert (run_root / "benchmark_summary.csv").exists()
-
+    with (run_root / "benchmark_summary.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["artifacts_complete"] == "True"
+    assert rows[0]["peak_memory_mb"]

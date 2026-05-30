@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 import glob
 import json
+import math
+import resource
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -44,6 +46,7 @@ def run_algorithm_case(
     case_id = Path(case_path).stem
     algorithm_for_report = algorithm_name
     config_for_report = str(config_path)
+    memory_before_mb = _peak_memory_mb()
     try:
         case = read_case_hdf5(case_path)
         case_id = case.case_id
@@ -58,10 +61,16 @@ def run_algorithm_case(
             status=ResultStatus.FAILED,
             failure_reason=f"{type(exc).__name__}: {exc}",
         )
+    memory_after_mb = _peak_memory_mb()
 
     out_dir = out_root / case_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    _write_result_artifacts(result, out_dir, config=config_for_report)
+    _write_result_artifacts(
+        result,
+        out_dir,
+        config=config_for_report,
+        peak_memory_mb=max(memory_before_mb, memory_after_mb),
+    )
     return out_dir
 
 
@@ -81,9 +90,15 @@ def evaluate_run(run_dir: str | Path, protocol_path: str | Path | None = None) -
             "algorithm": metadata.get("algorithm", case_dir.parent.name),
             "status": metadata.get("status", "unknown"),
             "runtime_s": metadata.get("runtime_s", ""),
+            "peak_memory_mb": metadata.get("peak_memory_mb", ""),
+            "failure_reason": metadata.get("failure_reason") or "",
+            "failure_report_present": (case_dir / "failure_report.md").exists(),
         }
         record.update(metrics)
-        record["pass"] = _record_passes(record, protocol)
+        record["artifacts_complete"], artifact_reasons = _artifact_check(case_dir, record)
+        record["pass"], pass_reasons, fail_reasons = _assess_record(record, protocol, artifact_reasons)
+        record["pass_reasons"] = "; ".join(pass_reasons)
+        record["fail_reasons"] = "; ".join(fail_reasons)
         records.append(record)
 
     summary_csv = run_path / "benchmark_summary.csv"
@@ -121,7 +136,7 @@ def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
     return {"run_root": str(run_root), "num_cases": len(cases), **evaluation}
 
 
-def _write_result_artifacts(result: ReconstructionResult, out_dir: Path, *, config: str) -> None:
+def _write_result_artifacts(result: ReconstructionResult, out_dir: Path, *, config: str, peak_memory_mb: float) -> None:
     preview_image = result.sound_speed_mps if result.sound_speed_mps is not None else result.attenuation_np_per_m
     if preview_image is not None:
         preview_path = write_preview_png(preview_image, out_dir / "preview.png")
@@ -136,6 +151,7 @@ def _write_result_artifacts(result: ReconstructionResult, out_dir: Path, *, conf
                 "case_id": result.case_id,
                 "config": config,
                 "runtime_s": result.runtime_s,
+                "peak_memory_mb": peak_memory_mb,
                 "status": str(result.status),
                 "failure_reason": result.failure_reason,
                 "result_h5": str(result_path),
@@ -173,22 +189,81 @@ def _expand(value: str) -> str:
     return os.path.expandvars(os.path.expanduser(value))
 
 
-def _record_passes(record: dict[str, Any], protocol: dict[str, Any]) -> bool:
+def _assess_record(
+    record: dict[str, Any],
+    protocol: dict[str, Any],
+    artifact_reasons: list[str],
+) -> tuple[bool, list[str], list[str]]:
+    pass_reasons: list[str] = []
+    fail_reasons: list[str] = []
+
     if str(record.get("status", "")).lower() != "success":
-        return False
+        fail_reasons.append(f"status is {record.get('status')}")
+        if record.get("failure_reason"):
+            fail_reasons.append(str(record["failure_reason"]))
+    else:
+        pass_reasons.append("status is success")
+
+    if artifact_reasons:
+        fail_reasons.extend(artifact_reasons)
+    else:
+        pass_reasons.append("required artifacts present")
+
     thresholds = protocol.get("thresholds", {})
-    if not isinstance(thresholds, dict):
-        return True
-    for key, limit in thresholds.items():
-        if key in record and float(record[key]) > float(limit):
-            return False
-    return True
+    if isinstance(thresholds, dict):
+        for key, limit in thresholds.items():
+            if key in record and _is_number(record[key]):
+                value = float(record[key])
+                if value > float(limit):
+                    fail_reasons.append(f"{key}={value:g} exceeds max {float(limit):g}")
+                else:
+                    pass_reasons.append(f"{key}={value:g} <= {float(limit):g}")
+
+    minimums = protocol.get("minimums", {})
+    if isinstance(minimums, dict):
+        for key, limit in minimums.items():
+            if key in record and _is_number(record[key]):
+                value = float(record[key])
+                if value < float(limit):
+                    fail_reasons.append(f"{key}={value:g} below min {float(limit):g}")
+                else:
+                    pass_reasons.append(f"{key}={value:g} >= {float(limit):g}")
+
+    return not fail_reasons, pass_reasons, fail_reasons
+
+
+def _artifact_check(case_dir: Path, record: dict[str, Any]) -> tuple[bool, list[str]]:
+    reasons = []
+    required = {
+        "result.h5": case_dir / "result.h5",
+        "metrics.json": case_dir / "metrics.json",
+        "metadata.yaml": case_dir / "metadata.yaml",
+    }
+    for label, path in required.items():
+        if not path.exists():
+            reasons.append(f"missing {label}")
+    if str(record.get("status", "")).lower() == "success" and not (case_dir / "preview.png").exists():
+        reasons.append("missing preview.png for successful run")
+    if str(record.get("status", "")).lower() != "success" and not (case_dir / "failure_report.md").exists():
+        reasons.append("missing failure_report.md for non-success run")
+    return not reasons, reasons
 
 
 def _write_summary_csv(records: list[dict[str, Any]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fields = sorted({key for record in records for key in record})
-    preferred = ["algorithm", "case_id", "status", "pass", "runtime_s"]
+    preferred = [
+        "algorithm",
+        "case_id",
+        "status",
+        "pass",
+        "pass_reasons",
+        "fail_reasons",
+        "runtime_s",
+        "peak_memory_mb",
+        "artifacts_complete",
+        "failure_report_present",
+    ]
     fieldnames = preferred + [field for field in fields if field not in preferred]
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -198,6 +273,8 @@ def _write_summary_csv(records: list[dict[str, Any]], path: Path) -> None:
 
 def _write_benchmark_report(records: list[dict[str, Any]], path: Path, *, protocol: dict[str, Any]) -> None:
     passed = sum(1 for record in records if record.get("pass"))
+    runtimes = [float(record["runtime_s"]) for record in records if _is_number(record.get("runtime_s"))]
+    memory_values = [float(record["peak_memory_mb"]) for record in records if _is_number(record.get("peak_memory_mb"))]
     lines = [
         "# Benchmark report",
         "",
@@ -205,6 +282,9 @@ def _write_benchmark_report(records: list[dict[str, Any]], path: Path, *, protoc
         f"- Passed: {passed}",
         f"- Failed: {len(records) - passed}",
         f"- Protocol: {protocol.get('name', 'ad hoc')}",
+        f"- Runtime total seconds: {sum(runtimes):.6g}" if runtimes else "- Runtime total seconds:",
+        f"- Runtime max seconds: {max(runtimes):.6g}" if runtimes else "- Runtime max seconds:",
+        f"- Peak memory max MB: {max(memory_values):.6g}" if memory_values else "- Peak memory max MB:",
         "",
         "## Results",
         "",
@@ -212,7 +292,23 @@ def _write_benchmark_report(records: list[dict[str, Any]], path: Path, *, protoc
     for record in records:
         lines.append(
             f"- `{record.get('algorithm')}` / `{record.get('case_id')}`: "
-            f"status={record.get('status')}, pass={record.get('pass')}, runtime_s={record.get('runtime_s')}"
+            f"status={record.get('status')}, pass={record.get('pass')}, runtime_s={record.get('runtime_s')}, "
+            f"reasons={record.get('fail_reasons') or record.get('pass_reasons')}"
         )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+
+def _peak_memory_mb() -> float:
+    usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    # macOS reports bytes; Linux reports KiB.
+    if usage > 10_000_000:
+        return float(usage) / (1024.0 * 1024.0)
+    return float(usage) / 1024.0
+
+
+def _is_number(value: Any) -> bool:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(number)
