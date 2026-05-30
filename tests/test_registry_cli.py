@@ -11,5 +11,13 @@ def test_cli_registers_builtin_algorithms(capsys):
     assert exit_code == 0
     assert "straight_sart" in output
     assert "attenuation_sirt" in output
-    assert {entry.name for entry in list_algorithms()} >= {"straight_sart", "straight_sirt", "straight_cgls", "attenuation_sirt"}
-
+    assert "bent_ray_gn" in output
+    assert "rwave_adapter" in output
+    assert {entry.name for entry in list_algorithms()} >= {
+        "straight_sart",
+        "straight_sirt",
+        "straight_cgls",
+        "attenuation_sirt",
+        "bent_ray_gn",
+        "rwave_adapter",
+    }

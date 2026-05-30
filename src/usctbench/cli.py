@@ -17,7 +17,9 @@ def register_builtin_algorithms() -> None:
     """Register built-in algorithms exactly once for CLI use."""
 
     from usctbench.algorithms.ray import register_ray_algorithms
+    from usctbench.algorithms.adapters import register_adapter_algorithms
 
+    register_adapter_algorithms(replace=True)
     register_ray_algorithms(replace=True)
 
 

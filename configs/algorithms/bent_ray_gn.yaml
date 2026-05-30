@@ -1,0 +1,7 @@
+name: bent_ray_gn
+parameters:
+  matlab_bin: null
+  external_root: null
+  entrypoint: null
+  timeout_s: 300
+

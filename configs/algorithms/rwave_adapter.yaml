@@ -1,0 +1,7 @@
+name: rwave_adapter
+parameters:
+  matlab_bin: null
+  external_root: null
+  entrypoint: null
+  timeout_s: 300
+
