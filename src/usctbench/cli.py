@@ -38,6 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
     smoke_parser.add_argument("--root", required=True, help="OpenBreastUS data root.")
     smoke_parser.add_argument("--out", required=True, help="Output smoke subset root.")
     smoke_parser.add_argument("--cases-per-density", type=int, default=1)
+    smoke_parser.add_argument("--converted-shape", type=int, default=64, help="Square image size for converted speed-map cases.")
+    smoke_parser.add_argument("--n-transducers", type=int, default=32, help="Synthetic ring transducers for converted speed-map cases.")
+    smoke_parser.add_argument("--spacing-m", type=float, default=1.0e-3, help="Assumed pixel spacing for converted speed-map cases.")
+    smoke_parser.add_argument("--no-convert-speed-mat", action="store_true", help="Only write the manifest; do not create HDF5 cases.")
 
     run_parser = subparsers.add_parser("run", help="Run one algorithm on one case.")
     run_parser.add_argument("algorithm", help="Registered algorithm name.")
@@ -85,7 +89,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(args.out)
             return 0
         if args.data_command == "make-smoke":
-            make_smoke_subset(args.root, args.out, cases_per_density=args.cases_per_density)
+            make_smoke_subset(
+                args.root,
+                args.out,
+                cases_per_density=args.cases_per_density,
+                convert_speed_mat=not args.no_convert_speed_mat,
+                converted_shape=(args.converted_shape, args.converted_shape),
+                spacing_m=(args.spacing_m, args.spacing_m),
+                n_transducers=args.n_transducers,
+            )
             print(args.out)
             return 0
 

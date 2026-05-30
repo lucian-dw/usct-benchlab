@@ -16,6 +16,8 @@ from typing import Any
 
 import numpy as np
 
+from .conversion import speed_mat_metadata
+
 INSPECTOR_VERSION = "0.1"
 SUPPORTED_SUFFIXES = {".h5", ".hdf5", ".mat", ".npy", ".npz", ".json", ".yaml", ".yml", ".txt", ".csv"}
 DATA_SUFFIXES = {".h5", ".hdf5", ".mat", ".npy", ".npz"}
@@ -228,6 +230,8 @@ def _shape(path: Path) -> Any:
             return shapes
         except Exception:
             return None
+    if suffix == ".mat":
+        return speed_mat_metadata(path)
     return None
 
 

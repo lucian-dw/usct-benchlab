@@ -1,5 +1,5 @@
 name: openbreastus_mini
-case_glob: ${USCT_SAMPLE_ROOT}/mini/**/*.h5
+case_glob: ${USCT_SAMPLE_ROOT}/cases/*.h5
 algorithms:
   - name: straight_cgls
     config: configs/algorithms/straight_cgls.yaml
@@ -9,4 +9,3 @@ algorithms:
     config: configs/algorithms/attenuation_sirt.yaml
 outputs:
   root: ${USCT_RUN_ROOT}
-

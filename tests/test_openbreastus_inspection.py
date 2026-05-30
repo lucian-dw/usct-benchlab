@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 
+import h5py
 import numpy as np
 
 from usctbench.data.openbreastus import inspect_openbreastus
 from usctbench.data.smoke_subset import make_smoke_subset
+from usctbench.io.hdf5 import read_case_hdf5
 
 
 def test_inspect_openbreastus_indexes_local_tree(tmp_path):
@@ -46,3 +48,27 @@ def test_make_smoke_subset_selects_one_case_per_density(tmp_path):
     assert (out / "openbreastus_smoke_manifest.json").exists()
     assert (out / "schema_inspection_report.md").exists()
 
+
+def test_make_smoke_subset_converts_speed_mat_volume(tmp_path):
+    root = tmp_path / "openbreastus"
+    root.mkdir()
+    mat_path = root / "breast_train_speed.mat"
+    with h5py.File(mat_path, "w") as handle:
+        data = np.zeros((8, 8, 2), dtype=np.float32)
+        data[:, :, 0] = 1500.0
+        data[2:6, 2:6, 0] = 1450.0
+        data[:, :, 1] = 1510.0
+        handle.create_dataset("breast_train", data=data)
+
+    out = tmp_path / "smoke"
+    manifest = make_smoke_subset(root, out, cases_per_density=1, converted_shape=(4, 4), n_transducers=8)
+
+    assert len(manifest["converted_cases"]) == 1
+    case_path = out / "cases" / "breast_train_speed_000000.h5"
+    loaded = read_case_hdf5(case_path)
+    assert loaded.case_id == "breast_train_speed_000000"
+    assert loaded.grid.shape == (4, 4)
+    assert loaded.measurement.delta_tof_s.shape == (8, 8)
+    assert loaded.measurement.log_amp.shape == (8, 8)
+    assert loaded.ground_truth.sound_speed_mps.shape == (4, 4)
+    assert loaded.metadata["conversion"] == "speed_map_to_straight_ray_surrogate"

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .conversion import convert_speed_mat_volume
 from .openbreastus import inspect_openbreastus, write_schema_report
 
 
@@ -18,6 +19,10 @@ def make_smoke_subset(
     *,
     cases_per_density: int = 1,
     symlink_sources: bool = True,
+    convert_speed_mat: bool = True,
+    converted_shape: tuple[int, int] = (64, 64),
+    spacing_m: tuple[float, float] = (1.0e-3, 1.0e-3),
+    n_transducers: int = 32,
 ) -> dict[str, Any]:
     """Select a small smoke subset and write a manifest plus source links.
 
@@ -54,6 +59,25 @@ def make_smoke_subset(
                 except OSError:
                     file_record["smoke_link"] = None
 
+    converted_cases = []
+    if convert_speed_mat:
+        converted_root = out_path / "cases"
+        for case in selected:
+            for file_record in case["files"]:
+                source = root_path / file_record["path"]
+                if "sound_speed" in file_record.get("roles", []) and source.suffix.lower() == ".mat":
+                    converted_cases.extend(
+                        convert_speed_mat_volume(
+                            source,
+                            converted_root,
+                            indices=[0],
+                            case_id_prefix=case["case_id"],
+                            output_shape=converted_shape,
+                            spacing_m=spacing_m,
+                            n_transducers=n_transducers,
+                        )
+                    )
+
     manifest = {
         "schema_version": "0.1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -61,9 +85,11 @@ def make_smoke_subset(
         "subset_root": str(out_path),
         "cases_per_density": cases_per_density,
         "cases": selected,
+        "converted_cases": converted_cases,
         "notes": [
             "This smoke subset manifest records selected source files without copying large arrays.",
-            "Dataset-specific conversion to standard USCTCase HDF5 should be added after inspecting local schema.",
+            "Converted HDF5 cases are downsampled standard USCTCase files when a supported speed-map MAT volume is present.",
+            "Speed-only conversions use surrogate straight-ray features and record unit assumptions in metadata.",
         ],
     }
     manifest_path = out_path / "openbreastus_smoke_manifest.json"
@@ -81,4 +107,3 @@ def _select_cases(cases: list[dict[str, Any]], *, cases_per_density: int) -> lis
     for density in sorted(by_density):
         selected.extend(by_density[density][:cases_per_density])
     return selected
-
