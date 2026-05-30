@@ -25,3 +25,19 @@ This checklist records current evidence. It is not a claim that v0.1 is complete
 - MATLAB adapters do not yet marshal `USCTCase` into external package input formats.
 - `fwi_tiny` is synthetic proof-of-life only and is not production FWI.
 
+## Audit Command
+
+Repository readiness can be checked with:
+
+```bash
+python scripts/audit_v01_readiness.py --root .
+```
+
+To include benchmark evidence from A100:
+
+```bash
+python scripts/audit_v01_readiness.py --root . --run-dir "$USCT_RUN_ROOT/<run_id>"
+```
+
+Use `--require-clean` only when intentionally auditing a clean release checkout; Codex working threads may have user-owned unstaged instruction edits.
+
