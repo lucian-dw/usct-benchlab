@@ -46,3 +46,22 @@ def test_cli_run_failure_writes_failure_report(tmp_path):
     assert (case_dir / "failure_report.md").exists()
     assert "delta_tof_s" in (case_dir / "failure_report.md").read_text(encoding="utf-8")
 
+
+def test_cli_run_fwi_tiny_writes_standard_artifacts(tmp_path):
+    case_path = write_case_hdf5(make_sound_speed_case(shape=(10, 10), n_transducers=12), tmp_path / "case.h5")
+    config_path = tmp_path / "fwi_tiny.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"parameters": {"steps": 5, "learning_rate": 1.0e6}}),
+        encoding="utf-8",
+    )
+    out = tmp_path / "runs"
+
+    exit_code = main(["run", "fwi_tiny", "--case", str(case_path), "--config", str(config_path), "--out", str(out)])
+
+    case_dir = out / "synthetic_circular_sos"
+    assert exit_code == 0
+    assert (case_dir / "result.h5").exists()
+    assert (case_dir / "metrics.json").exists()
+    assert (case_dir / "metadata.yaml").exists()
+    assert (case_dir / "preview.png").exists()
+    assert json.loads((case_dir / "metrics.json").read_text(encoding="utf-8"))["loss_decreased"] is True
