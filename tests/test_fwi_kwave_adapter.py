@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 
@@ -46,6 +48,18 @@ def test_kwave_adapter_missing_result_skips(tmp_path):
 
     assert result.status == "skipped"
     assert "result file not found" in result.failure_reason
+
+
+def test_kwave_adapter_expands_env_result_path(tmp_path, monkeypatch):
+    result_path = tmp_path / "result.mat"
+    _write_result(result_path)
+    monkeypatch.setenv("KWAVE_RESULT_FOR_TEST", str(result_path))
+    case = make_sound_speed_case(shape=(4, 4), n_transducers=8)
+
+    result = KWaveFWIAdapterAlgorithm().run(case, AlgorithmConfig(parameters={"result_path": "$KWAVE_RESULT_FOR_TEST"}))
+
+    assert result.status == "success"
+    assert os.path.samefile(result.metrics["external_result_path"], result_path)
 
 
 def _write_result(path):

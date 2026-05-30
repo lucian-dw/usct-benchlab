@@ -133,7 +133,9 @@ def _run_external_pipeline(case: USCTCase, config: AlgorithmConfig, result_path:
             failure_reason="run_external requires parameters.dataset_path or case.metadata.source_path",
         )
 
-    usct_kwave_root = Path(str(config.parameters.get("usct_kwave_root", os.environ.get("USCT_KWAVE_ROOT", "/home/wudalong/USCT_kwave")))).expanduser()
+    usct_kwave_root = Path(
+        os.path.expandvars(str(config.parameters.get("usct_kwave_root", os.environ.get("USCT_KWAVE_ROOT", "/home/wudalong/USCT_kwave"))))
+    ).expanduser()
     python_bin = str(config.parameters.get("python_bin", sys.executable))
     module = str(config.parameters.get("pipeline_module", "openbreastus_diffusion.kwave_dps.run_full_pipeline"))
     extra_args = [str(value) for value in config.parameters.get("pipeline_args", [])]
@@ -206,7 +208,7 @@ def _configured_path(config: AlgorithmConfig, key: str) -> Path | None:
     value = config.parameters.get(key)
     if not value:
         return None
-    return Path(str(value)).expanduser()
+    return Path(os.path.expandvars(str(value))).expanduser()
 
 
 def _resize_to_shape(image: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
@@ -269,4 +271,3 @@ def _h5py():
     except ModuleNotFoundError as exc:
         raise RuntimeError("h5py is required to read MATLAB v7.3 FWI result files") from exc
     return h5py
-
