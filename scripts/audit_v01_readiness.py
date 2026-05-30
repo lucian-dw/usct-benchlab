@@ -190,22 +190,26 @@ def _check_git_clean(root: Path, checks: list[dict[str, Any]]) -> None:
 def _check_run_dir(run_dir: Path, checks: list[dict[str, Any]]) -> None:
     summary = run_dir / "benchmark_summary.csv"
     report = run_dir / "benchmark_report.md"
-    missing = [str(path) for path in (summary, report) if not path.exists()]
+    run_checks_path = run_dir / "benchmark_run_checks.json"
+    missing = [str(path) for path in (summary, report, run_checks_path) if not path.exists()]
     if missing:
         checks.append({"name": "benchmark_run_artifacts", "passed": False, "missing": missing})
         return
 
     with summary.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
+    run_checks = json.loads(run_checks_path.read_text(encoding="utf-8"))
+    run_fail_reasons = run_checks.get("fail_reasons", [])
     failed_rows = [row for row in rows if row.get("pass") != "True"]
     missing_reason_rows = [row for row in rows if not row.get("pass_reasons") and not row.get("fail_reasons")]
     checks.append(
         {
             "name": "benchmark_run_artifacts",
-            "passed": bool(rows) and not failed_rows and not missing_reason_rows,
+            "passed": bool(rows) and not failed_rows and not missing_reason_rows and not run_fail_reasons,
             "records": len(rows),
             "failed_rows": failed_rows,
             "missing_reason_rows": missing_reason_rows,
+            "run_fail_reasons": run_fail_reasons,
         }
     )
 

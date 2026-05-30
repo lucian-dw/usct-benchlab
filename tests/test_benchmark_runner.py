@@ -5,7 +5,7 @@ import csv
 import pytest
 import yaml
 
-from usctbench.benchmark.runner import run_benchmark_suite
+from usctbench.benchmark.runner import run_algorithm_case, run_benchmark_suite
 from usctbench.cli import main
 from usctbench.data.synthetic import make_sound_speed_case
 from usctbench.io.hdf5 import write_case_hdf5
@@ -37,7 +37,9 @@ def test_eval_aggregates_run_metrics(tmp_path):
     assert "status is success" in rows[0]["pass_reasons"]
     report = (tmp_path / "run" / "benchmark_report.md").read_text(encoding="utf-8")
     assert "Passed: 1" in report
+    assert "Run checks: passed" in report
     assert "Runtime total seconds" in report
+    assert (tmp_path / "run" / "benchmark_run_checks.json").exists()
 
 
 def test_eval_records_fail_reasons_and_failure_report_presence(tmp_path):
@@ -126,6 +128,39 @@ def test_eval_uses_algorithm_specific_metric_limits(tmp_path):
     assert "missing threshold metric rmse" not in rows[0]["fail_reasons"]
 
 
+def test_eval_fails_missing_expected_algorithm_record(tmp_path):
+    run_case = tmp_path / "run" / "straight_sart" / "case001"
+    run_case.mkdir(parents=True)
+    (run_case / "metrics.json").write_text('{"data_residual_norm": 0.0}', encoding="utf-8")
+    (run_case / "metadata.yaml").write_text(
+        yaml.safe_dump({"algorithm": "straight_sart", "case_id": "case001", "status": "success", "runtime_s": 0.1}),
+        encoding="utf-8",
+    )
+    (run_case / "result.h5").write_text("placeholder", encoding="utf-8")
+    (run_case / "preview.png").write_bytes(b"placeholder")
+    protocol = tmp_path / "protocol.yaml"
+    protocol.write_text(
+        yaml.safe_dump(
+            {
+                "name": "unit",
+                "algorithms": [
+                    {"name": "straight_sart", "config": "unused.yaml"},
+                    {"name": "attenuation_sirt", "config": "unused.yaml"},
+                ],
+                "min_records": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["eval", "--run", str(tmp_path / "run"), "--protocol", str(protocol)])
+
+    assert exit_code == 1
+    report = (tmp_path / "run" / "benchmark_report.md").read_text(encoding="utf-8")
+    assert "Run checks: failed" in report
+    assert "missing algorithms: attenuation_sirt" in report
+
+
 def test_bench_runs_suite_on_synthetic_case(tmp_path):
     case_dir = tmp_path / "cases"
     case_dir.mkdir()
@@ -178,3 +213,16 @@ def test_bench_suite_rejects_empty_case_glob(tmp_path):
 
     with pytest.raises(ValueError, match="matched no cases"):
         run_benchmark_suite(suite)
+
+
+def test_run_algorithm_case_classifies_data_failure(tmp_path):
+    config = tmp_path / "straight_cgls.yaml"
+    config.write_text(yaml.safe_dump({"parameters": {"iterations": 1}}), encoding="utf-8")
+
+    out_dir = run_algorithm_case("straight_cgls", tmp_path / "missing_case.h5", config, tmp_path / "run")
+
+    metadata = yaml.safe_load((out_dir / "metadata.yaml").read_text(encoding="utf-8"))
+    report = (out_dir / "failure_report.md").read_text(encoding="utf-8")
+    assert metadata["status"] == "failed"
+    assert metadata["error_type"] == "data"
+    assert "- Error type: data" in report

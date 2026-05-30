@@ -7,6 +7,11 @@ algorithms:
     config: configs/algorithms/attenuation_sirt.yaml
 outputs:
   root: ${USCT_RUN_ROOT}
+min_cases: 1
+min_records: 2
+expected_statuses:
+  - success
+require_algorithm_case_matrix: true
 required_metrics:
   straight_sart:
     - data_residual_norm

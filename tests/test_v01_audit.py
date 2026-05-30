@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -39,10 +40,14 @@ def test_v01_audit_run_dir_requires_passing_records(tmp_path):
         writer.writeheader()
         writer.writerow({"algorithm": "a", "case_id": "c", "pass": "False", "pass_reasons": "", "fail_reasons": "status is failed"})
     (run_dir / "benchmark_report.md").write_text("# Benchmark report\n", encoding="utf-8")
+    (run_dir / "benchmark_run_checks.json").write_text(
+        json.dumps({"passed": False, "pass_reasons": [], "fail_reasons": ["record count 1 below required 2"]}),
+        encoding="utf-8",
+    )
 
     result = audit.audit_repo(Path(".").resolve(), run_dir=run_dir)
 
     assert result["passed"] is False
     run_check = [check for check in result["checks"] if check["name"] == "benchmark_run_artifacts"][0]
     assert run_check["failed_rows"]
-
+    assert run_check["run_fail_reasons"]

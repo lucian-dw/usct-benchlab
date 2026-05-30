@@ -25,14 +25,34 @@ Non-success records fail benchmark acceptance unless the protocol explicitly tre
 Benchmark YAML supports:
 
 ```yaml
+min_cases: 1
+min_records: 2
+expected_statuses:
+  - success
+require_algorithm_case_matrix: true
+required_metrics:
+  straight_sart:
+    - data_residual_norm
+    - rmse
 thresholds:
-  rmse: 100.0
-  data_residual_norm: 1.0e-4
+  straight_sart:
+    rmse: 100.0
+    data_residual_norm: 1.0e-4
 minimums:
-  water_relative_rmse_improvement: 0.0
+  straight_sart:
+    water_relative_rmse_improvement: 0.0
 ```
 
-`thresholds` are maximum allowed values. `minimums` are minimum required values.
+`min_cases` and `min_records` are run-level evidence checks. `expected_statuses`
+lists acceptable result states, and `require_algorithm_case_matrix` requires
+every expected algorithm to have a record for every observed case. Expected
+algorithms are inferred from the suite `algorithms` list unless
+`expected_algorithms` is supplied explicitly.
+
+`required_metrics` names metrics that must be present and finite. `thresholds`
+are maximum allowed values. `minimums` are minimum required values. These fields
+can be either global mappings or algorithm-specific mappings keyed by algorithm
+name.
 
 ## Required Metrics
 
@@ -55,7 +75,11 @@ Attenuation algorithms should report:
 `usct eval` and `usct bench` write:
 
 - `benchmark_summary.csv`
+- `benchmark_run_checks.json`
 - `benchmark_report.md`
 
 The CSV includes pass/fail booleans, pass reasons, fail reasons, runtime, peak memory, artifact completeness, and failure-report presence.
-
+The run-check JSON records protocol-level failures such as missing algorithms,
+too few records, too few cases, or an incomplete algorithm/case matrix. CLI
+commands return non-zero if any per-case record fails or if run-level checks
+fail.

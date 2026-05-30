@@ -18,9 +18,19 @@ Use this template when summarizing benchmark runs for a paper, issue, or release
 - Records:
 - Passed:
 - Failed:
+- Run checks:
 - Runtime total seconds:
 - Runtime max seconds:
 - Peak memory max MB:
+
+## Run Checks
+
+- Minimum cases:
+- Minimum records:
+- Expected algorithms:
+- Expected statuses:
+- Complete algorithm/case matrix:
+- Run-level fail reasons:
 
 ## Dataset
 
@@ -53,4 +63,3 @@ For each failure, link to `failure_report.md` and include:
 - What failed:
 - What is a surrogate or synthetic-only result:
 - What should be run next:
-

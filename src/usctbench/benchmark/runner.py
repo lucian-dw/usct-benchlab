@@ -78,6 +78,7 @@ def evaluate_run(run_dir: str | Path, protocol_path: str | Path | None = None) -
     """Aggregate per-case metrics into CSV and markdown reports."""
 
     run_path = Path(run_dir)
+    run_path.mkdir(parents=True, exist_ok=True)
     protocol = _load_yaml(protocol_path) if protocol_path is not None else {}
     records = []
     for metrics_path in sorted(run_path.rglob("metrics.json")):
@@ -101,11 +102,21 @@ def evaluate_run(run_dir: str | Path, protocol_path: str | Path | None = None) -
         record["fail_reasons"] = "; ".join(fail_reasons)
         records.append(record)
 
+    run_pass_reasons, run_fail_reasons = _assess_run_records(records, protocol)
+    run_checks = {"passed": not run_fail_reasons, "pass_reasons": run_pass_reasons, "fail_reasons": run_fail_reasons}
+    run_checks_json = run_path / "benchmark_run_checks.json"
+    run_checks_json.write_text(json.dumps(run_checks, indent=2, sort_keys=True), encoding="utf-8")
     summary_csv = run_path / "benchmark_summary.csv"
     _write_summary_csv(records, summary_csv)
     report_md = run_path / "benchmark_report.md"
-    _write_benchmark_report(records, report_md, protocol=protocol)
-    return {"records": records, "summary_csv": str(summary_csv), "report_md": str(report_md)}
+    _write_benchmark_report(records, report_md, protocol=protocol, run_checks=run_checks)
+    return {
+        "records": records,
+        "run_checks": run_checks,
+        "summary_csv": str(summary_csv),
+        "report_md": str(report_md),
+        "run_checks_json": str(run_checks_json),
+    }
 
 
 def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
@@ -152,6 +163,7 @@ def _write_result_artifacts(result: ReconstructionResult, out_dir: Path, *, conf
                 "algorithm": result.algorithm,
                 "case_id": result.case_id,
                 "config": config,
+                "error_type": _classify_failure(result.failure_reason),
                 "runtime_s": result.runtime_s,
                 "peak_memory_mb": peak_memory_mb,
                 "status": str(result.status),
@@ -168,7 +180,7 @@ def _write_result_artifacts(result: ReconstructionResult, out_dir: Path, *, conf
             algorithm=result.algorithm,
             case_id=result.case_id,
             config=config,
-            error_type="unknown",
+            error_type=_classify_failure(result.failure_reason),
             symptom=result.failure_reason or "algorithm did not report success",
             likely_causes=["schema mismatch", "data/geometry mismatch", "numerical instability"],
             actions=["inspect case metadata", "inspect sinogram/features", "lower relaxation or iterations"],
@@ -244,6 +256,78 @@ def _assess_record(
     return not fail_reasons, pass_reasons, fail_reasons
 
 
+def _assess_run_records(records: list[dict[str, Any]], protocol: dict[str, Any]) -> tuple[list[str], list[str]]:
+    pass_reasons: list[str] = []
+    fail_reasons: list[str] = []
+
+    if records:
+        pass_reasons.append(f"{len(records)} benchmark records present")
+    else:
+        fail_reasons.append("no benchmark records present")
+
+    min_records = protocol.get("min_records")
+    if min_records is not None:
+        if len(records) < int(min_records):
+            fail_reasons.append(f"record count {len(records)} below required {int(min_records)}")
+        else:
+            pass_reasons.append(f"record count {len(records)} >= {int(min_records)}")
+
+    observed_algorithms = {str(record.get("algorithm", "")) for record in records}
+    expected_algorithms = _expected_algorithms(protocol)
+    missing_algorithms = sorted(expected_algorithms - observed_algorithms)
+    if expected_algorithms:
+        if missing_algorithms:
+            fail_reasons.append(f"missing algorithms: {', '.join(missing_algorithms)}")
+        else:
+            pass_reasons.append("all expected algorithms present")
+
+    observed_cases = {str(record.get("case_id", "")) for record in records}
+    min_cases = protocol.get("min_cases")
+    if min_cases is not None:
+        if len(observed_cases) < int(min_cases):
+            fail_reasons.append(f"case count {len(observed_cases)} below required {int(min_cases)}")
+        else:
+            pass_reasons.append(f"case count {len(observed_cases)} >= {int(min_cases)}")
+
+    if expected_algorithms and observed_cases and bool(protocol.get("require_algorithm_case_matrix", True)):
+        observed_pairs = {(str(record.get("algorithm", "")), str(record.get("case_id", ""))) for record in records}
+        missing_pairs = [
+            f"{algorithm}/{case_id}"
+            for algorithm in sorted(expected_algorithms)
+            for case_id in sorted(observed_cases)
+            if (algorithm, case_id) not in observed_pairs
+        ]
+        if missing_pairs:
+            fail_reasons.append(f"missing algorithm-case records: {', '.join(missing_pairs)}")
+        else:
+            pass_reasons.append("complete algorithm-case matrix present")
+
+    allowed_statuses = protocol.get("expected_statuses")
+    if isinstance(allowed_statuses, list) and allowed_statuses:
+        allowed = {str(status).lower() for status in allowed_statuses}
+        bad = [
+            f"{record.get('algorithm')}/{record.get('case_id')}={record.get('status')}"
+            for record in records
+            if str(record.get("status", "")).lower() not in allowed
+        ]
+        if bad:
+            fail_reasons.append(f"unexpected statuses: {', '.join(bad)}")
+        else:
+            pass_reasons.append("all statuses are expected")
+
+    return pass_reasons, fail_reasons
+
+
+def _expected_algorithms(protocol: dict[str, Any]) -> set[str]:
+    explicit = protocol.get("expected_algorithms")
+    if isinstance(explicit, list):
+        return {str(value) for value in explicit}
+    algorithms = protocol.get("algorithms", [])
+    if isinstance(algorithms, list):
+        return {str(entry.get("name")) for entry in algorithms if isinstance(entry, dict) and entry.get("name")}
+    return set()
+
+
 def _metric_limits_for_algorithm(spec: Any, algorithm_name: str) -> dict[str, Any]:
     if not isinstance(spec, dict):
         return {}
@@ -311,7 +395,7 @@ def _write_summary_csv(records: list[dict[str, Any]], path: Path) -> None:
         writer.writerows(records)
 
 
-def _write_benchmark_report(records: list[dict[str, Any]], path: Path, *, protocol: dict[str, Any]) -> None:
+def _write_benchmark_report(records: list[dict[str, Any]], path: Path, *, protocol: dict[str, Any], run_checks: dict[str, Any]) -> None:
     passed = sum(1 for record in records if record.get("pass"))
     runtimes = [float(record["runtime_s"]) for record in records if _is_number(record.get("runtime_s"))]
     memory_values = [float(record["peak_memory_mb"]) for record in records if _is_number(record.get("peak_memory_mb"))]
@@ -322,13 +406,25 @@ def _write_benchmark_report(records: list[dict[str, Any]], path: Path, *, protoc
         f"- Passed: {passed}",
         f"- Failed: {len(records) - passed}",
         f"- Protocol: {protocol.get('name', 'ad hoc')}",
+        f"- Run checks: {'passed' if run_checks.get('passed') else 'failed'}",
         f"- Runtime total seconds: {sum(runtimes):.6g}" if runtimes else "- Runtime total seconds:",
         f"- Runtime max seconds: {max(runtimes):.6g}" if runtimes else "- Runtime max seconds:",
         f"- Peak memory max MB: {max(memory_values):.6g}" if memory_values else "- Peak memory max MB:",
         "",
-        "## Results",
+        "## Run checks",
         "",
     ]
+    for reason in run_checks.get("fail_reasons", []):
+        lines.append(f"- FAIL: {reason}")
+    for reason in run_checks.get("pass_reasons", []):
+        lines.append(f"- PASS: {reason}")
+    lines.extend(
+        [
+            "",
+            "## Results",
+            "",
+        ]
+    )
     for record in records:
         lines.append(
             f"- `{record.get('algorithm')}` / `{record.get('case_id')}`: "
@@ -336,6 +432,21 @@ def _write_benchmark_report(records: list[dict[str, Any]], path: Path, *, protoc
             f"reasons={record.get('fail_reasons') or record.get('pass_reasons')}"
         )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _classify_failure(reason: str | None) -> str:
+    text = (reason or "").lower()
+    if any(token in text for token in ("matlab", "dependency", "modulenotfounderror", "importerror", "not installed", "executable")):
+        return "external-dependency"
+    if any(token in text for token in ("pydantic", "validation", "schema", "model", "field required")):
+        return "schema"
+    if any(token in text for token in ("hdf5", "h5py", "file not found", "no such file", "case", "dataset", "path")):
+        return "data"
+    if any(token in text for token in ("nan", "inf", "singular", "overflow", "underflow", "ill-conditioned", "non-finite")):
+        return "numerical"
+    if any(token in text for token in ("converge", "diverge", "residual increased", "line search")):
+        return "convergence"
+    return "unknown"
 
 
 def _peak_memory_mb() -> float:
