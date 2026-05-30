@@ -238,7 +238,7 @@ def _split(paths: list[Path]) -> str:
 
 
 def _roles(path: Path) -> list[str]:
-    text = path.as_posix().lower()
+    text = path.name.lower()
     roles = []
     if any(token in text for token in ("reference", "water", "baseline", "background")):
         roles.append("reference")
@@ -246,7 +246,7 @@ def _roles(path: Path) -> list[str]:
         roles.append("sound_speed")
     if any(token in text for token in ("attenuation", "atten", "alpha")):
         roles.append("attenuation")
-    if any(token in text for token in ("wavefield", "pressure", "rf", "signal", "data")):
+    if any(token in text for token in ("wavefield", "pressure", "rf", "signal", "sinogram", "measurement")):
         roles.append("wavefield")
     if any(token in text for token in ("geometry", "transducer", "probe", "sensor", "receiver")):
         roles.append("geometry")
