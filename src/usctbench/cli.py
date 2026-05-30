@@ -113,12 +113,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "eval":
         result = evaluate_run(args.run, args.protocol)
         print(result["report_md"])
-        return 0
+        return 0 if result["records"] and all(record.get("pass") for record in result["records"]) else 1
 
     if args.command == "bench":
         result = run_benchmark_suite(args.suite)
         print(result["run_root"])
-        return 0
+        return 0 if result["records"] and all(record.get("pass") for record in result["records"]) else 1
 
     parser.error(f"unknown command: {args.command}")
     return 2

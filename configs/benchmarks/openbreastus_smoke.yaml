@@ -7,8 +7,19 @@ algorithms:
     config: configs/algorithms/attenuation_sirt.yaml
 outputs:
   root: ${USCT_RUN_ROOT}
+required_metrics:
+  straight_sart:
+    - data_residual_norm
+    - rmse
+    - water_relative_rmse_improvement
+  attenuation_sirt:
+    - data_residual_norm
 thresholds:
-  rmse: 100.0
-  data_residual_norm: 1.0e-4
+  straight_sart:
+    rmse: 100.0
+    data_residual_norm: 1.0e-4
+  attenuation_sirt:
+    data_residual_norm: 1.0e-4
 minimums:
-  water_relative_rmse_improvement: 0.0
+  straight_sart:
+    water_relative_rmse_improvement: 0.0

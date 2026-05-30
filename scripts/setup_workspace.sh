@@ -12,6 +12,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+if [ -f "$REPO_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$REPO_DIR/.env"
+  set +a
+fi
+
 # If repo is <workspace>/code, workspace is parent.
 # If repo itself is named usct-benchlab, workspace is repo.
 if [ "$(basename "$REPO_DIR")" = "code" ]; then

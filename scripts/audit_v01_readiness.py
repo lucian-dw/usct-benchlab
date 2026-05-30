@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -61,6 +62,7 @@ REQUIRED_FILES = [
     "scripts/bootstrap_a100.sh",
     "scripts/run_smoke.sh",
     "docs/architecture.md",
+    "docs/A100_SERVER_SETUP.md",
     "docs/OPENBREASTUS_DATA_PROTOCOL.md",
     "docs/EVALUATION_ACCEPTANCE_PROTOCOL.md",
     "docs/algorithm_taxonomy.md",
@@ -88,6 +90,8 @@ REQUIRED_TESTS = [
     "tests/test_fwi_gradient_check.py",
     "tests/test_fwi_loss_decrease.py",
     "tests/test_docs_inventory.py",
+    "tests/test_scripts.py",
+    "tests/test_v01_audit.py",
 ]
 
 FORBIDDEN_TRACKED_SUFFIXES = (".h5", ".hdf5", ".mat", ".npy", ".npz", ".pt", ".pth", ".ckpt")
@@ -130,6 +134,7 @@ def _check_registered_algorithms(root: Path, checks: list[dict[str, Any]]) -> No
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=_pythonpath_env(root),
         check=False,
     )
     if proc.returncode != 0:
@@ -205,6 +210,14 @@ def _check_run_dir(run_dir: Path, checks: list[dict[str, Any]]) -> None:
     )
 
 
+def _pythonpath_env(root: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    src = str(root / "src")
+    current = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = src if not current else f"{src}{os.pathsep}{current}"
+    return env
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Audit usct-benchlab v0.1 readiness evidence.")
     parser.add_argument("--root", default=".", help="Repository root.")
@@ -229,4 +242,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

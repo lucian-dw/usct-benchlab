@@ -116,6 +116,8 @@ def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
     suite_name = suite.get("name", suite_file.stem)
     case_glob = _expand(str(suite["case_glob"]))
     cases = sorted(Path(path) for path in glob.glob(case_glob, recursive=True))
+    if not cases and not bool(suite.get("allow_empty", False)):
+        raise ValueError(f"benchmark suite matched no cases: {case_glob}")
     output_root = Path(_expand(str(suite.get("outputs", {}).get("root", "runs/usctbench_runs"))))
     run_id = suite.get("run_id") or f"{suite_name}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     run_root = output_root / run_id
@@ -209,27 +211,65 @@ def _assess_record(
     else:
         pass_reasons.append("required artifacts present")
 
-    thresholds = protocol.get("thresholds", {})
+    algorithm_name = str(record.get("algorithm", ""))
+
+    for key in _required_metrics_for_algorithm(protocol.get("required_metrics", []), algorithm_name):
+        if key not in record or not _is_number(record[key]):
+            fail_reasons.append(f"missing required metric {key}")
+
+    thresholds = _metric_limits_for_algorithm(protocol.get("thresholds", {}), algorithm_name)
     if isinstance(thresholds, dict):
         for key, limit in thresholds.items():
-            if key in record and _is_number(record[key]):
-                value = float(record[key])
-                if value > float(limit):
-                    fail_reasons.append(f"{key}={value:g} exceeds max {float(limit):g}")
-                else:
-                    pass_reasons.append(f"{key}={value:g} <= {float(limit):g}")
+            if key not in record or not _is_number(record[key]):
+                fail_reasons.append(f"missing threshold metric {key}")
+                continue
+            value = float(record[key])
+            if value > float(limit):
+                fail_reasons.append(f"{key}={value:g} exceeds max {float(limit):g}")
+            else:
+                pass_reasons.append(f"{key}={value:g} <= {float(limit):g}")
 
-    minimums = protocol.get("minimums", {})
+    minimums = _metric_limits_for_algorithm(protocol.get("minimums", {}), algorithm_name)
     if isinstance(minimums, dict):
         for key, limit in minimums.items():
-            if key in record and _is_number(record[key]):
-                value = float(record[key])
-                if value < float(limit):
-                    fail_reasons.append(f"{key}={value:g} below min {float(limit):g}")
-                else:
-                    pass_reasons.append(f"{key}={value:g} >= {float(limit):g}")
+            if key not in record or not _is_number(record[key]):
+                fail_reasons.append(f"missing minimum metric {key}")
+                continue
+            value = float(record[key])
+            if value < float(limit):
+                fail_reasons.append(f"{key}={value:g} below min {float(limit):g}")
+            else:
+                pass_reasons.append(f"{key}={value:g} >= {float(limit):g}")
 
     return not fail_reasons, pass_reasons, fail_reasons
+
+
+def _metric_limits_for_algorithm(spec: Any, algorithm_name: str) -> dict[str, Any]:
+    if not isinstance(spec, dict):
+        return {}
+    if any(isinstance(value, dict) for value in spec.values()):
+        limits: dict[str, Any] = {}
+        default_limits = spec.get("default", {})
+        algorithm_limits = spec.get(algorithm_name, {})
+        if isinstance(default_limits, dict):
+            limits.update(default_limits)
+        if isinstance(algorithm_limits, dict):
+            limits.update(algorithm_limits)
+        return limits
+    return spec
+
+
+def _required_metrics_for_algorithm(spec: Any, algorithm_name: str) -> list[str]:
+    if isinstance(spec, list):
+        return [str(item) for item in spec]
+    if not isinstance(spec, dict):
+        return []
+    required: list[str] = []
+    for key in ("default", algorithm_name):
+        values = spec.get(key, [])
+        if isinstance(values, list):
+            required.extend(str(item) for item in values)
+    return sorted(set(required))
 
 
 def _artifact_check(case_dir: Path, record: dict[str, Any]) -> tuple[bool, list[str]]:

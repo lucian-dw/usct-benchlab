@@ -6,6 +6,7 @@ from pathlib import Path
 def test_required_v01_docs_exist():
     required = [
         "docs/architecture.md",
+        "docs/A100_SERVER_SETUP.md",
         "docs/OPENBREASTUS_DATA_PROTOCOL.md",
         "docs/EVALUATION_ACCEPTANCE_PROTOCOL.md",
         "docs/algorithm_taxonomy.md",
@@ -25,4 +26,3 @@ def test_required_v01_docs_exist():
     missing = [path for path in required if not Path(path).exists()]
 
     assert not missing
-

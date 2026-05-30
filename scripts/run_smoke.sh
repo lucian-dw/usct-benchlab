@@ -4,6 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+if [ -f "$REPO_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$REPO_DIR/.env"
+  set +a
+fi
+
 cd "$REPO_DIR"
 
 if [ "$(basename "$REPO_DIR")" = "code" ]; then
@@ -39,6 +46,10 @@ if [ -d "$USCT_SAMPLE_ROOT/cases" ] && find "$USCT_SAMPLE_ROOT/cases" -maxdepth 
   run_root="$(PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli bench --suite "$SMOKE_SUITE" | tail -n 1)"
   echo "SMOKE_RUN_ROOT=$run_root"
   PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" scripts/audit_v01_readiness.py --root "$REPO_DIR" --run-dir "$run_root"
+elif [ "${USCT_REQUIRE_SMOKE_CASES:-0}" = "1" ]; then
+  echo "No HDF5 smoke cases found under $USCT_SAMPLE_ROOT/cases." >&2
+  echo "Set USCT_DATA_ROOT and run: usct data make-smoke --root \"\$USCT_DATA_ROOT\" --out \"\$USCT_SAMPLE_ROOT\"" >&2
+  exit 1
 else
   echo "No HDF5 smoke cases found under $USCT_SAMPLE_ROOT/cases; OpenBreastUS smoke benchmark skipped."
 fi
