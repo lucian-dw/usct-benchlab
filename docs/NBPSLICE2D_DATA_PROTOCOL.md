@@ -73,7 +73,7 @@ The smoke suite covers the local runnable algorithm library flow:
 - `straight_sirt`
 - `straight_cgls`
 - `attenuation_sirt`
-- `fwi_tiny`
+- `fwi_tiny` with `configs/algorithms/fwi_tiny_nbp.yaml`
 
 External MATLAB/k-Wave adapters are intentionally not run by this smoke suite
 unless a matching external result or launch contract is added later.

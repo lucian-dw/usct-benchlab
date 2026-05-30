@@ -10,7 +10,7 @@ algorithms:
   - name: attenuation_sirt
     config: configs/algorithms/attenuation_sirt.yaml
   - name: fwi_tiny
-    config: configs/algorithms/fwi_tiny.yaml
+    config: configs/algorithms/fwi_tiny_nbp.yaml
 outputs:
   root: ${USCT_NBP_RUN_ROOT}
 min_cases: 1

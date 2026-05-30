@@ -92,6 +92,7 @@ REQUIRED_FILES = [
     "configs/benchmarks/openbreastus_mini.yaml",
     "configs/benchmarks/fwi_kwave_adapter_smoke.yaml",
     "configs/benchmarks/nbpslice2d_smoke.yaml",
+    "configs/algorithms/fwi_tiny_nbp.yaml",
 ]
 
 REQUIRED_TESTS = [
