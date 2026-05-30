@@ -71,6 +71,7 @@ REQUIRED_FILES = [
     "scripts/check_server.sh",
     "scripts/bootstrap_a100.sh",
     "scripts/run_smoke.sh",
+    "scripts/run_v01_release_check.sh",
     "docs/architecture.md",
     "docs/A100_SERVER_SETUP.md",
     "docs/OPENBREASTUS_DATA_PROTOCOL.md",
@@ -108,7 +109,15 @@ FORBIDDEN_TRACKED_SUFFIXES = (".h5", ".hdf5", ".mat", ".npy", ".npz", ".pt", ".p
 FORBIDDEN_TRACKED_DIRS = ("data/", "runs/", "checkpoints/", "external/", "third_party/")
 
 
-def audit_repo(root: Path, *, run_dir: Path | None = None, require_clean: bool = False) -> dict[str, Any]:
+def audit_repo(
+    root: Path,
+    *,
+    run_dir: Path | None = None,
+    openbreastus_index: Path | None = None,
+    smoke_manifest: Path | None = None,
+    require_clean: bool = False,
+    require_v01_dod: bool = False,
+) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
 
     _check_files(root, checks, "required_files", REQUIRED_FILES)
@@ -123,6 +132,17 @@ def audit_repo(root: Path, *, run_dir: Path | None = None, require_clean: bool =
         _check_git_clean(root, checks)
     if run_dir is not None:
         _check_run_dir(run_dir, checks)
+    if openbreastus_index is not None:
+        _check_openbreastus_index(openbreastus_index, checks)
+    if smoke_manifest is not None:
+        _check_smoke_manifest(smoke_manifest, checks)
+    if require_v01_dod:
+        _check_v01_dod_evidence(
+            checks,
+            run_dir=run_dir,
+            openbreastus_index=openbreastus_index,
+            smoke_manifest=smoke_manifest,
+        )
 
     passed = all(check["passed"] for check in checks)
     return {"passed": passed, "checks": checks}
@@ -313,6 +333,91 @@ def _check_run_dir(run_dir: Path, checks: list[dict[str, Any]]) -> None:
     )
 
 
+def _check_openbreastus_index(index_path: Path, checks: list[dict[str, Any]]) -> None:
+    if not index_path.exists():
+        checks.append({"name": "openbreastus_index_evidence", "passed": False, "missing": str(index_path)})
+        return
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    summary = index.get("summary", {})
+    cases = index.get("cases", [])
+    checks.append(
+        {
+            "name": "openbreastus_index_evidence",
+            "passed": bool(cases) and int(summary.get("num_cases", 0)) > 0,
+            "path": str(index_path),
+            "num_cases": summary.get("num_cases", 0),
+            "num_files": summary.get("num_files", 0),
+            "warnings": index.get("warnings", []),
+        }
+    )
+
+
+def _check_smoke_manifest(manifest_path: Path, checks: list[dict[str, Any]]) -> None:
+    if not manifest_path.exists():
+        checks.append({"name": "smoke_manifest_evidence", "passed": False, "missing": str(manifest_path)})
+        return
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    converted = manifest.get("converted_cases", [])
+    missing_converted = [record.get("path", "") for record in converted if record.get("path") and not Path(record["path"]).exists()]
+    checks.append(
+        {
+            "name": "smoke_manifest_evidence",
+            "passed": bool(manifest.get("cases")) and bool(converted) and not missing_converted,
+            "path": str(manifest_path),
+            "cases": len(manifest.get("cases", [])),
+            "converted_cases": len(converted),
+            "missing_converted_paths": missing_converted,
+        }
+    )
+
+
+def _check_v01_dod_evidence(
+    checks: list[dict[str, Any]],
+    *,
+    run_dir: Path | None,
+    openbreastus_index: Path | None,
+    smoke_manifest: Path | None,
+) -> None:
+    missing_inputs = []
+    if run_dir is None:
+        missing_inputs.append("--run-dir")
+    if openbreastus_index is None:
+        missing_inputs.append("--openbreastus-index")
+    if smoke_manifest is None:
+        missing_inputs.append("--smoke-manifest")
+    if missing_inputs:
+        checks.append({"name": "v01_dod_evidence", "passed": False, "missing_inputs": missing_inputs})
+        return
+
+    summary = run_dir / "benchmark_summary.csv"
+    if not summary.exists():
+        checks.append({"name": "v01_dod_evidence", "passed": False, "missing": str(summary)})
+        return
+    with summary.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    required_smoke = {"straight_sart", "attenuation_sirt"}
+    passing_smoke = {
+        row.get("algorithm")
+        for row in rows
+        if row.get("algorithm") in required_smoke
+        and row.get("status") == "success"
+        and row.get("pass") == "True"
+    }
+    missing_smoke = sorted(required_smoke - passing_smoke)
+    checks.append(
+        {
+            "name": "v01_dod_evidence",
+            "passed": not missing_smoke,
+            "required_smoke_algorithms": sorted(required_smoke),
+            "passing_smoke_algorithms": sorted(passing_smoke),
+            "missing_smoke_algorithms": missing_smoke,
+            "run_dir": str(run_dir),
+            "openbreastus_index": str(openbreastus_index),
+            "smoke_manifest": str(smoke_manifest),
+        }
+    )
+
+
 def _pythonpath_env(root: Path) -> dict[str, str]:
     env = os.environ.copy()
     src = str(root / "src")
@@ -325,14 +430,20 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Audit usct-benchlab v0.1 readiness evidence.")
     parser.add_argument("--root", default=".", help="Repository root.")
     parser.add_argument("--run-dir", default=None, help="Optional benchmark run directory to audit.")
+    parser.add_argument("--openbreastus-index", default=None, help="Optional OpenBreastUS index JSON evidence path.")
+    parser.add_argument("--smoke-manifest", default=None, help="Optional OpenBreastUS smoke manifest JSON evidence path.")
     parser.add_argument("--require-clean", action="store_true", help="Fail if git status is dirty.")
+    parser.add_argument("--require-v01-dod", action="store_true", help="Require explicit v0.1 Definition-of-Done evidence paths and smoke records.")
     parser.add_argument("--json", action="store_true", help="Print full JSON output.")
     args = parser.parse_args(argv)
 
     result = audit_repo(
         Path(args.root).resolve(),
         run_dir=Path(args.run_dir).resolve() if args.run_dir else None,
+        openbreastus_index=Path(args.openbreastus_index).resolve() if args.openbreastus_index else None,
+        smoke_manifest=Path(args.smoke_manifest).resolve() if args.smoke_manifest else None,
         require_clean=args.require_clean,
+        require_v01_dod=args.require_v01_dod,
     )
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))

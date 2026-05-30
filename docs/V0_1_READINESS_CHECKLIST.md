@@ -39,6 +39,16 @@ To include benchmark evidence from A100:
 python scripts/audit_v01_readiness.py --root . --run-dir "$USCT_RUN_ROOT/<run_id>"
 ```
 
+The full v0.1 evidence chain can be run on A100 with:
+
+```bash
+PYTHON_BIN=/home/wudalong/miniconda3/bin/python bash scripts/run_v01_release_check.sh
+```
+
+This script runs `pytest`, `inspect-openbreastus`, `make-smoke`, the smoke
+benchmark suite, and `audit_v01_readiness.py --require-v01-dod` with explicit
+OpenBreastUS index, smoke manifest, and run-directory evidence.
+
 Use `--require-clean` only when intentionally auditing a clean release checkout; Codex working threads may have user-owned unstaged instruction edits.
 
 `scripts/run_smoke.sh` runs `pytest` everywhere. When `$USCT_SAMPLE_ROOT/cases/*.h5` exists, it also runs `configs/benchmarks/openbreastus_smoke.yaml` and audits the generated run directory.
