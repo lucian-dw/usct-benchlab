@@ -26,3 +26,12 @@ usct bench --suite configs/benchmarks/openbreastus_smoke.yaml
 Large datasets, generated runs, external repositories, and checkpoints belong outside Git under the workspace-level `data/`, `runs/`, `external/`, and `checkpoints/` directories.
 
 The OpenBreastUS inspector is intentionally schema-first: it writes an index and schema report from the local tree before any loader assumes case layout or filenames. For speed-map-only MATLAB v7.3 mirrors such as `breast_train_speed.mat`, `make-smoke` writes downsampled standard `USCTCase` HDF5 files under `$USCT_SAMPLE_ROOT/cases/` and records the surrogate straight-ray feature assumptions in metadata.
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [OpenBreastUS data protocol](docs/OPENBREASTUS_DATA_PROTOCOL.md)
+- [Evaluation acceptance protocol](docs/EVALUATION_ACCEPTANCE_PROTOCOL.md)
+- [Algorithm taxonomy](docs/algorithm_taxonomy.md)
+- [External sources and licenses](docs/EXTERNAL_SOURCES_AND_LICENSES.md)
+- [v0.1 readiness checklist](docs/V0_1_READINESS_CHECKLIST.md)
