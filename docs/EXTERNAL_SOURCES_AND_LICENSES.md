@@ -19,6 +19,20 @@ External USCT code must remain outside Git unless deliberately vendored after li
 | Waveform inversion references | `rehmanali1994/WaveformInversionUST` and A100 `$HOME/USCT_kwave` derivative scripts | external clone only |
 | Numerical breast phantoms | NBPslices2D archive from Illinois Data Bank / A100 `$HOME/USCT_kwave` mirror | data outside Git only |
 
+The refraction-corrected GN reference paper describes slowness reconstruction
+as nonlinear least squares over travel times, solved by Gauss-Newton and
+conjugate gradients, with Laplacian regularization, Bayesian formulation, and
+resolution-filling gradients as stabilization options. The native
+`bent_ray_gn` backend currently implements the project-standard travel-time
+surrogate with Laplacian regularization and smoothing; the external MATLAB
+repository remains the reference for a fuller refraction-corrected path.
+
+The r-Wave reference data package points to the GitHub project branch/folder
+`r-Wave #V1.1` and describes k-Wave-simulated transmission data for validating
+ray approximations to Green's functions. The native `rwave_adapter` backend is
+therefore treated as a benchmark-compatible ray-Born surrogate, not as a claim
+that the full external MATLAB workflow has been vendored.
+
 ## Current Repository State
 
 The current repository contains native Python baselines plus optional adapter paths. It does not vendor external MATLAB packages or full third-party repositories.

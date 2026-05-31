@@ -13,7 +13,10 @@ This checklist records current evidence. It is not a claim that v0.1 is complete
 | `attenuation_sirt` smoke run | A100 smoke benchmark writes standard artifacts and passes thresholds using simulated nonzero attenuation evidence from a k-Wave channel MAT file | Passing with simulated-data limitation |
 | Tiny FWI gradient check | `test_fwi_gradient_check.py` | Passing synthetic-only |
 | Tiny FWI loss decrease | `test_fwi_loss_decrease.py` | Passing synthetic-only |
-| MATLAB/r-Wave adapter callable or skipped clearly | adapter tests and readiness audit verify `skipped`, external-dependency failure report, and adapter skip metadata | Passing skip path |
+| Bent-ray native backend | OpenBreastUS and NBPslice2D smoke/quality runs write standard metrics and previews; optional MATLAB path still skips clearly when requested | Passing native v0.1 path |
+| r-Wave native backend | OpenBreastUS and NBPslice2D smoke/quality runs write standard metrics and previews; optional MATLAB path still skips clearly when requested | Passing native v0.1 path |
+| k-Wave FWI adapter | A100 `fwi_kwave_full_pipeline_success201_dense` and re-ingest evidence show external result loading, GT/native metrics, and visual artifacts | Passing one-case A100 smoke |
+| MATLAB adapter dependency path | adapter tests and readiness audit verify `skipped`, external-dependency failure report, and adapter skip metadata when MATLAB backend is requested and unavailable | Passing skip path |
 | Benchmark reports generated automatically | `usct bench` writes CSV and Markdown with reasons/runtime/memory | Passing |
 | Algorithm cards exist for registered algorithms | cards under `docs/algorithm_cards/` | Passing |
 | No data/run/checkpoint outputs committed | `.gitignore` plus current branch status | Passing in current commits |
@@ -22,8 +25,13 @@ This checklist records current evidence. It is not a claim that v0.1 is complete
 
 - The configured A100 data root includes a local symlink to a k-Wave simulation MAT file so attenuation smoke has nonzero simulated attenuation evidence. It is not raw measured OpenBreastUS RF data.
 - The speed-map-only `breast_train_speed.mat` path remains supported, but zero `log_amp` surrogate cases no longer count as valid attenuation DoD evidence.
-- MATLAB adapters do not yet marshal `USCTCase` into external package input formats.
-- `fwi_tiny` is synthetic proof-of-life only and is not production FWI.
+- MATLAB adapters do not yet marshal `USCTCase` into the public external package
+  input formats. The default `bent_ray_gn` and `rwave_adapter` paths are native
+  benchmark backends that preserve the same I/O and metrics.
+- `fwi_tiny` is synthetic proof-of-life only. Production-like FWI evidence is
+  currently the A100 k-Wave adapter path, not `fwi_tiny`.
+- k-Wave FWI has one validated OpenBreastUS test201 smoke case. It is not yet a
+  broad multi-case benchmark.
 
 ## Audit Command
 
@@ -72,3 +80,18 @@ passed=2
 Use `--require-clean` only when intentionally auditing a clean release checkout; Codex working threads may have user-owned unstaged instruction edits.
 
 `scripts/run_smoke.sh` runs `pytest` everywhere. When `$USCT_SAMPLE_ROOT/cases/*.h5` exists, it also runs `configs/benchmarks/openbreastus_smoke.yaml` and audits the generated run directory.
+
+## Current Traditional/FWI Evidence Paths
+
+Representative A100 evidence from the current branch:
+
+- OpenBreastUS 4-class 256 quality:
+  `/home/wudalong/usct-benchlab/runs/usctbench_runs/openbreastus_quality_20260531T164948Z`
+- NBPslice2D 4-class 256 quality:
+  `/home/wudalong/usct-benchlab/runs/usctbench_runs/nbpslice2d_quality_20260531T162341Z`
+- k-Wave FWI successful full-pipeline result:
+  `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_full_pipeline_success201_dense`
+- k-Wave FWI re-ingest with corrected acceptance metrics:
+  `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_success201_reingest_63ec1e5`
+- Single-case cross-algorithm visual comparison:
+  `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_cross_algorithm_63ec1e5/comparison_artifacts/fwi_case_test201_cross_algorithm_horizontal_gray.png`

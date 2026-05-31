@@ -73,11 +73,54 @@ Sound-speed algorithms should report:
 - coverage nonzero fraction, valid ray fraction, row/column norm ranges, ring artifact index, and coverage/error correlation for straight-ray algorithms;
 - runtime and peak memory.
 
+Straight-ray, Bent-ray, and r-Wave quality protocols use the same standard
+image and forward-model residual fields:
+
+- `rmse`, `mae`, `nrmse`, `psnr`, `ssim`;
+- `data_residual_norm`, `data_relative_residual`, and
+  `data_residual_reduction`;
+- `water_relative_rmse_improvement`;
+- `coverage_nonzero_fraction`, `valid_ray_fraction`, and
+  `ring_artifact_index`.
+
+`bent_ray_gn` and `rwave_adapter` are runnable native v0.1 baselines by
+default. Their MATLAB paths are optional dependency checks and may return
+`skipped` only when the protocol explicitly exercises the external backend.
+
 Attenuation algorithms should report:
 
 - attenuation RMSE, MAE, NRMSE on synthetic or labeled cases;
 - data residual norm;
 - runtime and peak memory.
+
+## k-Wave FWI Metrics
+
+`fwi_kwave_adapter` has two distinct protocol roles:
+
+- `fwi_kwave_adapter_smoke` is an ingestion smoke test. It verifies an existing
+  MATLAB/k-Wave result can be loaded into the standard artifact layout. It must
+  not use `loss_decreased`, water-baseline improvement, or wrapper-case RMSE as
+  quality gates.
+- `fwi_kwave_full_pipeline_smoke` is the A100 quality smoke path. It requires
+  the external result to be loaded, records selected/final/best iteration
+  diagnostics, and judges FWI against the external k-Wave ground truth and
+  native scalar metrics.
+
+FWI quality acceptance should use:
+
+- `kwave_gt_rmse` and `kwave_gt_ssim`;
+- `kwave_gt_init_rmse`;
+- `kwave_gt_final_relative_rmse_improvement`;
+- `kwave_native_psnr` and `kwave_native_ssim`;
+- `final_iteration_rmse` as a final-iteration guard.
+
+Generic wrapper metrics (`rmse`, `ssim`, `water_relative_rmse_improvement`) are
+still written for common CSV and image-panel tooling, but they are diagnostic
+for k-Wave FWI. They must not be treated as the primary pass/fail evidence.
+
+`LOSS_ITER` is also diagnostic. A useful FWI schedule can have nonmonotonic
+waveform loss, so `loss_decreased` is not a valid full-pipeline acceptance
+gate.
 
 ## Reports
 

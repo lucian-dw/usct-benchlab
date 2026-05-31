@@ -53,6 +53,22 @@ def test_fwi_kwave_adapter_smoke_script_runs_adapter_flow():
     assert "USCT_KWAVE_FWI_RESULT_PATH" in text
 
 
+def test_fwi_kwave_adapter_smoke_protocol_is_ingestion_only():
+    import yaml
+
+    protocol = yaml.safe_load(Path("configs/benchmarks/fwi_kwave_adapter_smoke.yaml").read_text(encoding="utf-8"))
+    required = protocol["required_metrics"]["fwi_kwave_adapter"]
+
+    assert "external_result_loaded" in required
+    assert "selected_iteration" in required
+    assert "selected_loss" in required
+    assert "kwave_native_psnr" in required
+    assert "kwave_native_ssim" in required
+    assert "loss_decreased" not in required
+    assert "loss_decreased" not in protocol["minimums"]["fwi_kwave_adapter"]
+    assert "water_relative_rmse_improvement" not in required
+
+
 def test_fwi_kwave_full_pipeline_smoke_script_runs_speed_map_flow():
     text = Path("scripts/run_fwi_kwave_full_pipeline_smoke.sh").read_text(encoding="utf-8")
 

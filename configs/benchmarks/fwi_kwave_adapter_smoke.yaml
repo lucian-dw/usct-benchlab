@@ -8,14 +8,17 @@ expected_statuses:
 required_metrics:
   fwi_kwave_adapter:
     - external_result_loaded
+    - selected_iteration
+    - selected_loss
     - initial_loss
     - final_loss
-    - loss_decreased
     - iterations
+    - kwave_native_psnr
+    - kwave_native_ssim
 thresholds:
   fwi_kwave_adapter:
     final_loss: 1.0e-6
 minimums:
   fwi_kwave_adapter:
-    loss_decreased: 1
+    external_result_loaded: 1
     iterations: 1
