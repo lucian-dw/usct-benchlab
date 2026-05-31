@@ -12,7 +12,9 @@ This adapter targets refraction-corrected travel-time tomography. In v0.1 the de
 - When the optional MATLAB path is configured and available, the adapter writes
   a MATLAB-readable HDF5 `.mat` input file containing `USCTCase` grid,
   geometry, measurement, ground-truth, mask, and metadata fields under the case
-  run directory before reporting the external execution/output-ingest boundary.
+  run directory. The configured entrypoint receives `usctbench_input_mat`,
+  `usctbench_output_mat`, and `usctbench_output_dir` MATLAB variables and must
+  write a standard adapter output MAT file to be ingested.
 
 ## Default Settings
 
@@ -44,8 +46,10 @@ This adapter targets refraction-corrected travel-time tomography. In v0.1 the de
 - Adapter is registered by `usct list-algorithms`.
 - Native backend returns `success` with standard `sound_speed_mps`, image metrics, residual metrics, coverage metrics, and preview artifacts.
 - Missing MATLAB or missing entrypoint returns `skipped`, not a crash, when the MATLAB backend is explicitly requested.
-- Configured MATLAB entrypoints get an `adapter_input_mat` artifact before the
-  current external execution/output-ingest skip.
+- Configured MATLAB entrypoints get `adapter_input_mat`, `adapter_output_mat`,
+  `matlab_log`, and `external_entrypoint` artifacts.
+- Standard adapter output MAT files are ingested into `ReconstructionResult`
+  with `external_adapter_output_loaded=true`.
 - A failure report is written by the CLI for skipped runs.
 
 ## References and Related Code

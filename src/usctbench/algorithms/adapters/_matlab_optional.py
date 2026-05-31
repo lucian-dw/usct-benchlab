@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from usctbench.adapters.matlab import MatlabAdapter, MatlabUnavailable, write_usct_case_mat
+from usctbench.adapters.matlab import MatlabAdapter, MatlabUnavailable, read_matlab_adapter_result, write_usct_case_mat
 from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
 
 
@@ -75,25 +75,51 @@ def run_matlab_placeholder(
         return skipped_matlab_adapter(algorithm, case, f"{missing_entrypoint_prefix}: {entry_path}")
 
     input_path = _adapter_input_path(params, adapter.work_dir, algorithm, case)
+    output_path = _adapter_output_path(params, adapter.work_dir, algorithm, case)
     write_usct_case_mat(case, input_path)
     code = (
         f"addpath(genpath('{_matlab_string(external_root_path)}')); "
         f"usctbench_input_mat='{_matlab_string(input_path)}'; "
+        f"usctbench_output_mat='{_matlab_string(output_path)}'; "
         f"usctbench_output_dir='{_matlab_string(adapter.work_dir)}'; "
-        f"disp('{_matlab_string(configured_message)}');"
+        f"disp('{_matlab_string(configured_message)}'); "
+        f"{_entrypoint_call(params, entry_path)}"
     )
     try:
         log_path = adapter.run_batch(code, log_name=log_name, timeout_s=int(params.get("timeout_s", 300)))
     except MatlabUnavailable as exc:
         return skipped_matlab_adapter(algorithm, case, str(exc))
 
-    return ReconstructionResult(
-        algorithm=algorithm,
-        case_id=case.case_id,
-        status=ResultStatus.SKIPPED,
-        failure_reason=unimplemented_reason,
-        artifacts={"adapter_input_mat": str(input_path), "matlab_log": str(log_path), "external_entrypoint": str(entry_path)},
-    )
+    artifacts = {
+        "adapter_input_mat": str(input_path),
+        "adapter_output_mat": str(output_path),
+        "matlab_log": str(log_path),
+        "external_entrypoint": str(entry_path),
+    }
+    if not output_path.exists():
+        return ReconstructionResult(
+            algorithm=algorithm,
+            case_id=case.case_id,
+            status=ResultStatus.SKIPPED,
+            failure_reason=unimplemented_reason,
+            artifacts=artifacts,
+            metrics={"adapter_dependency_available": True, "external_adapter_output_loaded": False},
+        )
+    try:
+        result = read_matlab_adapter_result(output_path, algorithm=algorithm, case_id=case.case_id)
+    except Exception as exc:
+        return ReconstructionResult(
+            algorithm=algorithm,
+            case_id=case.case_id,
+            status=ResultStatus.FAILED,
+            failure_reason=f"failed to read MATLAB adapter output: {type(exc).__name__}: {exc}",
+            artifacts=artifacts,
+            metrics={"adapter_dependency_available": True, "external_adapter_output_loaded": False},
+        )
+    result.artifacts.update(artifacts)
+    result.metrics.setdefault("adapter_dependency_available", True)
+    result.metrics["external_adapter_output_loaded"] = True
+    return result
 
 
 def skipped_matlab_adapter(algorithm: str, case: USCTCase, reason: str) -> ReconstructionResult:
@@ -116,6 +142,20 @@ def _adapter_input_path(params: dict, work_dir: Path, algorithm: str, case: USCT
     if configured:
         return Path(str(configured)).expanduser()
     return work_dir / f"{_safe_stem(algorithm)}_{_safe_stem(case.case_id)}_input.mat"
+
+
+def _adapter_output_path(params: dict, work_dir: Path, algorithm: str, case: USCTCase) -> Path:
+    configured = params.get("adapter_output_path") or params.get("output_mat_path")
+    if configured:
+        return Path(str(configured)).expanduser()
+    return work_dir / f"{_safe_stem(algorithm)}_{_safe_stem(case.case_id)}_output.mat"
+
+
+def _entrypoint_call(params: dict, entry_path: Path) -> str:
+    configured = params.get("entrypoint_call")
+    if configured:
+        return str(configured)
+    return f"run('{_matlab_string(entry_path)}');"
 
 
 def _safe_stem(value: str) -> str:

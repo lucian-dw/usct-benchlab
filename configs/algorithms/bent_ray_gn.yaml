@@ -17,4 +17,4 @@ parameters:
 metadata:
   default_backend: project-native regularized travel-time GN surrogate.
   external_reference: rehmanali1994/refractionCorrectedUSCT.github.io
-  v0_1_scope: smoke/quality benchmark path; MATLAB-readable input export is available, while full external execution/output ingest remains optional.
+  v0_1_scope: smoke/quality benchmark path; optional MATLAB entrypoints use standard input/output MAT artifacts.

@@ -26,10 +26,11 @@ This checklist records current evidence. It is not a claim that v0.1 is complete
 - The configured A100 data root includes a local symlink to a k-Wave simulation MAT file so attenuation smoke has nonzero simulated attenuation evidence. It is not raw measured OpenBreastUS RF data.
 - The speed-map-only `breast_train_speed.mat` path remains supported, but zero `log_amp` surrogate cases no longer count as valid attenuation DoD evidence.
 - MATLAB adapters now export a standard MATLAB-readable `USCTCase` input MAT
-  file for external entrypoints, but do not yet execute those public entrypoints
-  end-to-end or ingest their outputs. The default `bent_ray_gn` and
-  `rwave_adapter` paths are native benchmark backends that preserve the same
-  I/O and metrics.
+  file, execute configured entrypoints with `usctbench_input_mat` and
+  `usctbench_output_mat` variables, and ingest standard adapter output MAT
+  files. The default `bent_ray_gn` and `rwave_adapter` paths remain native
+  benchmark backends; public-package-specific entrypoint scripts still need to
+  be authored outside Git for full end-to-end external runs.
 - `fwi_tiny` is synthetic proof-of-life only. Production-like FWI evidence is
   currently the A100 k-Wave adapter path, not `fwi_tiny`.
 - k-Wave FWI has one validated OpenBreastUS test201 smoke case. It is not yet a

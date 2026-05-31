@@ -4,14 +4,14 @@ from pathlib import Path
 
 import yaml
 
-from usctbench.adapters.matlab import write_usct_case_mat
+from usctbench.adapters.matlab import read_matlab_adapter_result, write_matlab_adapter_result, write_usct_case_mat
 from usctbench.algorithms.adapters._matlab_optional import requests_matlab_backend
 from usctbench.algorithms.adapters.refraction_gn import BentRayGNAdapter
 from usctbench.algorithms.adapters.rwave import RWaveAdapter
 from usctbench.cli import main
 from usctbench.data.synthetic import make_sound_speed_case
 from usctbench.io.hdf5 import write_case_hdf5
-from usctbench.schema import AlgorithmConfig
+from usctbench.schema import AlgorithmConfig, ReconstructionResult
 
 
 def test_adapter_native_backends_reconstruct_sound_speed():
@@ -79,6 +79,8 @@ def test_matlab_adapter_exports_input_before_external_execution_skip(tmp_path, m
 
         def run_batch(self, code, *, log_name="matlab.log", timeout_s=None):
             assert "usctbench_input_mat" in code
+            assert "usctbench_output_mat" in code
+            assert "run_refraction.m" in code
             log_path = self.work_dir / log_name
             log_path.write_text(code, encoding="utf-8")
             return log_path
@@ -107,13 +109,85 @@ def test_matlab_adapter_exports_input_before_external_execution_skip(tmp_path, m
     )
 
     assert result.status == "skipped"
-    assert "adapter input was exported" in result.failure_reason
-    assert "output ingest is not implemented yet" in result.failure_reason
+    assert "did not write usctbench_output_mat" in result.failure_reason
     assert result.artifacts["external_entrypoint"].endswith("run_refraction.m")
     input_path = result.artifacts["adapter_input_mat"]
+    output_path = result.artifacts["adapter_output_mat"]
     assert input_path.endswith("_input.mat")
+    assert output_path.endswith("_output.mat")
     assert (tmp_path / "case_run" / "bent_ray_gn_matlab.log").exists()
     assert Path(input_path).exists()
+
+
+def test_matlab_adapter_ingests_standard_external_output(tmp_path, monkeypatch):
+    output_path = tmp_path / "case_run" / "adapter_output.mat"
+
+    class FakeMatlabAdapter:
+        def __init__(self, work_dir):
+            self.work_dir = work_dir
+
+        def run_batch(self, code, *, log_name="matlab.log", timeout_s=None):
+            log_path = self.work_dir / log_name
+            log_path.write_text(code, encoding="utf-8")
+            write_matlab_adapter_result(
+                ReconstructionResult(
+                    algorithm="rwave_adapter",
+                    case_id="synthetic_circular_sos",
+                    sound_speed_mps=make_sound_speed_case(shape=(8, 8), n_transducers=10).ground_truth.sound_speed_mps,
+                    metrics={"external_metric": 1.25},
+                    artifacts={"external_artifact": "ok"},
+                ),
+                output_path,
+            )
+            return log_path
+
+    def fake_from_config(*, matlab_bin=None, work_dir=None):
+        work_dir = tmp_path / "work" if work_dir is None else Path(work_dir)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        return FakeMatlabAdapter(work_dir)
+
+    external_root = tmp_path / "external"
+    external_root.mkdir()
+    (external_root / "run_rwave.m").write_text("% placeholder", encoding="utf-8")
+    monkeypatch.setattr("usctbench.algorithms.adapters._matlab_optional.MatlabAdapter.from_config", fake_from_config)
+
+    case = make_sound_speed_case(shape=(8, 8), n_transducers=10)
+    result = RWaveAdapter().run(
+        case,
+        AlgorithmConfig(
+            parameters={
+                "backend": "matlab",
+                "external_root": str(external_root),
+                "entrypoint": "run_rwave.m",
+                "_run_output_dir": str(tmp_path / "case_run"),
+                "adapter_output_path": str(output_path),
+            }
+        ),
+    )
+
+    assert result.status == "success"
+    assert result.sound_speed_mps.shape == case.grid.shape
+    assert result.metrics["external_metric"] == 1.25
+    assert result.metrics["external_adapter_output_loaded"] is True
+    assert result.artifacts["external_artifact"] == "ok"
+    assert result.artifacts["adapter_output_mat"] == str(output_path)
+
+
+def test_matlab_adapter_result_roundtrip(tmp_path):
+    result = ReconstructionResult(
+        algorithm="bent_ray_gn",
+        case_id="case_a",
+        sound_speed_mps=make_sound_speed_case(shape=(6, 6), n_transducers=8).ground_truth.sound_speed_mps,
+        metrics={"rmse": 2.0},
+    )
+    path = write_matlab_adapter_result(result, tmp_path / "out.mat")
+
+    loaded = read_matlab_adapter_result(path, algorithm="fallback", case_id="fallback_case")
+
+    assert loaded.algorithm == "bent_ray_gn"
+    assert loaded.case_id == "case_a"
+    assert loaded.metrics["rmse"] == 2.0
+    assert loaded.sound_speed_mps.shape == (6, 6)
 
 
 def test_cli_adapter_skip_writes_failure_report(tmp_path):

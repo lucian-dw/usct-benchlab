@@ -27,7 +27,7 @@ class RWaveAdapter:
             missing_entrypoint_prefix="r-Wave entrypoint not found",
             configured_message="USCT rwave_adapter configured",
             log_name="rwave_matlab.log",
-            unimplemented_reason="External r-Wave entrypoint is configured and adapter input was exported, but entrypoint execution/output ingest is not implemented yet.",
+            unimplemented_reason="External r-Wave entrypoint completed but did not write usctbench_output_mat; configure it to write the standard adapter output file.",
         )
 
 
