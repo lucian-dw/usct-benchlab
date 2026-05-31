@@ -24,6 +24,9 @@ c0 = usctbench_json_number(usctbench_parameters_json, 'reference_sound_speed_mps
 bounds = usctbench_json_vector(usctbench_parameters_json, 'sound_speed_bounds_mps', [1300.0, 1700.0]);
 lambda = usctbench_json_number(usctbench_parameters_json, 'regularization_lambda', 3.0e-5);
 num_cg = usctbench_json_number(usctbench_parameters_json, 'inner_iterations', 30);
+outer_iterations = usctbench_json_number(usctbench_parameters_json, 'outer_iterations', 4);
+step_length = usctbench_json_number(usctbench_parameters_json, 'step_length', 1.0);
+smooth_sigma = usctbench_json_number(usctbench_parameters_json, 'smooth_sigma', 0.6);
 
 target = double(case_data.measurement.delta_tof_s(:));
 valid_mask = case_data.measurement.valid_mask;
@@ -38,10 +41,20 @@ L = usctbench_laplacian_operator(nx, ny);
 A = H(valid, :);
 b = target(valid);
 normal_matrix = A' * A + (lambda ^ 2) * (L' * L);
-rhs = A' * b;
-delta_slowness = pcg(normal_matrix, rhs, 1e-8, max(1, round(num_cg)));
-if isempty(delta_slowness)
-    delta_slowness = normal_matrix \ rhs;
+delta_slowness = zeros(nx * ny, 1);
+for iter = 1:max(1, round(outer_iterations))
+    residual = b - A * delta_slowness;
+    rhs = A' * residual;
+    update = pcg(normal_matrix, rhs, 1e-8, max(1, round(num_cg)));
+    if isempty(update)
+        update = normal_matrix \ rhs;
+    end
+    delta_slowness = delta_slowness + step_length * update;
+    if smooth_sigma > 0
+        delta_slowness = reshape(usctbench_smooth2(reshape(delta_slowness, [ny, nx]), smooth_sigma), [], 1);
+    end
+    slowness_iter = min(max((1 / c0) + reshape(delta_slowness, [ny, nx]), 1 / bounds(2)), 1 / bounds(1));
+    delta_slowness = reshape(slowness_iter - (1 / c0), [], 1);
 end
 
 slowness = reshape((1 / c0) + delta_slowness, [ny, nx]);
@@ -51,7 +64,9 @@ sound_speed = 1 ./ slowness;
 metrics = sprintf(['{"external_entrypoint":"refraction_corrected_usct_entrypoint",' ...
     '"external_reference":"rehmanali1994/refractionCorrectedUSCT.github.io",' ...
     '"method_family":"external_refraction_corrected_travel_time_gn",' ...
-    '"regularization":"laplacian","regularization_lambda":%.17g}'], lambda);
+    '"regularization":"laplacian","regularization_lambda":%.17g,' ...
+    '"outer_iterations":%.17g,"inner_iterations":%.17g,' ...
+    '"smooth_sigma":%.17g}'], lambda, outer_iterations, num_cg, smooth_sigma);
 usctbench_write_result(usctbench_output_mat, 'bent_ray_gn', case_data.case_id, sound_speed, metrics);
 
 function H = usctbench_build_straight_ray_matrix(case_data, nx, ny)
@@ -106,6 +121,14 @@ L = L + sparse(center, left, 1, nx * ny, nx * ny);
 L = L + sparse(center, right, 1, nx * ny, nx * ny);
 L = L + sparse(center, up, 1, nx * ny, nx * ny);
 L = L + sparse(center, down, 1, nx * ny, nx * ny);
+end
+
+function out = usctbench_smooth2(image, sigma)
+radius = max(1, ceil(3 * sigma));
+x = -radius:radius;
+kernel = exp(-(x .^ 2) / (2 * sigma ^ 2));
+kernel = kernel / sum(kernel);
+out = conv2(conv2(image, kernel, 'same'), kernel.', 'same');
 end
 
 function value = usctbench_json_number(json_text, key, default_value)
