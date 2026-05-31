@@ -75,6 +75,7 @@ REQUIRED_FILES = [
     "scripts/bootstrap_a100.sh",
     "scripts/run_smoke.sh",
     "scripts/run_v01_release_check.sh",
+    "scripts/run_openbreastus_smoke.sh",
     "scripts/run_fwi_kwave_adapter_smoke.sh",
     "scripts/run_fwi_kwave_full_pipeline_smoke.sh",
     "scripts/run_nbpslice2d_smoke.sh",

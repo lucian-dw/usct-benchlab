@@ -92,6 +92,12 @@ Use `--require-clean` only when intentionally auditing a clean release checkout;
 
 `scripts/run_smoke.sh` runs `pytest` everywhere. When `$USCT_SAMPLE_ROOT/cases/*.h5` exists, it also runs `configs/benchmarks/openbreastus_smoke.yaml` and audits the generated run directory.
 
+`scripts/run_openbreastus_smoke.sh` is the explicit A100 OpenBreastUS smoke
+entrypoint when the sample set has not yet been generated. It inspects the data
+root, creates 64x64 smoke cases, runs `straight_sart`, `bent_ray_gn`,
+`rwave_adapter`, and `attenuation_sirt`, then renders a grayscale sound-speed
+comparison panel for the three sound-speed algorithms.
+
 ## Current Traditional/FWI Evidence Paths
 
 Representative A100 evidence from the current branch:

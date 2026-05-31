@@ -78,6 +78,12 @@ plus traditional sound-speed algorithms only. Use
 `scripts/render_class_comparison_panels.py` for reproducible class-comparison
 figures.
 
+The convenience script `scripts/run_openbreastus_smoke.sh` runs inspection,
+64x64 smoke conversion, `configs/benchmarks/openbreastus_smoke.yaml`, and a
+grayscale GT+`straight_sart`+`bent_ray_gn`+`rwave_adapter` panel under
+`<run_root>/comparison_artifacts/openbreastus_smoke_64_sound_speed_gray.png`
+with adjacent `.summary.csv` and `.manifest.json` files.
+
 ## 256x256 Quality Comparison
 
 Use 256x256 converted cases for visual quality comparison:

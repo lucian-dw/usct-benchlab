@@ -21,6 +21,7 @@ def test_shell_scripts_source_local_env():
         Path("scripts/bootstrap_a100.sh"),
         Path("scripts/run_smoke.sh"),
         Path("scripts/run_v01_release_check.sh"),
+        Path("scripts/run_openbreastus_smoke.sh"),
         Path("scripts/run_fwi_kwave_adapter_smoke.sh"),
         Path("scripts/run_fwi_kwave_full_pipeline_smoke.sh"),
         Path("scripts/run_nbpslice2d_smoke.sh"),
@@ -44,6 +45,21 @@ def test_v01_release_check_runs_full_evidence_chain():
     assert "--smoke-manifest" in text
     assert "bench_status=$?" in text
     assert "audit_status=$?" in text
+
+
+def test_openbreastus_smoke_script_builds_64_smoke_and_panel():
+    text = Path("scripts/run_openbreastus_smoke.sh").read_text(encoding="utf-8")
+
+    assert "inspect-openbreastus" in text
+    assert "make-smoke" in text
+    assert "USCT_SMOKE_CONVERTED_SHAPE:-64" in text
+    assert "USCT_SMOKE_N_TRANSDUCERS:-32" in text
+    assert "configs/benchmarks/openbreastus_smoke.yaml" in text
+    assert "render_class_comparison_panels.py" in text
+    assert "straight_sart bent_ray_gn rwave_adapter" in text
+    assert "openbreastus_smoke_${USCT_SMOKE_CONVERTED_SHAPE}_sound_speed_gray.png" in text
+    assert "--cmap gray" in text
+    assert "--transpose" in text
 
 
 def test_fwi_kwave_adapter_smoke_script_runs_adapter_flow():
