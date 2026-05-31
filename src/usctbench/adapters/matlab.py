@@ -141,6 +141,22 @@ def write_matlab_adapter_result(result: ReconstructionResult, path: str | Path) 
     return out
 
 
+def write_matlab_adapter_contract(directory: str | Path) -> Path:
+    """Write first-party MATLAB helper functions for external adapters.
+
+    The helper files are copied into the per-run work directory before MATLAB
+    starts. External entrypoints can then call `usctbench_read_case` and
+    `usctbench_write_result` without vendoring project Python code or
+    re-implementing the HDF5 schema.
+    """
+
+    out_dir = Path(directory).expanduser()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "usctbench_read_case.m").write_text(_MATLAB_READ_CASE, encoding="utf-8")
+    (out_dir / "usctbench_write_result.m").write_text(_MATLAB_WRITE_RESULT, encoding="utf-8")
+    return out_dir
+
+
 def read_matlab_adapter_result(path: str | Path, *, algorithm: str, case_id: str) -> ReconstructionResult:
     """Read a MATLAB-adapter output MAT/HDF5 file as `ReconstructionResult`."""
 
@@ -211,3 +227,75 @@ def _json_default(value: Any) -> Any:
     if isinstance(value, np.bool_):
         return bool(value)
     raise TypeError(f"object of type {type(value).__name__} is not JSON serializable")
+
+
+_MATLAB_READ_CASE = """function case_data = usctbench_read_case(input_mat)
+case_data = struct();
+case_data.case_id = h5readatt(input_mat, '/', 'case_id');
+case_data.metadata_json = h5readatt(input_mat, '/', 'metadata_json');
+case_data.grid = struct();
+case_data.grid.shape = double(h5read(input_mat, '/grid/shape'))';
+case_data.grid.spacing_m = double(h5read(input_mat, '/grid/spacing_m'))';
+case_data.grid.origin_m = double(h5read(input_mat, '/grid/origin_m'))';
+case_data.grid.roi_mask = usctbench_optional_h5read(input_mat, '/grid/roi_mask');
+case_data.geometry = struct();
+case_data.geometry.type = h5readatt(input_mat, '/geometry', 'type');
+case_data.geometry.tx_pos_m = double(h5read(input_mat, '/geometry/tx_pos_m'));
+case_data.geometry.rx_pos_m = double(h5read(input_mat, '/geometry/rx_pos_m'));
+case_data.measurement = struct();
+case_data.measurement.domain = h5readatt(input_mat, '/measurement', 'domain');
+case_data.measurement.delta_tof_s = usctbench_optional_h5read(input_mat, '/measurement/delta_tof_s');
+case_data.measurement.tof_s = usctbench_optional_h5read(input_mat, '/measurement/tof_s');
+case_data.measurement.valid_mask = usctbench_optional_h5read(input_mat, '/measurement/valid_mask');
+case_data.measurement.log_amp = usctbench_optional_h5read(input_mat, '/measurement/log_amp');
+case_data.measurement.frequencies_hz = usctbench_optional_h5read(input_mat, '/measurement/frequencies_hz');
+case_data.measurement.freq_data = usctbench_optional_h5read(input_mat, '/measurement/freq_data');
+case_data.measurement.time_data = usctbench_optional_h5read(input_mat, '/measurement/time_data');
+case_data.ground_truth = struct();
+case_data.ground_truth.sound_speed_mps = usctbench_optional_h5read(input_mat, '/ground_truth/sound_speed_mps');
+case_data.ground_truth.attenuation_np_per_m = usctbench_optional_h5read(input_mat, '/ground_truth/attenuation_np_per_m');
+end
+
+function value = usctbench_optional_h5read(input_mat, dataset_name)
+try
+    value = h5read(input_mat, dataset_name);
+catch
+    value = [];
+end
+end
+"""
+
+
+_MATLAB_WRITE_RESULT = """function usctbench_write_result(output_mat, algorithm, case_id, sound_speed_mps, metrics_json, varargin)
+if nargin < 5 || isempty(metrics_json)
+    metrics_json = '{}';
+end
+if exist(output_mat, 'file')
+    delete(output_mat);
+end
+h5create(output_mat, '/sound_speed_mps', size(sound_speed_mps), 'Datatype', 'double');
+h5write(output_mat, '/sound_speed_mps', double(sound_speed_mps));
+h5writeatt(output_mat, '/', 'schema_version', 'usctbench-matlab-adapter-v0.1');
+h5writeatt(output_mat, '/', 'record_type', 'ReconstructionResult');
+h5writeatt(output_mat, '/', 'algorithm', char(algorithm));
+h5writeatt(output_mat, '/', 'case_id', char(case_id));
+h5writeatt(output_mat, '/', 'runtime_s', 0.0);
+h5writeatt(output_mat, '/', 'status', 'success');
+h5writeatt(output_mat, '/', 'metrics_json', char(metrics_json));
+h5writeatt(output_mat, '/', 'artifacts_json', '{}');
+for idx = 1:2:numel(varargin)
+    key = varargin{idx};
+    value = varargin{idx + 1};
+    if strcmp(key, 'attenuation_np_per_m') && ~isempty(value)
+        h5create(output_mat, '/attenuation_np_per_m', size(value), 'Datatype', 'double');
+        h5write(output_mat, '/attenuation_np_per_m', double(value));
+    elseif strcmp(key, 'reflectivity') && ~isempty(value)
+        h5create(output_mat, '/reflectivity', size(value), 'Datatype', 'double');
+        h5write(output_mat, '/reflectivity', double(value));
+    elseif strcmp(key, 'uncertainty') && ~isempty(value)
+        h5create(output_mat, '/uncertainty', size(value), 'Datatype', 'double');
+        h5write(output_mat, '/uncertainty', double(value));
+    end
+end
+end
+"""

@@ -41,6 +41,14 @@ The current repository contains native Python baselines plus optional adapter pa
 
 `rwave_adapter` now has a project-native regularized ray-Born/r-Wave smoke backend for the standard benchmark contract. The optional MATLAB path uses the same input/output artifact contract for external r-Wave/ray-Born experiments. The public ray-based quantitative ultrasound tomography repository remains a reference and optional external integration target; clone it outside Git before experimenting with package-specific entrypoint scripts.
 
+For both optional MATLAB adapters, the run directory now includes
+`usctbench_read_case.m` and `usctbench_write_result.m`. External entrypoints
+should read `usctbench_input_mat`, map the fields into the third-party package's
+native structs or variables, then call `usctbench_write_result` with
+`sound_speed_mps`. The Python adapter will ingest that file and add
+project-standard image, water-baseline, and travel-time residual metrics when
+they are not provided by MATLAB.
+
 `fwi_kwave_adapter` reads existing MATLAB v7.3 FWI result files and can optionally launch the external A100 `USCT_kwave` pipeline. The external approach is derived from `rehmanali1994/WaveformInversionUST`, which is MIT licensed upstream. Keep the full MATLAB/k-Wave code and generated FWI datasets/results outside this Git repository.
 
 `NBPslices2D` is a CC BY numerical phantom dataset. The repository only stores

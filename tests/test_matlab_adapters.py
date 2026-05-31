@@ -4,7 +4,12 @@ from pathlib import Path
 
 import yaml
 
-from usctbench.adapters.matlab import read_matlab_adapter_result, write_matlab_adapter_result, write_usct_case_mat
+from usctbench.adapters.matlab import (
+    read_matlab_adapter_result,
+    write_matlab_adapter_contract,
+    write_matlab_adapter_result,
+    write_usct_case_mat,
+)
 from usctbench.algorithms.adapters._matlab_optional import requests_matlab_backend
 from usctbench.algorithms.adapters.refraction_gn import BentRayGNAdapter
 from usctbench.algorithms.adapters.rwave import RWaveAdapter
@@ -72,6 +77,18 @@ def test_write_usct_case_mat_exports_standard_adapter_input(tmp_path):
         assert handle["ground_truth/sound_speed_mps"].shape == case.grid.shape
 
 
+def test_write_matlab_adapter_contract_writes_helper_functions(tmp_path):
+    contract_dir = write_matlab_adapter_contract(tmp_path)
+
+    read_helper = contract_dir / "usctbench_read_case.m"
+    write_helper = contract_dir / "usctbench_write_result.m"
+
+    assert read_helper.exists()
+    assert write_helper.exists()
+    assert "h5read(input_mat, '/measurement/delta_tof_s')" in read_helper.read_text(encoding="utf-8")
+    assert "h5create(output_mat, '/sound_speed_mps'" in write_helper.read_text(encoding="utf-8")
+
+
 def test_matlab_adapter_exports_input_before_external_execution_skip(tmp_path, monkeypatch):
     class FakeMatlabAdapter:
         def __init__(self, work_dir):
@@ -81,6 +98,7 @@ def test_matlab_adapter_exports_input_before_external_execution_skip(tmp_path, m
             assert "usctbench_input_mat" in code
             assert "usctbench_output_mat" in code
             assert "run_refraction.m" in code
+            assert "addpath" in code
             log_path = self.work_dir / log_name
             log_path.write_text(code, encoding="utf-8")
             return log_path
@@ -117,6 +135,8 @@ def test_matlab_adapter_exports_input_before_external_execution_skip(tmp_path, m
     assert output_path.endswith("_output.mat")
     assert (tmp_path / "case_run" / "bent_ray_gn_matlab.log").exists()
     assert Path(input_path).exists()
+    assert (tmp_path / "case_run" / "usctbench_read_case.m").exists()
+    assert (tmp_path / "case_run" / "usctbench_write_result.m").exists()
 
 
 def test_matlab_adapter_ingests_standard_external_output(tmp_path, monkeypatch):
@@ -171,6 +191,58 @@ def test_matlab_adapter_ingests_standard_external_output(tmp_path, monkeypatch):
     assert result.metrics["external_adapter_output_loaded"] is True
     assert result.artifacts["external_artifact"] == "ok"
     assert result.artifacts["adapter_output_mat"] == str(output_path)
+    assert result.artifacts["adapter_contract_dir"] == str(tmp_path / "case_run")
+
+
+def test_matlab_adapter_augments_external_output_metrics(tmp_path, monkeypatch):
+    output_path = tmp_path / "case_run" / "adapter_output.mat"
+
+    class FakeMatlabAdapter:
+        def __init__(self, work_dir):
+            self.work_dir = work_dir
+
+        def run_batch(self, code, *, log_name="matlab.log", timeout_s=None):
+            log_path = self.work_dir / log_name
+            log_path.write_text(code, encoding="utf-8")
+            case = make_sound_speed_case(shape=(10, 10), n_transducers=12)
+            write_matlab_adapter_result(
+                ReconstructionResult(
+                    algorithm="bent_ray_gn",
+                    case_id=case.case_id,
+                    sound_speed_mps=case.ground_truth.sound_speed_mps,
+                ),
+                output_path,
+            )
+            return log_path
+
+    def fake_from_config(*, matlab_bin=None, work_dir=None):
+        work_dir = tmp_path / "work" if work_dir is None else Path(work_dir)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        return FakeMatlabAdapter(work_dir)
+
+    external_root = tmp_path / "external"
+    external_root.mkdir()
+    (external_root / "run_refraction.m").write_text("% placeholder", encoding="utf-8")
+    monkeypatch.setattr("usctbench.algorithms.adapters._matlab_optional.MatlabAdapter.from_config", fake_from_config)
+
+    case = make_sound_speed_case(shape=(10, 10), n_transducers=12)
+    result = BentRayGNAdapter().run(
+        case,
+        AlgorithmConfig(
+            parameters={
+                "backend": "matlab",
+                "external_root": str(external_root),
+                "entrypoint": "run_refraction.m",
+                "_run_output_dir": str(tmp_path / "case_run"),
+                "adapter_output_path": str(output_path),
+            }
+        ),
+    )
+
+    assert result.status == "success"
+    assert result.metrics["rmse"] == 0.0
+    assert result.metrics["water_improved"] is True
+    assert result.metrics["data_residual_reduction"] > 0.0
 
 
 def test_matlab_adapter_result_roundtrip(tmp_path):

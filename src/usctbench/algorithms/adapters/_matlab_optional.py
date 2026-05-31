@@ -5,7 +5,24 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from usctbench.adapters.matlab import MatlabAdapter, MatlabUnavailable, read_matlab_adapter_result, write_usct_case_mat
+import numpy as np
+
+from usctbench.adapters.matlab import (
+    MatlabAdapter,
+    MatlabUnavailable,
+    read_matlab_adapter_result,
+    write_matlab_adapter_contract,
+    write_usct_case_mat,
+)
+from usctbench.algorithms.ray._common import (
+    apply_mask,
+    masked_norm,
+    reference_sound_speed,
+    residual_metrics,
+    target_delta_tof,
+)
+from usctbench.algorithms.ray.straight_projector import StraightRayProjector
+from usctbench.metrics.image import compute_baseline_improvement_metrics, compute_image_metrics
 from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
 
 
@@ -77,7 +94,9 @@ def run_matlab_placeholder(
     input_path = _adapter_input_path(params, adapter.work_dir, algorithm, case)
     output_path = _adapter_output_path(params, adapter.work_dir, algorithm, case)
     write_usct_case_mat(case, input_path)
+    contract_dir = write_matlab_adapter_contract(adapter.work_dir)
     code = (
+        f"addpath('{_matlab_string(contract_dir)}'); "
         f"addpath(genpath('{_matlab_string(external_root_path)}')); "
         f"usctbench_input_mat='{_matlab_string(input_path)}'; "
         f"usctbench_output_mat='{_matlab_string(output_path)}'; "
@@ -93,6 +112,7 @@ def run_matlab_placeholder(
     artifacts = {
         "adapter_input_mat": str(input_path),
         "adapter_output_mat": str(output_path),
+        "adapter_contract_dir": str(contract_dir),
         "matlab_log": str(log_path),
         "external_entrypoint": str(entry_path),
     }
@@ -119,6 +139,7 @@ def run_matlab_placeholder(
     result.artifacts.update(artifacts)
     result.metrics.setdefault("adapter_dependency_available", True)
     result.metrics["external_adapter_output_loaded"] = True
+    _augment_external_result_metrics(result, case, config)
     return result
 
 
@@ -160,3 +181,30 @@ def _entrypoint_call(params: dict, entry_path: Path) -> str:
 
 def _safe_stem(value: str) -> str:
     return "".join(char if char.isalnum() or char in "._-" else "_" for char in str(value)).strip("._") or "case"
+
+
+def _augment_external_result_metrics(result: ReconstructionResult, case: USCTCase, config: AlgorithmConfig) -> None:
+    """Add project-standard metrics to external MATLAB outputs when possible."""
+
+    if result.sound_speed_mps is None:
+        return
+    try:
+        sound_speed = np.asarray(result.sound_speed_mps, dtype=float)
+        c0 = reference_sound_speed(case, config)
+        if case.ground_truth.sound_speed_mps is not None and sound_speed.shape == case.grid.shape:
+            truth = np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
+            for key, value in compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask).items():
+                result.metrics.setdefault(key, value)
+            for key, value in compute_baseline_improvement_metrics(sound_speed, truth, c0, mask=case.grid.roi_mask).items():
+                result.metrics.setdefault(key, value)
+        if sound_speed.shape == case.grid.shape:
+            projector = StraightRayProjector.from_case(case)
+            target, mask = target_delta_tof(case, projector)
+            delta_slowness = (1.0 / np.clip(sound_speed, 1.0e-12, np.inf)) - (1.0 / c0)
+            residual = apply_mask(target - projector.forward(delta_slowness), mask)
+            initial_norm = masked_norm(target, mask)
+            final_norm = masked_norm(residual, mask)
+            for key, value in residual_metrics(initial_norm, final_norm).items():
+                result.metrics.setdefault(key, value)
+    except Exception as exc:
+        result.metrics.setdefault("external_metric_augmentation_error", f"{type(exc).__name__}: {exc}")

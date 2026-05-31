@@ -15,6 +15,12 @@ This adapter targets refraction-corrected travel-time tomography. In v0.1 the de
   run directory. The configured entrypoint receives `usctbench_input_mat`,
   `usctbench_output_mat`, and `usctbench_output_dir` MATLAB variables and must
   write a standard adapter output MAT file to be ingested.
+- The case run directory also receives first-party MATLAB helper functions:
+  `usctbench_read_case.m` and `usctbench_write_result.m`. A refraction-corrected
+  entrypoint can call these helpers, then use the public repository's
+  `ctReconLaplacianRegularized.m` pattern and `Functions/eikProjMat.m` /
+  `Functions/laplacianOperator.m` internals without re-implementing the
+  usct-benchlab HDF5 contract.
 
 ## Default Settings
 
@@ -47,9 +53,12 @@ This adapter targets refraction-corrected travel-time tomography. In v0.1 the de
 - Native backend returns `success` with standard `sound_speed_mps`, image metrics, residual metrics, coverage metrics, and preview artifacts.
 - Missing MATLAB or missing entrypoint returns `skipped`, not a crash, when the MATLAB backend is explicitly requested.
 - Configured MATLAB entrypoints get `adapter_input_mat`, `adapter_output_mat`,
-  `matlab_log`, and `external_entrypoint` artifacts.
+  `adapter_contract_dir`, `matlab_log`, and `external_entrypoint` artifacts.
 - Standard adapter output MAT files are ingested into `ReconstructionResult`
   with `external_adapter_output_loaded=true`.
+- If a MATLAB entrypoint writes only `sound_speed_mps`, Python augments the
+  result with project-standard image, water-baseline, and data-residual metrics
+  before benchmark assessment.
 - A failure report is written by the CLI for skipped runs.
 
 ## References and Related Code
