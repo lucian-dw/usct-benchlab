@@ -546,15 +546,17 @@ def _best_iteration_by_rmse(external: dict[str, Any], case: USCTCase) -> tuple[i
         target_source = "case_gt"
     if truth is None:
         return None, {"best_iteration_reason": "missing_ground_truth"}
-    target = _resize_to_shape(np.asarray(truth, dtype=float), images.shape[1:])
+    target = _resize_to_shape(np.asarray(truth, dtype=float), case.grid.shape)
     finite = np.isfinite(target)
     if not np.any(finite):
         return None, {"best_iteration_reason": "nonfinite_ground_truth"}
+    mask = np.asarray(case.grid.roi_mask, dtype=bool) if case.grid.roi_mask is not None else None
 
     rmses: list[float] = []
     ssims: list[float] = []
     for image in images:
-        metrics = compute_image_metrics(np.asarray(image, dtype=float), target, mask=finite)
+        resized = _resize_to_shape(np.asarray(image, dtype=float), case.grid.shape)
+        metrics = compute_image_metrics(resized, target, mask=mask)
         rmses.append(float(metrics["rmse"]))
         ssims.append(float(metrics["ssim"]))
     best_index = int(np.argmin(np.asarray(rmses, dtype=float)))
@@ -562,6 +564,7 @@ def _best_iteration_by_rmse(external: dict[str, Any], case: USCTCase) -> tuple[i
         "best_iteration": best_index + 1,
         "best_iteration_metric": "rmse",
         "best_iteration_target": target_source,
+        "best_iteration_eval_shape": list(case.grid.shape),
         "best_iteration_rmse": rmses[best_index],
         "best_iteration_ssim": ssims[best_index],
         "final_iteration_rmse": rmses[-1],
