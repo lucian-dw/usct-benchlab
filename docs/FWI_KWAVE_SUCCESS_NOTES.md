@@ -59,6 +59,19 @@ The external result file for that run is:
 /home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_full_pipeline_success201_dense/external_kwave/results/openbreast_test201_kwave_full_WaveformInversionResults.mat
 ```
 
+The current best-selected re-ingest and cross-algorithm evidence run is:
+
+```text
+/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_best_grid_reingest_2b8d7a5
+```
+
+It evaluates best/final iterations on the same 256x256 `USCTCase` grid used by
+the horizontal comparison panel. The representative test201 metrics are
+`selected_iteration=19`, `kwave_gt_rmse=16.85`,
+`kwave_gt_selected_relative_rmse_improvement=0.343`,
+`kwave_gt_ssim=0.677`, `kwave_native_psnr=22.80`, and
+`kwave_native_ssim=0.705`.
+
 ## Acceptance Semantics
 
 FWI is judged primarily against the external k-Wave result ground truth

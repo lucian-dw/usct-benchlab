@@ -13,9 +13,9 @@ This checklist records current evidence. It is not a claim that v0.1 is complete
 | `attenuation_sirt` smoke run | A100 smoke benchmark writes standard artifacts and passes thresholds using simulated nonzero attenuation evidence from a k-Wave channel MAT file | Passing with simulated-data limitation |
 | Tiny FWI gradient check | `test_fwi_gradient_check.py` | Passing synthetic-only |
 | Tiny FWI loss decrease | `test_fwi_loss_decrease.py` | Passing synthetic-only |
-| Bent-ray native backend | OpenBreastUS and NBPslice2D smoke/quality runs write standard metrics and previews; optional MATLAB path still skips clearly when requested | Passing native v0.1 path |
-| r-Wave native backend | OpenBreastUS and NBPslice2D smoke/quality runs write standard metrics and previews; optional MATLAB path still skips clearly when requested | Passing native v0.1 path |
-| k-Wave FWI adapter | A100 `fwi_kwave_full_pipeline_success201_dense` and re-ingest evidence show external result loading, GT/native metrics, and visual artifacts | Passing one-case A100 smoke |
+| Bent-ray native/backend + external smoke | OpenBreastUS and NBPslice2D smoke/quality runs write standard metrics and previews; external MATLAB smoke uses the public refraction-corrected repository path and standard adapter MAT I/O | Passing native and 64 smoke external paths |
+| r-Wave native/backend + external smoke | OpenBreastUS and NBPslice2D smoke/quality runs write standard metrics and previews; external MATLAB smoke uses the public ray-Born/r-Wave repository path and standard adapter MAT I/O | Passing native and 64 smoke external paths |
+| k-Wave FWI adapter | A100 `fwi_kwave_full_pipeline_success201_dense` and best-selected re-ingest evidence show external result loading, GT/native metrics, and visual artifacts | Passing one-case A100 smoke |
 | MATLAB adapter dependency path | adapter tests and readiness audit verify `skipped`, external-dependency failure report, and adapter skip metadata when MATLAB backend is requested and unavailable | Passing skip path |
 | Benchmark reports generated automatically | `usct bench` writes CSV and Markdown with reasons/runtime/memory | Passing |
 | Algorithm cards exist for registered algorithms | cards under `docs/algorithm_cards/` | Passing |
@@ -29,8 +29,8 @@ This checklist records current evidence. It is not a claim that v0.1 is complete
   file, execute configured entrypoints with `usctbench_input_mat` and
   `usctbench_output_mat` variables, and ingest standard adapter output MAT
   files. The default `bent_ray_gn` and `rwave_adapter` paths remain native
-  benchmark backends; public-package-specific entrypoint scripts still need to
-  be authored outside Git for full end-to-end external runs.
+  benchmark backends; public-package-specific entrypoint templates and a
+  reproducible 64x64 external MATLAB smoke script are now in Git.
 - `fwi_tiny` is synthetic proof-of-life only. Production-like FWI evidence is
   currently the A100 k-Wave adapter path, not `fwi_tiny`.
 - k-Wave FWI has one validated OpenBreastUS test201 smoke case. It is not yet a
@@ -113,11 +113,15 @@ Representative A100 evidence from the current branch:
 - k-Wave FWI successful full-pipeline result:
   `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_full_pipeline_success201_dense`
 - k-Wave FWI re-ingest with corrected acceptance metrics:
-  `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_success201_reingest_63ec1e5`
+  `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_best_grid_reingest_2b8d7a5`
   - run check: `benchmark_run_checks.json`
-  - contact sheet: `fwi_kwave_adapter/openbreast_test201_kwave_full_000200/kwave_smoke_outputs/contact_sheet.png`
+  - selected metrics: `kwave_gt_rmse=16.85`, `kwave_gt_selected_relative_rmse_improvement=0.343`, `kwave_gt_ssim=0.677`
 - Single-case cross-algorithm visual comparison:
-  `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_cross_algorithm_63ec1e5/comparison_artifacts/fwi_case_test201_cross_algorithm_horizontal_gray.png`
+  `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_best_grid_reingest_2b8d7a5/comparison_artifacts/fwi_case_test201_best_grid_cross_algorithm_gray.png`
+- External MATLAB adapter 64 smoke:
+  `/home/wudalong/usct-benchlab/runs/usctbench_runs/external_matlab_adapter_smoke_20260531T215551Z`
+  - run check: `benchmark_run_checks.json`
+  - panel: `comparison_artifacts/external_matlab_smoke_64_gray.png`
 
 The current evidence bundle can be audited on A100 with:
 

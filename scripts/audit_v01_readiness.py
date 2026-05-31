@@ -180,12 +180,16 @@ QUALITY_EVIDENCE_SPECS = [
         ],
     },
     {
-        "name": "fwi_cross_algorithm_panel",
-        "run_dir": "fwi_kwave_cross_algorithm_63ec1e5",
-        "summary_csv": "comparison_artifacts/fwi_case_test201_cross_algorithm_horizontal_gray.summary.csv",
+        "name": "fwi_best_grid_cross_algorithm_panel",
+        "run_dir": "fwi_kwave_best_grid_reingest_2b8d7a5",
+        "run_checks": "benchmark_run_checks.json",
+        "summary_csv": "comparison_artifacts/fwi_case_test201_best_grid_cross_algorithm_gray.summary.csv",
         "files": [
-            "comparison_artifacts/fwi_case_test201_cross_algorithm_horizontal_gray.png",
-            "comparison_artifacts/fwi_case_test201_cross_algorithm_horizontal_gray.summary.csv",
+            "benchmark_summary.csv",
+            "benchmark_report.md",
+            "benchmark_run_checks.json",
+            "comparison_artifacts/fwi_case_test201_best_grid_cross_algorithm_gray.png",
+            "comparison_artifacts/fwi_case_test201_best_grid_cross_algorithm_gray.summary.csv",
         ],
         "expected_algorithms": [
             "straight_cgls",
