@@ -39,7 +39,7 @@ mkdir -p "$comparison_dir"
 PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" scripts/render_class_comparison_panels.py \
   --cases-dir "$USCT_QUALITY_SAMPLE_ROOT/cases" \
   --run-dir "$run_root" \
-  --out "$comparison_dir/openbreastus_quality_256_sound_speed_gray.png" \
+  --out "$comparison_dir/openbreastus_quality_${USCT_QUALITY_CONVERTED_SHAPE}_sound_speed_gray.png" \
   --field sound_speed \
   --algorithms straight_cgls straight_sirt straight_sart bent_ray_gn rwave_adapter \
   --title "OpenBreastUS 256 sound-speed quality comparison" \

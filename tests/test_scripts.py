@@ -209,8 +209,8 @@ def test_quality_scripts_render_standard_comparison_panels():
         assert "--field sound_speed" in text
         assert "--cmap gray" in text
         assert "straight_cgls straight_sirt straight_sart bent_ray_gn rwave_adapter" in text
-    assert "openbreastus_quality_256_sound_speed_gray.png" in openbreast
-    assert "nbpslice2d_quality_256_sound_speed_gray.png" in nbp
+    assert "openbreastus_quality_${USCT_QUALITY_CONVERTED_SHAPE}_sound_speed_gray.png" in openbreast
+    assert "nbpslice2d_quality_${USCT_NBP_QUALITY_CONVERTED_SHAPE}_sound_speed_gray.png" in nbp
 
 
 def test_setup_workspace_root_layout_symlinks_resolve_to_workspace_dirs(tmp_path):
