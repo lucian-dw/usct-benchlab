@@ -57,6 +57,7 @@ def run_algorithm_case(
         case = read_case_hdf5(case_path)
         case_id = case.case_id
         config = load_algorithm_config(config_path)
+        config.parameters.setdefault("_run_output_dir", str(out_root / case_id))
         algorithm = get_algorithm(algorithm_name)
         result = algorithm.run(case, config)
     except Exception as exc:

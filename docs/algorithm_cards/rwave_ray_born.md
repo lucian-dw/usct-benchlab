@@ -9,6 +9,10 @@ This adapter targets weak-scattering ray-Born or r-Wave style reconstruction. In
 - Standard `USCTCase` with `measurement.delta_tof_s`
 - Ring geometry and grid metadata compatible with the straight-ray projector
 - Optional MATLAB path: MATLAB available through `MATLAB_BIN` or `parameters.matlab_bin`, external r-Wave/ray-Born source installed outside Git, and configured `parameters.external_root` plus `parameters.entrypoint`
+- When the optional MATLAB path is configured and available, the adapter writes
+  a MATLAB-readable HDF5 `.mat` input file containing `USCTCase` grid,
+  geometry, measurement, ground-truth, mask, and metadata fields under the case
+  run directory before reporting the external execution/output-ingest boundary.
 
 ## Default Settings
 
@@ -40,6 +44,8 @@ This adapter targets weak-scattering ray-Born or r-Wave style reconstruction. In
 - Adapter is registered by `usct list-algorithms`.
 - Native backend returns `success` with standard `sound_speed_mps`, image metrics, residual metrics, coverage metrics, and preview artifacts.
 - Missing MATLAB or missing entrypoint returns `skipped`, not a crash, when the MATLAB backend is explicitly requested.
+- Configured MATLAB entrypoints get an `adapter_input_mat` artifact before the
+  current external execution/output-ingest skip.
 - CLI writes the standard failure report for skipped adapter runs.
 
 ## References and Related Code

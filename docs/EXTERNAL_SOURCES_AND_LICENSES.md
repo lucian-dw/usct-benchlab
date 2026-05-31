@@ -37,9 +37,9 @@ that the full external MATLAB workflow has been vendored.
 
 The current repository contains native Python baselines plus optional adapter paths. It does not vendor external MATLAB packages or full third-party repositories.
 
-`bent_ray_gn` now has a project-native regularized travel-time GN smoke backend for the standard benchmark contract. The public refraction-corrected MATLAB repository remains a reference and optional external integration target; clone it outside Git before experimenting with its full MATLAB entrypoints.
+`bent_ray_gn` now has a project-native regularized travel-time GN smoke backend for the standard benchmark contract. The optional MATLAB path exports a standard MATLAB-readable HDF5 `.mat` input artifact under the case run directory when a MATLAB entrypoint is configured and available. The public refraction-corrected MATLAB repository remains a reference and optional external integration target; clone it outside Git before experimenting with its full MATLAB entrypoints and output ingest.
 
-`rwave_adapter` now has a project-native regularized ray-Born/r-Wave smoke backend for the standard benchmark contract. The public ray-based quantitative ultrasound tomography repository remains a reference and optional external integration target; clone it outside Git before experimenting with its full MATLAB entrypoints.
+`rwave_adapter` now has a project-native regularized ray-Born/r-Wave smoke backend for the standard benchmark contract. The optional MATLAB path exports the same standard adapter input artifact for external r-Wave/ray-Born experiments. The public ray-based quantitative ultrasound tomography repository remains a reference and optional external integration target; clone it outside Git before experimenting with its full MATLAB entrypoints and output ingest.
 
 `fwi_kwave_adapter` reads existing MATLAB v7.3 FWI result files and can optionally launch the external A100 `USCT_kwave` pipeline. The external approach is derived from `rehmanali1994/WaveformInversionUST`, which is MIT licensed upstream. Keep the full MATLAB/k-Wave code and generated FWI datasets/results outside this Git repository.
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from usctbench.adapters.matlab import MatlabAdapter, MatlabUnavailable
+from usctbench.adapters.matlab import MatlabAdapter, MatlabUnavailable, write_usct_case_mat
 from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
 
 
@@ -55,10 +55,11 @@ def run_matlab_placeholder(
     unimplemented_reason: str,
 ) -> ReconstructionResult:
     params = config.parameters
+    work_dir = params.get("work_dir") or params.get("_run_output_dir") or "."
     try:
         adapter = MatlabAdapter.from_config(
             matlab_bin=params.get("matlab_bin"),
-            work_dir=params.get("work_dir", "."),
+            work_dir=work_dir,
         )
     except MatlabUnavailable as exc:
         return skipped_matlab_adapter(algorithm, case, str(exc))
@@ -73,7 +74,14 @@ def run_matlab_placeholder(
     if not entry_path.exists():
         return skipped_matlab_adapter(algorithm, case, f"{missing_entrypoint_prefix}: {entry_path}")
 
-    code = f"addpath(genpath('{_matlab_string(external_root_path)}')); disp('{_matlab_string(configured_message)}');"
+    input_path = _adapter_input_path(params, adapter.work_dir, algorithm, case)
+    write_usct_case_mat(case, input_path)
+    code = (
+        f"addpath(genpath('{_matlab_string(external_root_path)}')); "
+        f"usctbench_input_mat='{_matlab_string(input_path)}'; "
+        f"usctbench_output_dir='{_matlab_string(adapter.work_dir)}'; "
+        f"disp('{_matlab_string(configured_message)}');"
+    )
     try:
         log_path = adapter.run_batch(code, log_name=log_name, timeout_s=int(params.get("timeout_s", 300)))
     except MatlabUnavailable as exc:
@@ -84,7 +92,7 @@ def run_matlab_placeholder(
         case_id=case.case_id,
         status=ResultStatus.SKIPPED,
         failure_reason=unimplemented_reason,
-        artifacts={"matlab_log": str(log_path), "external_entrypoint": str(entry_path)},
+        artifacts={"adapter_input_mat": str(input_path), "matlab_log": str(log_path), "external_entrypoint": str(entry_path)},
     )
 
 
@@ -101,3 +109,14 @@ def skipped_matlab_adapter(algorithm: str, case: USCTCase, reason: str) -> Recon
 
 def _matlab_string(value: object) -> str:
     return str(value).replace("'", "''")
+
+
+def _adapter_input_path(params: dict, work_dir: Path, algorithm: str, case: USCTCase) -> Path:
+    configured = params.get("adapter_input_path") or params.get("input_mat_path")
+    if configured:
+        return Path(str(configured)).expanduser()
+    return work_dir / f"{_safe_stem(algorithm)}_{_safe_stem(case.case_id)}_input.mat"
+
+
+def _safe_stem(value: str) -> str:
+    return "".join(char if char.isalnum() or char in "._-" else "_" for char in str(value)).strip("._") or "case"

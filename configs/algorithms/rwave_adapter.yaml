@@ -17,4 +17,4 @@ parameters:
 metadata:
   default_backend: project-native ray-Born/r-Wave surrogate over benchmark travel-time features.
   external_reference: Ash1362/ray-based-quantitative-ultrasound-tomography
-  v0_1_scope: smoke/quality benchmark path; full MATLAB marshaling remains optional.
+  v0_1_scope: smoke/quality benchmark path; MATLAB-readable input export is available, while full external execution/output ingest remains optional.

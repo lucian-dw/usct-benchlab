@@ -28,7 +28,7 @@ class BentRayGNAdapter:
             missing_entrypoint_prefix="MATLAB refraction GN entrypoint not found",
             configured_message="USCT bent_ray_gn adapter configured",
             log_name="bent_ray_gn_matlab.log",
-            unimplemented_reason="External MATLAB entrypoint is configured, but data marshaling is not implemented yet.",
+            unimplemented_reason="External MATLAB entrypoint is configured and adapter input was exported, but entrypoint execution/output ingest is not implemented yet.",
         )
 
 
