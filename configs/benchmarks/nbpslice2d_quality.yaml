@@ -1,0 +1,35 @@
+name: nbpslice2d_quality
+case_glob: ${USCT_NBP_QUALITY_SAMPLE_ROOT}/cases/*.h5
+algorithms:
+  - name: straight_cgls
+    config: configs/algorithms/straight_cgls.yaml
+  - name: straight_sirt
+    config: configs/algorithms/straight_sirt.yaml
+  - name: straight_sart
+    config: configs/algorithms/straight_sart.yaml
+outputs:
+  root: ${USCT_NBP_QUALITY_RUN_ROOT}
+min_cases: 1
+min_records: 3
+expected_statuses:
+  - success
+require_algorithm_case_matrix: true
+required_metrics:
+  default:
+    - data_residual_norm
+    - data_relative_residual
+    - data_residual_reduction
+    - rmse
+    - ssim
+    - water_relative_rmse_improvement
+    - coverage_nonzero_fraction
+    - valid_ray_fraction
+    - ring_artifact_index
+thresholds:
+  default:
+    rmse: 220.0
+    data_relative_residual: 1.0
+minimums:
+  default:
+    coverage_nonzero_fraction: 0.5
+    valid_ray_fraction: 0.8

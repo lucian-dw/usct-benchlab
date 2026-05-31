@@ -38,6 +38,9 @@ usct data make-nbp-smoke \
   --n-transducers 32
 ```
 
+This 64x64 path is for interface diagnostics and fast numerical checks. It is
+not the quality-comparison path.
+
 This writes:
 
 ```text
@@ -64,6 +67,24 @@ leaving margin so the breast occupies about 72% of the reconstruction width.
 The original source shape, crop box, and effective meter spacing are recorded in
 `metadata.roi_fit` and `metadata.effective_spacing_m`. This avoids wasting most
 of the reconstruction grid on blank background for small NBPslice2D samples.
+
+For visual quality comparison, generate 256x256 cases:
+
+```bash
+export USCT_NBP_QUALITY_SAMPLE_ROOT=$USCT_WORKSPACE/data/nbpslice2d_quality_256
+export USCT_NBP_QUALITY_RUN_ROOT=$USCT_WORKSPACE/runs/usctbench_runs
+usct data make-nbp-quality \
+  --zip "$USCT_NBP_ZIP_PATH" \
+  --out "$USCT_NBP_QUALITY_SAMPLE_ROOT" \
+  --cases-per-type 1 \
+  --converted-shape 256 \
+  --n-transducers 128
+usct bench --suite configs/benchmarks/nbpslice2d_quality.yaml
+```
+
+The 256x256 path uses the same ROI crop, then rescales that fitted field of view
+to the benchmark grid. This keeps GT detail visible while keeping the benchmark
+explicitly marked as a map-surrogate, not measured RF reconstruction.
 
 ## Smoke benchmark
 

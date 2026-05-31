@@ -215,6 +215,15 @@ def test_cli_make_synthetic_smoke_writes_cases_and_manifest(tmp_path):
     assert [path.stem for path in cases] == ["synthetic_circular_sos", "synthetic_homogeneous_sos"]
 
 
+def test_cli_exposes_quality_subset_commands():
+    with pytest.raises(SystemExit) as openbreast_help:
+        main(["data", "make-quality", "--help"])
+    with pytest.raises(SystemExit) as nbp_help:
+        main(["data", "make-nbp-quality", "--help"])
+    assert openbreast_help.value.code == 0
+    assert nbp_help.value.code == 0
+
+
 def test_bench_suite_rejects_empty_case_glob(tmp_path):
     suite = tmp_path / "suite.yaml"
     suite.write_text(

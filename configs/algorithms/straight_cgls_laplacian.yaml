@@ -1,0 +1,11 @@
+name: straight_cgls
+parameters:
+  iterations: 30
+  regularization: laplacian
+  regularization_lambda: 1.0e-4
+  reference_sound_speed_mps: 1500.0
+  sound_speed_bounds_mps: [1300.0, 1700.0]
+metadata:
+  description: Straight-ray CGLS with Laplacian roughness regularization.
+  damping_convention: regularization_lambda is lambda; the solver uses lambda^2 in the normal equations.
+  lambda_sweep: try regularization_lambda in [0.0, 3.0e-5, 1.0e-4, 3.0e-4] on quality-comparison cases.

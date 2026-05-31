@@ -8,7 +8,7 @@ import pytest
 
 from usctbench.data.openbreastus import inspect_openbreastus
 from usctbench.data.conversion import convert_speed_mat_volume, speed_mat_metadata
-from usctbench.data.smoke_subset import make_smoke_subset
+from usctbench.data.smoke_subset import make_quality_subset, make_smoke_subset
 from usctbench.io.hdf5 import read_case_hdf5
 
 
@@ -137,6 +137,44 @@ def test_convert_speed_mat_volume_accepts_matlab_v5_case_first_volume(tmp_path):
     assert loaded.grid.shape == (4, 4)
     assert loaded.metadata["source_index"] == 1
     assert float(np.min(loaded.ground_truth.sound_speed_mps)) < 1500.0
+
+
+def test_speed_map_resize_preserves_full_field_of_view(tmp_path):
+    mat_path = tmp_path / "breast_test_speed.mat"
+    with h5py.File(mat_path, "w") as handle:
+        data = np.full((6, 6, 1), 1500.0, dtype=np.float32)
+        data[0, 0, 0] = 1700.0
+        data[-1, -1, 0] = 1300.0
+        handle.create_dataset("breast_train", data=data)
+
+    records = convert_speed_mat_volume(
+        mat_path,
+        tmp_path / "cases",
+        indices=[0],
+        dataset_name="breast_train",
+        output_shape=(4, 4),
+        n_transducers=6,
+    )
+
+    loaded = read_case_hdf5(records[0]["path"])
+    assert loaded.ground_truth.sound_speed_mps[0, 0] == pytest.approx(1700.0)
+    assert loaded.ground_truth.sound_speed_mps[-1, -1] == pytest.approx(1300.0)
+
+
+def test_make_quality_subset_marks_quality_role(tmp_path):
+    root = tmp_path / "openbreastus"
+    root.mkdir()
+    mat_path = root / "breast_train_speed.mat"
+    with h5py.File(mat_path, "w") as handle:
+        handle.create_dataset("breast_train", data=np.ones((8, 8, 1), dtype=np.float32) * 1500.0)
+
+    out = tmp_path / "quality"
+    manifest = make_quality_subset(root, out, cases_per_density=1, converted_shape=(8, 8), n_transducers=6)
+
+    assert manifest["subset_role"] == "quality_comparison"
+    assert manifest["converted_shape"] == [8, 8]
+    assert manifest["n_transducers"] == 6
+    assert len(manifest["converted_cases"]) == 1
 
 
 def test_make_smoke_subset_prefers_and_converts_kwave_channel_mat(tmp_path):

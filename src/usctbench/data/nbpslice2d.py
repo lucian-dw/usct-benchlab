@@ -62,6 +62,7 @@ def make_nbp_slice2d_smoke_subset(
     n_transducers: int = 32,
     reference_sound_speed_mps: float = 1500.0,
     attenuation_frequency_mhz: float = 1.0,
+    subset_role: str = "interface_smoke",
 ) -> dict[str, Any]:
     """Create standard USCTCase smoke cases from NBPslices2D."""
 
@@ -86,6 +87,7 @@ def make_nbp_slice2d_smoke_subset(
         "cases_per_type": cases_per_type,
         "converted_shape": list(converted_shape),
         "n_transducers": n_transducers,
+        "subset_role": subset_role,
         "reference_sound_speed_mps": reference_sound_speed_mps,
         "attenuation_frequency_mhz": attenuation_frequency_mhz,
         "index_summary": index["summary"],
@@ -100,3 +102,27 @@ def make_nbp_slice2d_smoke_subset(
     manifest_path = out_path / "nbpslice2d_smoke_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     return manifest
+
+
+def make_nbp_slice2d_quality_subset(
+    zip_path: str | Path,
+    out: str | Path,
+    *,
+    cases_per_type: int = 1,
+    converted_shape: tuple[int, int] = (256, 256),
+    n_transducers: int = 128,
+    reference_sound_speed_mps: float = 1500.0,
+    attenuation_frequency_mhz: float = 1.0,
+) -> dict[str, Any]:
+    """Create 256x256 NBPslice2D cases for visual quality comparison."""
+
+    return make_nbp_slice2d_smoke_subset(
+        zip_path,
+        out,
+        cases_per_type=cases_per_type,
+        converted_shape=converted_shape,
+        n_transducers=n_transducers,
+        reference_sound_speed_mps=reference_sound_speed_mps,
+        attenuation_frequency_mhz=attenuation_frequency_mhz,
+        subset_role="quality_comparison",
+    )

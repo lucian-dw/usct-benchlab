@@ -6,7 +6,7 @@ import h5py
 import numpy as np
 
 from usctbench.data.conversion import convert_nbp_slice2d_mat
-from usctbench.data.nbpslice2d import inspect_nbp_slice2d_zip, make_nbp_slice2d_smoke_subset
+from usctbench.data.nbpslice2d import inspect_nbp_slice2d_zip, make_nbp_slice2d_quality_subset, make_nbp_slice2d_smoke_subset
 from usctbench.io.hdf5 import read_case_hdf5
 
 
@@ -59,6 +59,21 @@ def test_make_nbp_slice2d_smoke_subset_from_zip(tmp_path):
     assert (tmp_path / "sample" / "nbpslice2d_index.json").exists()
     assert (tmp_path / "sample" / "nbpslice2d_smoke_manifest.json").exists()
     assert sorted(case["case_id"] for case in manifest["converted_cases"]) == ["A000001", "B000001"]
+
+
+def test_make_nbp_slice2d_quality_subset_marks_quality_role(tmp_path):
+    zip_path = tmp_path / "NBPslices2D.zip"
+    source_a = tmp_path / "A000001.mat"
+    _write_nbp_mat(source_a, density_label="A")
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        archive.write(source_a, "NBPslices2D/A000001.mat")
+
+    manifest = make_nbp_slice2d_quality_subset(zip_path, tmp_path / "quality", converted_shape=(8, 8), n_transducers=8)
+
+    assert manifest["subset_role"] == "quality_comparison"
+    assert manifest["converted_shape"] == [8, 8]
+    assert manifest["n_transducers"] == 8
+    assert len(manifest["converted_cases"]) == 1
 
 
 def _write_nbp_mat(path, *, density_label: str) -> None:

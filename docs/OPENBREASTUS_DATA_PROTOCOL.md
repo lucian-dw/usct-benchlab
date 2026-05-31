@@ -40,6 +40,9 @@ The inspector writes:
 usct data make-smoke --root "$USCT_DATA_ROOT" --out "$USCT_SAMPLE_ROOT" --cases-per-density 1
 ```
 
+Smoke conversion defaults to 64x64 and 32 synthetic transducers. It is an
+interface and numerical diagnostic, not a visual quality comparison.
+
 The smoke builder writes:
 
 - `openbreastus_index.json`
@@ -74,6 +77,27 @@ Sound-speed comparison panels should use a grayscale colormap and include GT
 plus traditional sound-speed algorithms only. Use
 `scripts/render_class_comparison_panels.py` for reproducible class-comparison
 figures.
+
+## 256x256 Quality Comparison
+
+Use 256x256 converted cases for visual quality comparison:
+
+```bash
+export USCT_QUALITY_SAMPLE_ROOT=$USCT_WORKSPACE/data/openbreastus_quality_256
+export USCT_QUALITY_RUN_ROOT=$USCT_WORKSPACE/runs/usctbench_runs
+usct data make-quality \
+  --root "$USCT_DATA_ROOT" \
+  --out "$USCT_QUALITY_SAMPLE_ROOT" \
+  --cases-per-density 1 \
+  --converted-shape 256 \
+  --n-transducers 128
+usct bench --suite configs/benchmarks/openbreastus_quality.yaml
+```
+
+The converter rescales the full speed-map field of view to the target shape,
+rather than center-cropping 480x480 maps down to 256x256. The benchmark remains
+`openbreastus_speedmap_surrogate` unless the case metadata explicitly says
+`openbreastus_wavefield`; it should not be described as measured RF inversion.
 
 Converted k-Wave cases must include provenance metadata:
 

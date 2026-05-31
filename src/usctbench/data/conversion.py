@@ -550,25 +550,31 @@ def _nbp_handle_to_case_record(
 
 
 def _downsample_mean(image: np.ndarray, output_shape: tuple[int, int]) -> np.ndarray:
-    """Downsample by centered crop plus block averaging."""
+    """Resize a property map to the benchmark grid with linear interpolation.
 
-    ny, nx = image.shape
+    The historical name is kept for API stability. For quality comparisons this
+    intentionally rescales the full fitted field of view instead of center
+    cropping, so 480x480 maps converted to 256x256 keep the whole phantom.
+    """
+
+    array = np.asarray(image, dtype=float)
+    ny, nx = array.shape
     out_y, out_x = output_shape
     if out_y <= 0 or out_x <= 0:
         raise ValueError("output_shape must be positive")
-    if out_y > ny or out_x > nx:
-        y_idx = np.linspace(0, ny - 1, out_y).round().astype(int)
-        x_idx = np.linspace(0, nx - 1, out_x).round().astype(int)
-        return image[np.ix_(y_idx, x_idx)].astype(float, copy=False)
-
-    block_y = max(1, ny // out_y)
-    block_x = max(1, nx // out_x)
-    crop_y = out_y * block_y
-    crop_x = out_x * block_x
-    start_y = (ny - crop_y) // 2
-    start_x = (nx - crop_x) // 2
-    cropped = image[start_y : start_y + crop_y, start_x : start_x + crop_x]
-    return cropped.reshape(out_y, block_y, out_x, block_x).mean(axis=(1, 3))
+    if (ny, nx) == (out_y, out_x):
+        return array.astype(float, copy=False)
+    y_src = np.linspace(0.0, ny - 1.0, out_y)
+    x_src = np.linspace(0.0, nx - 1.0, out_x)
+    y0 = np.floor(y_src).astype(int)
+    x0 = np.floor(x_src).astype(int)
+    y1 = np.clip(y0 + 1, 0, ny - 1)
+    x1 = np.clip(x0 + 1, 0, nx - 1)
+    wy = (y_src - y0)[:, None]
+    wx = (x_src - x0)[None, :]
+    top = (1.0 - wx) * array[np.ix_(y0, x0)] + wx * array[np.ix_(y0, x1)]
+    bottom = (1.0 - wx) * array[np.ix_(y1, x0)] + wx * array[np.ix_(y1, x1)]
+    return ((1.0 - wy) * top + wy * bottom).astype(float, copy=False)
 
 
 def _fit_nbp_field_of_view(

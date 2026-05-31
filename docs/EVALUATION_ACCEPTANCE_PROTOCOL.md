@@ -43,6 +43,14 @@ minimums:
     water_relative_rmse_improvement: 0.0
 ```
 
+Resolution policy:
+
+- 64x64 converted cases are interface smoke diagnostics only.
+- 256x256 converted cases are the minimum visual quality-comparison target for
+  OpenBreastUS/NBPslice2D map-surrogate panels.
+- Benchmark reports must retain `case_type` and `benchmark_type` so quality
+  comparison is not confused with measured wavefield inversion.
+
 `min_cases` and `min_records` are run-level evidence checks. `expected_statuses`
 lists acceptable result states, and `require_algorithm_case_matrix` requires
 every expected algorithm to have a record for every observed case. Expected

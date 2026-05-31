@@ -23,6 +23,7 @@ def make_smoke_subset(
     converted_shape: tuple[int, int] = (64, 64),
     spacing_m: tuple[float, float] = (1.0e-3, 1.0e-3),
     n_transducers: int = 32,
+    subset_role: str = "interface_smoke",
 ) -> dict[str, Any]:
     """Select a small smoke subset and write a manifest plus source links.
 
@@ -95,6 +96,9 @@ def make_smoke_subset(
         "source_root": str(root_path),
         "subset_root": str(out_path),
         "cases_per_density": cases_per_density,
+        "converted_shape": list(converted_shape),
+        "n_transducers": n_transducers,
+        "subset_role": subset_role,
         "cases": selected,
         "case_capability_summary": _capability_summary(selected),
         "converted_cases": converted_cases,
@@ -108,6 +112,32 @@ def make_smoke_subset(
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     write_schema_report(index, out_path / "schema_inspection_report.md")
     return manifest
+
+
+def make_quality_subset(
+    root: str | Path,
+    out: str | Path,
+    *,
+    cases_per_density: int = 1,
+    symlink_sources: bool = True,
+    convert_speed_mat: bool = True,
+    converted_shape: tuple[int, int] = (256, 256),
+    spacing_m: tuple[float, float] = (1.0e-3, 1.0e-3),
+    n_transducers: int = 128,
+) -> dict[str, Any]:
+    """Create OpenBreastUS map-surrogate cases for visual quality comparison."""
+
+    return make_smoke_subset(
+        root,
+        out,
+        cases_per_density=cases_per_density,
+        symlink_sources=symlink_sources,
+        convert_speed_mat=convert_speed_mat,
+        converted_shape=converted_shape,
+        spacing_m=spacing_m,
+        n_transducers=n_transducers,
+        subset_role="quality_comparison",
+    )
 
 
 def _capability_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
