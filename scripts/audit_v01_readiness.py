@@ -78,6 +78,8 @@ REQUIRED_FILES = [
     "scripts/run_fwi_kwave_adapter_smoke.sh",
     "scripts/run_fwi_kwave_full_pipeline_smoke.sh",
     "scripts/run_nbpslice2d_smoke.sh",
+    "scripts/run_openbreastus_quality.sh",
+    "scripts/run_nbpslice2d_quality.sh",
     "scripts/render_class_comparison_panels.py",
     "scripts/render_kwave_fwi_smoke_outputs.py",
     "docs/architecture.md",

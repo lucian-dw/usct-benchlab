@@ -82,6 +82,11 @@ usct data make-nbp-quality \
 usct bench --suite configs/benchmarks/nbpslice2d_quality.yaml
 ```
 
+The convenience script `scripts/run_nbpslice2d_quality.sh` runs both steps and
+then writes a reproducible grayscale GT+algorithm panel under
+`<run_root>/comparison_artifacts/nbpslice2d_quality_256_sound_speed_gray.png`
+with adjacent `.summary.csv` and `.manifest.json` files.
+
 The 256x256 path uses the same ROI crop, then rescales that fitted field of view
 to the benchmark grid. This keeps GT detail visible while keeping the benchmark
 explicitly marked as a map-surrogate, not measured RF reconstruction.

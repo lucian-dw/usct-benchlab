@@ -24,6 +24,8 @@ def test_shell_scripts_source_local_env():
         Path("scripts/run_fwi_kwave_adapter_smoke.sh"),
         Path("scripts/run_fwi_kwave_full_pipeline_smoke.sh"),
         Path("scripts/run_nbpslice2d_smoke.sh"),
+        Path("scripts/run_openbreastus_quality.sh"),
+        Path("scripts/run_nbpslice2d_quality.sh"),
     ]:
         text = path.read_text(encoding="utf-8")
         assert 'if [ -f "$REPO_DIR/.env" ]; then' in text
@@ -195,6 +197,20 @@ def test_nbpslice2d_smoke_script_runs_dataset_flow():
     assert "make-nbp-smoke" in text
     assert "nbpslice2d_smoke.yaml" in text
     assert "USCT_NBP_ZIP_PATH" in text
+
+
+def test_quality_scripts_render_standard_comparison_panels():
+    openbreast = Path("scripts/run_openbreastus_quality.sh").read_text(encoding="utf-8")
+    nbp = Path("scripts/run_nbpslice2d_quality.sh").read_text(encoding="utf-8")
+
+    for text in (openbreast, nbp):
+        assert "render_class_comparison_panels.py" in text
+        assert "comparison_artifacts" in text
+        assert "--field sound_speed" in text
+        assert "--cmap gray" in text
+        assert "straight_cgls straight_sirt straight_sart bent_ray_gn rwave_adapter" in text
+    assert "openbreastus_quality_256_sound_speed_gray.png" in openbreast
+    assert "nbpslice2d_quality_256_sound_speed_gray.png" in nbp
 
 
 def test_setup_workspace_root_layout_symlinks_resolve_to_workspace_dirs(tmp_path):

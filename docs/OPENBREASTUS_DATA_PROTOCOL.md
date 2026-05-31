@@ -94,6 +94,11 @@ usct data make-quality \
 usct bench --suite configs/benchmarks/openbreastus_quality.yaml
 ```
 
+The convenience script `scripts/run_openbreastus_quality.sh` runs both steps and
+then writes a reproducible grayscale GT+algorithm panel under
+`<run_root>/comparison_artifacts/openbreastus_quality_256_sound_speed_gray.png`
+with adjacent `.summary.csv` and `.manifest.json` files.
+
 The converter rescales the full speed-map field of view to the target shape,
 rather than center-cropping 480x480 maps down to 256x256. The benchmark remains
 `openbreastus_speedmap_surrogate` unless the case metadata explicitly says

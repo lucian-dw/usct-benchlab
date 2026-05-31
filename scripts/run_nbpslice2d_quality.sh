@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -u
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -30,5 +30,17 @@ PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench
   --converted-shape "$USCT_NBP_QUALITY_CONVERTED_SHAPE" \
   --n-transducers "$USCT_NBP_QUALITY_N_TRANSDUCERS"
 
-PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli bench \
-  --suite configs/benchmarks/nbpslice2d_quality.yaml
+run_root="$(PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli bench \
+  --suite configs/benchmarks/nbpslice2d_quality.yaml)"
+echo "$run_root"
+
+comparison_dir="$run_root/comparison_artifacts"
+mkdir -p "$comparison_dir"
+PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" scripts/render_class_comparison_panels.py \
+  --cases-dir "$USCT_NBP_QUALITY_SAMPLE_ROOT/cases" \
+  --run-dir "$run_root" \
+  --out "$comparison_dir/nbpslice2d_quality_256_sound_speed_gray.png" \
+  --field sound_speed \
+  --algorithms straight_cgls straight_sirt straight_sart bent_ray_gn rwave_adapter \
+  --title "NBPslice2D 256 sound-speed quality comparison" \
+  --cmap gray
