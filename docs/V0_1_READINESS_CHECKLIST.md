@@ -47,6 +47,14 @@ To include benchmark evidence from A100:
 python scripts/audit_v01_readiness.py --root . --run-dir "$USCT_RUN_ROOT/<run_id>"
 ```
 
+To include the current 256 quality and FWI visual evidence bundle from A100:
+
+```bash
+python scripts/audit_v01_readiness.py \
+  --root . \
+  --quality-evidence-root "$USCT_RUN_ROOT"
+```
+
 For v0.1 release evidence, include the index and smoke manifest:
 
 ```bash
@@ -87,11 +95,25 @@ Representative A100 evidence from the current branch:
 
 - OpenBreastUS 4-class 256 quality:
   `/home/wudalong/usct-benchlab/runs/usctbench_runs/openbreastus_quality_20260531T164948Z`
+  - run check: `benchmark_run_checks.json`
+  - panel: `comparison_artifacts/openbreastus_quality_256_4class_5alg_gray.png`
 - NBPslice2D 4-class 256 quality:
   `/home/wudalong/usct-benchlab/runs/usctbench_runs/nbpslice2d_quality_20260531T162341Z`
+  - run check: `benchmark_run_checks.json`
+  - panel: `comparison_artifacts/nbpslice2d_quality_256_4class_5alg_gray.png`
 - k-Wave FWI successful full-pipeline result:
   `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_full_pipeline_success201_dense`
 - k-Wave FWI re-ingest with corrected acceptance metrics:
   `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_success201_reingest_63ec1e5`
+  - run check: `benchmark_run_checks.json`
+  - contact sheet: `fwi_kwave_adapter/openbreast_test201_kwave_full_000200/kwave_smoke_outputs/contact_sheet.png`
 - Single-case cross-algorithm visual comparison:
   `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_cross_algorithm_63ec1e5/comparison_artifacts/fwi_case_test201_cross_algorithm_horizontal_gray.png`
+
+The current evidence bundle can be audited on A100 with:
+
+```bash
+python scripts/audit_v01_readiness.py \
+  --root /home/wudalong/usct-benchlab/code \
+  --quality-evidence-root /home/wudalong/usct-benchlab/runs/usctbench_runs
+```

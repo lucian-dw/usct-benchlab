@@ -130,11 +130,74 @@ REQUIRED_TESTS = [
 FORBIDDEN_TRACKED_SUFFIXES = (".h5", ".hdf5", ".mat", ".npy", ".npz", ".pt", ".pth", ".ckpt")
 FORBIDDEN_TRACKED_DIRS = ("data/", "runs/", "checkpoints/", "external/", "third_party/")
 
+QUALITY_EVIDENCE_SPECS = [
+    {
+        "name": "openbreastus_quality_256",
+        "run_dir": "openbreastus_quality_20260531T164948Z",
+        "run_checks": "benchmark_run_checks.json",
+        "summary_csv": "comparison_artifacts/openbreastus_quality_256_4class_5alg_gray.summary.csv",
+        "files": [
+            "benchmark_summary.csv",
+            "benchmark_report.md",
+            "benchmark_run_checks.json",
+            "comparison_artifacts/openbreastus_quality_256_4class_5alg_gray.png",
+            "comparison_artifacts/openbreastus_quality_256_4class_5alg_gray.summary.csv",
+        ],
+        "expected_algorithms": ["straight_cgls", "straight_sirt", "straight_sart", "bent_ray_gn", "rwave_adapter"],
+        "min_summary_rows": 20,
+    },
+    {
+        "name": "nbpslice2d_quality_256",
+        "run_dir": "nbpslice2d_quality_20260531T162341Z",
+        "run_checks": "benchmark_run_checks.json",
+        "summary_csv": "comparison_artifacts/nbpslice2d_quality_256_4class_5alg_gray.summary.csv",
+        "files": [
+            "benchmark_summary.csv",
+            "benchmark_report.md",
+            "benchmark_run_checks.json",
+            "comparison_artifacts/nbpslice2d_quality_256_4class_5alg_gray.png",
+            "comparison_artifacts/nbpslice2d_quality_256_4class_5alg_gray.summary.csv",
+        ],
+        "expected_algorithms": ["straight_cgls", "straight_sirt", "straight_sart", "bent_ray_gn", "rwave_adapter"],
+        "min_summary_rows": 20,
+    },
+    {
+        "name": "fwi_kwave_reingest",
+        "run_dir": "fwi_kwave_success201_reingest_63ec1e5",
+        "run_checks": "benchmark_run_checks.json",
+        "files": [
+            "benchmark_summary.csv",
+            "benchmark_report.md",
+            "benchmark_run_checks.json",
+            "fwi_kwave_adapter/openbreast_test201_kwave_full_000200/kwave_smoke_outputs/contact_sheet.png",
+        ],
+    },
+    {
+        "name": "fwi_cross_algorithm_panel",
+        "run_dir": "fwi_kwave_cross_algorithm_63ec1e5",
+        "summary_csv": "comparison_artifacts/fwi_case_test201_cross_algorithm_horizontal_gray.summary.csv",
+        "files": [
+            "comparison_artifacts/fwi_case_test201_cross_algorithm_horizontal_gray.png",
+            "comparison_artifacts/fwi_case_test201_cross_algorithm_horizontal_gray.summary.csv",
+        ],
+        "expected_algorithms": [
+            "straight_cgls",
+            "straight_sirt",
+            "straight_sart",
+            "bent_ray_gn",
+            "rwave_adapter",
+            "fwi_kwave_adapter",
+        ],
+        "min_summary_rows": 6,
+    },
+]
+
 
 def audit_repo(
     root: Path,
     *,
     run_dir: Path | None = None,
+    quality_evidence_root: Path | None = None,
     openbreastus_index: Path | None = None,
     smoke_manifest: Path | None = None,
     require_clean: bool = False,
@@ -154,6 +217,8 @@ def audit_repo(
         _check_git_clean(root, checks)
     if run_dir is not None:
         _check_run_dir(run_dir, checks)
+    if quality_evidence_root is not None:
+        _check_quality_evidence(quality_evidence_root, checks)
     if openbreastus_index is not None:
         _check_openbreastus_index(openbreastus_index, checks)
     if smoke_manifest is not None:
@@ -363,6 +428,86 @@ def _check_run_dir(run_dir: Path, checks: list[dict[str, Any]]) -> None:
     )
 
 
+def _check_quality_evidence(evidence_root: Path, checks: list[dict[str, Any]]) -> None:
+    records = []
+    fail_reasons: list[str] = []
+    for spec in QUALITY_EVIDENCE_SPECS:
+        run_dir = evidence_root / str(spec["run_dir"])
+        missing_files = []
+        empty_files = []
+        for rel_path in spec.get("files", []):
+            path = run_dir / str(rel_path)
+            if not path.exists():
+                missing_files.append(str(path))
+            elif path.is_file() and path.stat().st_size <= 0:
+                empty_files.append(str(path))
+
+        run_check_passed: bool | None = None
+        run_checks_rel = spec.get("run_checks")
+        if run_checks_rel:
+            run_checks_path = run_dir / str(run_checks_rel)
+            if run_checks_path.exists():
+                try:
+                    run_check_passed = bool(json.loads(run_checks_path.read_text(encoding="utf-8")).get("passed"))
+                except json.JSONDecodeError:
+                    run_check_passed = False
+            else:
+                run_check_passed = False
+
+        summary_rows = 0
+        missing_algorithms: list[str] = []
+        summary_rel = spec.get("summary_csv")
+        if summary_rel:
+            summary_path = run_dir / str(summary_rel)
+            if summary_path.exists():
+                with summary_path.open(newline="", encoding="utf-8") as handle:
+                    rows = list(csv.DictReader(handle))
+                summary_rows = len(rows)
+                expected = {str(item) for item in spec.get("expected_algorithms", [])}
+                observed = {str(row.get("algorithm", "")) for row in rows}
+                missing_algorithms = sorted(expected - observed)
+            else:
+                missing_algorithms = sorted(str(item) for item in spec.get("expected_algorithms", []))
+
+        min_summary_rows = int(spec.get("min_summary_rows", 0))
+        record_fail_reasons = []
+        if missing_files:
+            record_fail_reasons.append(f"missing files: {', '.join(missing_files)}")
+        if empty_files:
+            record_fail_reasons.append(f"empty files: {', '.join(empty_files)}")
+        if run_check_passed is False:
+            record_fail_reasons.append("benchmark_run_checks.json is missing, invalid, or not passed")
+        if summary_rel and summary_rows < min_summary_rows:
+            record_fail_reasons.append(f"summary rows {summary_rows} below required {min_summary_rows}")
+        if missing_algorithms:
+            record_fail_reasons.append(f"missing algorithms in summary: {', '.join(missing_algorithms)}")
+        if record_fail_reasons:
+            fail_reasons.append(f"{spec['name']}: {'; '.join(record_fail_reasons)}")
+
+        records.append(
+            {
+                "name": spec["name"],
+                "run_dir": str(run_dir),
+                "missing_files": missing_files,
+                "empty_files": empty_files,
+                "run_check_passed": run_check_passed,
+                "summary_rows": summary_rows,
+                "missing_algorithms": missing_algorithms,
+                "passed": not record_fail_reasons,
+            }
+        )
+
+    checks.append(
+        {
+            "name": "traditional_fwi_quality_evidence",
+            "passed": not fail_reasons,
+            "evidence_root": str(evidence_root),
+            "records": records,
+            "fail_reasons": fail_reasons,
+        }
+    )
+
+
 def _check_openbreastus_index(index_path: Path, checks: list[dict[str, Any]]) -> None:
     if not index_path.exists():
         checks.append({"name": "openbreastus_index_evidence", "passed": False, "missing": str(index_path)})
@@ -533,6 +678,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Audit usct-benchlab v0.1 readiness evidence.")
     parser.add_argument("--root", default=".", help="Repository root.")
     parser.add_argument("--run-dir", default=None, help="Optional benchmark run directory to audit.")
+    parser.add_argument(
+        "--quality-evidence-root",
+        default=None,
+        help="Optional runs root containing the current OpenBreastUS/NBPslice2D 256 and FWI visual evidence runs.",
+    )
     parser.add_argument("--openbreastus-index", default=None, help="Optional OpenBreastUS index JSON evidence path.")
     parser.add_argument("--smoke-manifest", default=None, help="Optional OpenBreastUS smoke manifest JSON evidence path.")
     parser.add_argument("--require-clean", action="store_true", help="Fail if git status is dirty.")
@@ -543,6 +693,7 @@ def main(argv: list[str] | None = None) -> int:
     result = audit_repo(
         Path(args.root).resolve(),
         run_dir=Path(args.run_dir).resolve() if args.run_dir else None,
+        quality_evidence_root=Path(args.quality_evidence_root).resolve() if args.quality_evidence_root else None,
         openbreastus_index=Path(args.openbreastus_index).resolve() if args.openbreastus_index else None,
         smoke_manifest=Path(args.smoke_manifest).resolve() if args.smoke_manifest else None,
         require_clean=args.require_clean,

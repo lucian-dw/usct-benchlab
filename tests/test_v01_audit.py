@@ -143,6 +143,65 @@ def test_v01_audit_accepts_complete_dod_evidence(tmp_path):
     assert dod_check["passing_smoke_algorithms"] == ["attenuation_sirt", "straight_sart"]
 
 
+def test_v01_audit_accepts_quality_evidence_bundle(tmp_path):
+    audit = _load_audit_module()
+    evidence_root = tmp_path / "runs"
+    expected = {
+        "openbreastus_quality_20260531T164948Z": (
+            "comparison_artifacts/openbreastus_quality_256_4class_5alg_gray",
+            ["straight_cgls", "straight_sirt", "straight_sart", "bent_ray_gn", "rwave_adapter"] * 4,
+            True,
+        ),
+        "nbpslice2d_quality_20260531T162341Z": (
+            "comparison_artifacts/nbpslice2d_quality_256_4class_5alg_gray",
+            ["straight_cgls", "straight_sirt", "straight_sart", "bent_ray_gn", "rwave_adapter"] * 4,
+            True,
+        ),
+        "fwi_kwave_success201_reingest_63ec1e5": (
+            "fwi_kwave_adapter/openbreast_test201_kwave_full_000200/kwave_smoke_outputs/contact_sheet",
+            [],
+            True,
+        ),
+        "fwi_kwave_cross_algorithm_63ec1e5": (
+            "comparison_artifacts/fwi_case_test201_cross_algorithm_horizontal_gray",
+            ["straight_cgls", "straight_sirt", "straight_sart", "bent_ray_gn", "rwave_adapter", "fwi_kwave_adapter"],
+            False,
+        ),
+    }
+    for run_name, (artifact_stem, algorithms, needs_run_checks) in expected.items():
+        run_dir = evidence_root / run_name
+        artifact_path = run_dir / f"{artifact_stem}.png"
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_bytes(b"png")
+        summary_path = run_dir / f"{artifact_stem}.summary.csv"
+        if algorithms:
+            with summary_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["case_id", "algorithm", "rmse", "ssim"])
+                writer.writeheader()
+                for idx, algorithm in enumerate(algorithms):
+                    writer.writerow({"case_id": f"case{idx}", "algorithm": algorithm, "rmse": 1.0, "ssim": 0.9})
+        (run_dir / "benchmark_summary.csv").write_text("algorithm,case_id,pass\nx,c,True\n", encoding="utf-8")
+        (run_dir / "benchmark_report.md").write_text("# Benchmark report\n", encoding="utf-8")
+        if needs_run_checks:
+            (run_dir / "benchmark_run_checks.json").write_text(json.dumps({"passed": True}), encoding="utf-8")
+
+    result = audit.audit_repo(Path(".").resolve(), quality_evidence_root=evidence_root)
+
+    assert result["passed"] is True
+    evidence_check = [check for check in result["checks"] if check["name"] == "traditional_fwi_quality_evidence"][0]
+    assert all(record["passed"] for record in evidence_check["records"])
+
+
+def test_v01_audit_rejects_incomplete_quality_evidence_bundle(tmp_path):
+    audit = _load_audit_module()
+
+    result = audit.audit_repo(Path(".").resolve(), quality_evidence_root=tmp_path / "missing_runs")
+
+    assert result["passed"] is False
+    evidence_check = [check for check in result["checks"] if check["name"] == "traditional_fwi_quality_evidence"][0]
+    assert evidence_check["fail_reasons"]
+
+
 def test_v01_audit_rejects_surrogate_attenuation_as_dod_evidence(tmp_path):
     audit = _load_audit_module()
     run_dir = tmp_path / "run"
