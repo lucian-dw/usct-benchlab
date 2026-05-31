@@ -23,8 +23,14 @@ required_metrics:
     - initial_loss
     - final_loss
     - rmse
+    - water_relative_rmse_improvement
     - kwave_gt_rmse
+    - kwave_gt_water_relative_rmse_improvement
+    - kwave_gt_init_rmse
     - ssim
 minimums:
   fwi_kwave_adapter:
     iterations: 1
+    water_relative_rmse_improvement: 0.0
+    kwave_gt_water_relative_rmse_improvement: 0.0
+    kwave_gt_init_water_relative_rmse_improvement: 0.0

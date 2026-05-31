@@ -18,8 +18,9 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - Default mode is result ingestion only: `run_external: false`.
 - `result_path` must point to an existing k-Wave FWI result `.mat`.
 - `run_external: true` calls `openbreastus_diffusion.kwave_dps.run_full_pipeline` with explicit pipeline arguments from the config.
-- `configs/algorithms/fwi_kwave_full_pipeline.yaml` is the A100 smoke config for `full128`, 0.3 MHz, 20 sound-speed iterations, no attenuation inversion, velocity clamp `[1350, 1600]` m/s, per-step update clamp `5 m/s`, and `save_raw_grad_iters: 20`.
-- The smoke config reports a fixed early-stopped reconstruction checkpoint (`reconstruction_iteration: 1`) because A100 evidence showed later single-frequency iterations reduce waveform loss while worsening image RMSE. The full 20-step loss curve and gradient checkpoints are still saved for diagnostics.
+- `configs/algorithms/fwi_kwave_full_pipeline.yaml` is the A100 smoke config for `full128`, 0.3 MHz, 20 sound-speed iterations, no attenuation inversion, RF travel-time warm start, velocity clamp `[1350, 1600]` m/s, per-step update clamp `5 m/s`, and `save_raw_grad_iters: 20`.
+- The RF travel-time initializer uses a sign-corrected slowness update (`--update-scale -1`) based on A100 sweeps: the default sign produced negative object correlation on the smoke case, while the sign-corrected initializer improved RMSE against the k-Wave `C_INTERP` truth.
+- The smoke config reports a fixed early-stopped reconstruction checkpoint (`reconstruction_iteration: 1`) because A100 evidence showed later iterations reduce waveform loss while worsening image RMSE. The full 20-step loss curve and gradient checkpoints are still saved for diagnostics.
 - Output images are resized to the input case grid for benchmark metrics and artifact writing.
 
 ## Expected Failure Modes
@@ -35,7 +36,7 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - Verify `result_path`, `dataset_path`, `mat_path`, `mat_key`, and `sample_index` refer to the same case.
 - Start with an existing validated result before enabling `run_external`, then move to `invert_existing_dataset`, then `full_pipeline_from_speed_map`.
 - Use low starting frequency, small iteration counts, and conservative update damping.
-- Use warm-starts from the external project when available, but validate them against GT on benchmark phantoms before making them the default.
+- Validate RF warm-start sign, scale, and support before tuning FWI iterations; wrong sign can produce plausible-looking outlines with negative object correlation.
 - If image RMSE worsens while waveform loss decreases, reduce iterations, clamp per-step updates, or use a better multi-frequency schedule before claiming reconstruction quality.
 - Check the external stdout/stderr log before changing inversion parameters.
 

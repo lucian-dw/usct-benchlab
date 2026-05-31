@@ -152,11 +152,19 @@ class KWaveFWIAdapterAlgorithm:
             "loss_decreased": external.get("loss_decreased"),
             "matlab_psnr_value": external.get("psnr_value"),
             "matlab_ssim_value": external.get("ssim_value"),
+            "warm_start_builder": _expand_text(config.parameters.get("warm_start_builder", "")),
+            "warm_start_path": str(_configured_path(config, "warm_start_path") or _configured_path(config, "warm_start_result") or ""),
         }
         if case.ground_truth.sound_speed_mps is not None:
             truth = np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
             metrics.update(compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask))
             metrics.update(compute_baseline_improvement_metrics(sound_speed, truth, c0, mask=case.grid.roi_mask))
+            if external.get("initial_sound_speed_mps") is not None:
+                init = _resize_to_shape(np.asarray(external["initial_sound_speed_mps"], dtype=float), case.grid.shape)
+                metrics.update(compute_image_metrics(init, truth, mask=case.grid.roi_mask, prefix="init_"))
+                metrics.update(
+                    compute_baseline_improvement_metrics(init, truth, c0, mask=case.grid.roi_mask, prefix="init_water_")
+                )
         if external.get("ground_truth_sound_speed_mps") is not None:
             kwave_truth = _resize_to_shape(external["ground_truth_sound_speed_mps"], case.grid.shape)
             metrics.update(compute_image_metrics(sound_speed, kwave_truth, mask=case.grid.roi_mask, prefix="kwave_gt_"))
@@ -169,6 +177,18 @@ class KWaveFWIAdapterAlgorithm:
                     prefix="kwave_gt_water_",
                 )
             )
+            if external.get("initial_sound_speed_mps") is not None:
+                kwave_init = _resize_to_shape(np.asarray(external["initial_sound_speed_mps"], dtype=float), case.grid.shape)
+                metrics.update(compute_image_metrics(kwave_init, kwave_truth, mask=case.grid.roi_mask, prefix="kwave_gt_init_"))
+                metrics.update(
+                    compute_baseline_improvement_metrics(
+                        kwave_init,
+                        kwave_truth,
+                        c0,
+                        mask=case.grid.roi_mask,
+                        prefix="kwave_gt_init_water_",
+                    )
+                )
         if attenuation is not None and case.ground_truth.attenuation_np_per_m is not None:
             metrics.update(
                 compute_image_metrics(
@@ -208,6 +228,8 @@ def read_kwave_fwi_result(path: str | Path) -> dict[str, Any]:
             "ground_truth_sound_speed_mps": np.asarray(ground_truth, dtype=float) if ground_truth is not None else None,
             "sound_speed_iter_mps": np.asarray(sound_speed_iter, dtype=float) if sound_speed_iter is not None else None,
             "attenuation_iter_np_per_m": np.asarray(attenuation_iter, dtype=float) if attenuation_iter is not None else None,
+            "initial_sound_speed_mps": _read_dataset(handle, "VEL_INIT"),
+            "initial_attenuation_np_per_m": _read_dataset(handle, "ATTEN_INIT_USED"),
             "losses": losses.tolist(),
             "iterations": int(losses.size),
             "initial_loss": float(losses[0]) if losses.size else None,

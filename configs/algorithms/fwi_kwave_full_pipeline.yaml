@@ -24,6 +24,18 @@ parameters:
   scratch_dir: ${USCT_KWAVE_SCRATCH_DIR}
   dataset_path: ${USCT_KWAVE_DATASET_PATH}
   external_log_path: ${USCT_KWAVE_EXTERNAL_LOG_PATH}
+  warm_start_builder: traveltime
+  warm_start_path: ${USCT_KWAVE_WARM_START_PATH}
+  warm_start_summary_path: ${USCT_KWAVE_WARM_START_SUMMARY_PATH}
+  warm_start_diagnostic_prefix: ${USCT_KWAVE_WARM_START_DIAGNOSTIC_PREFIX}
+  warm_start_args:
+    - --update-scale
+    - "-1"
+    - --recon-dxi-mm
+    - "0.3"
+    - --velocity-bounds
+    - "1408.7"
+    - "1595.1"
   reconstruction_iteration: ${USCT_KWAVE_RECONSTRUCTION_ITERATION}
   overwrite: true
   start_matlab: true
@@ -37,7 +49,7 @@ parameters:
   tx_downsample: 1
   recon_dxi_mm: 0.6
   c_geom: 1540.0
-  c_init: 1480.0
+  c_init: 1500.0
   sign_conv: -1.0
   velocity_bounds:
     - 1350.0
@@ -48,6 +60,6 @@ parameters:
 metadata:
   external_source: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/run_full_pipeline.py
   default_mode: full_pipeline_from_speed_map
-  default_initialization: constant_early_stopped
-  optional_initialization: set warm_start_builder=traveltime to use RF travel-time warm start.
+  default_initialization: RF travel-time warm start with sign-corrected slowness update, early-stopped at the configured reconstruction checkpoint.
+  fallback_initialization: unset warm_start_builder to use constant background/debug mode.
   v0_1_scope: k-Wave simulation plus Helmholtz/FWI only; no diffusion or generative priors.
