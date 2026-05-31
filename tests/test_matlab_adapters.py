@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import yaml
 
+from usctbench.algorithms.adapters._matlab_optional import requests_matlab_backend
 from usctbench.algorithms.adapters.refraction_gn import BentRayGNAdapter
 from usctbench.algorithms.adapters.rwave import RWaveAdapter
 from usctbench.cli import main
@@ -30,6 +31,13 @@ def test_adapter_native_backends_reconstruct_sound_speed():
         assert result.metrics["data_residual_reduction"] > 0.0
         assert result.metrics["rmse"] < 100.0
         assert result.metrics["method_family"]
+
+
+def test_optional_matlab_backend_request_detection():
+    assert requests_matlab_backend(AlgorithmConfig(parameters={"backend": "python"})) is False
+    assert requests_matlab_backend(AlgorithmConfig(parameters={"backend": "matlab"})) is True
+    assert requests_matlab_backend(AlgorithmConfig(parameters={"external_root": "/tmp/external"})) is True
+    assert requests_matlab_backend(AlgorithmConfig(parameters={"entrypoint": "run.m"})) is True
 
 
 def test_matlab_adapters_skip_without_matlab():
