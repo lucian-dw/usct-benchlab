@@ -11,13 +11,14 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - For active external execution, an A100 environment with the `USCT_kwave` project, k-Wave, MATLAB engine support, CUDA k-Wave backend, and OpenBreastUS speed-map MAT files.
 - `execution_mode: invert_existing_dataset` requires a generated k-Wave channel dataset.
 - `execution_mode: full_pipeline_from_speed_map` starts from a 2-D OpenBreastUS speed map and calls the A100 `run_full_pipeline.py` path: sim info, RF generation, channel assembly, Helmholtz preparation inside MATLAB, and multi-frequency FWI.
+- `warm_start_builder: traveltime` runs the A100 RF travel-time initializer after channel assembly and passes the generated `VEL_ESTIM` MAT file into FWI as `warm_start_path`.
 
 ## Default Settings
 
 - Default mode is result ingestion only: `run_external: false`.
 - `result_path` must point to an existing k-Wave FWI result `.mat`.
 - `run_external: true` calls `openbreastus_diffusion.kwave_dps.run_full_pipeline` with explicit pipeline arguments from the config.
-- `configs/algorithms/fwi_kwave_full_pipeline.yaml` is the A100 smoke config for `full128`, 0.3 MHz, 20 sound-speed iterations, no attenuation inversion, and `save_raw_grad_iters: 20`.
+- `configs/algorithms/fwi_kwave_full_pipeline.yaml` is the A100 smoke config for `full128`, RF travel-time warm start, 0.3 MHz, 20 sound-speed iterations, no attenuation inversion, velocity clamp `[1350, 1600]` m/s, and `save_raw_grad_iters: 20`.
 - Output images are resized to the input case grid for benchmark metrics and artifact writing.
 
 ## Expected Failure Modes
@@ -34,6 +35,7 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - Start with an existing validated result before enabling `run_external`, then move to `invert_existing_dataset`, then `full_pipeline_from_speed_map`.
 - Use low starting frequency, small iteration counts, and conservative update damping.
 - Use warm-starts from the external project when available.
+- If image RMSE worsens while waveform loss decreases, reduce iterations, clamp per-step updates, or use a better multi-frequency schedule before claiming reconstruction quality.
 - Check the external stdout/stderr log before changing inversion parameters.
 
 ## Acceptance Tests

@@ -47,6 +47,9 @@ export USCT_KWAVE_SCRATCH_DIR="${USCT_KWAVE_SCRATCH_DIR:-$external_root/scratch/
 export USCT_KWAVE_DATASET_PATH="${USCT_KWAVE_DATASET_PATH:-$external_root/datasets/kWave_${case_prefix}_full128.mat}"
 export USCT_KWAVE_FWI_RESULT_PATH="${USCT_KWAVE_FWI_RESULT_PATH:-$external_root/results/${case_prefix}_WaveformInversionResults.mat}"
 export USCT_KWAVE_EXTERNAL_LOG_PATH="${USCT_KWAVE_EXTERNAL_LOG_PATH:-$external_root/run.log}"
+export USCT_KWAVE_WARM_START_PATH="${USCT_KWAVE_WARM_START_PATH:-$external_root/warm_start/${case_prefix}_traveltime_init.mat}"
+export USCT_KWAVE_WARM_START_SUMMARY_PATH="${USCT_KWAVE_WARM_START_SUMMARY_PATH:-$external_root/warm_start/${case_prefix}_traveltime_init.json}"
+export USCT_KWAVE_WARM_START_DIAGNOSTIC_PREFIX="${USCT_KWAVE_WARM_START_DIAGNOSTIC_PREFIX:-$external_root/warm_start/${case_prefix}_traveltime}"
 
 if [[ ! -f "$USCT_KWAVE_SOURCE_MAT" ]]; then
   echo "Missing USCT_KWAVE_SOURCE_MAT: $USCT_KWAVE_SOURCE_MAT" >&2

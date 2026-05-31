@@ -16,6 +16,7 @@ from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus
 
 _INVERT_EXISTING_DATASET_MODES = {"invert_existing_dataset", "dataset", "skip_simulation"}
 _FULL_PIPELINE_MODES = {"full_pipeline", "full_pipeline_from_speed_map", "speed_map"}
+_TRAVELTIME_WARM_START_BUILDERS = {"traveltime", "rf_traveltime", "travel_time", "rf_travel_time"}
 _CLI_PARAMS = {
     "mat_path": "--mat-path",
     "mat_key": "--mat-key",
@@ -148,6 +149,18 @@ class KWaveFWIAdapterAlgorithm:
             truth = np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
             metrics.update(compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask))
             metrics.update(compute_baseline_improvement_metrics(sound_speed, truth, c0, mask=case.grid.roi_mask))
+        if external.get("ground_truth_sound_speed_mps") is not None:
+            kwave_truth = _resize_to_shape(external["ground_truth_sound_speed_mps"], case.grid.shape)
+            metrics.update(compute_image_metrics(sound_speed, kwave_truth, mask=case.grid.roi_mask, prefix="kwave_gt_"))
+            metrics.update(
+                compute_baseline_improvement_metrics(
+                    sound_speed,
+                    kwave_truth,
+                    c0,
+                    mask=case.grid.roi_mask,
+                    prefix="kwave_gt_water_",
+                )
+            )
         if attenuation is not None and case.ground_truth.attenuation_np_per_m is not None:
             metrics.update(
                 compute_image_metrics(
@@ -177,10 +190,12 @@ def read_kwave_fwi_result(path: str | Path) -> dict[str, Any]:
     with h5py.File(result_path, "r") as handle:
         sound_speed = _require_dataset(handle, "VEL_ESTIM")
         attenuation = _read_dataset(handle, "ATTEN_ESTIM")
+        ground_truth = _read_dataset(handle, "C_INTERP")
         losses = _read_vector(handle, "LOSS_ITER")
         return {
             "sound_speed_mps": np.asarray(sound_speed, dtype=float),
             "attenuation_np_per_m": np.asarray(attenuation, dtype=float) if attenuation is not None else None,
+            "ground_truth_sound_speed_mps": np.asarray(ground_truth, dtype=float) if ground_truth is not None else None,
             "losses": losses.tolist(),
             "iterations": int(losses.size),
             "initial_loss": float(losses[0]) if losses.size else None,
@@ -205,56 +220,61 @@ def _run_external_pipeline(case: USCTCase, config: AlgorithmConfig, result_path:
     usct_kwave_root = Path(
         _expand_text(config.parameters.get("usct_kwave_root", os.environ.get("USCT_KWAVE_ROOT", "/home/wudalong/USCT_kwave")))
     ).expanduser()
-    command = list(build["command"])
+    commands = [list(command) for command in build["commands"]]
     env = os.environ.copy()
     env["PYTHONPATH"] = str(usct_kwave_root) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     log_path = _configured_path(config, "external_log_path")
     timeout_s = float(config.parameters.get("timeout_s", 3600.0))
     result_path.parent.mkdir(parents=True, exist_ok=True)
-    stdout_target = subprocess.PIPE
-    stderr_target = subprocess.STDOUT
-    log_handle = None
-    try:
+    for step_index, command in enumerate(commands, start=1):
+        stdout_target = subprocess.PIPE
+        stderr_target = subprocess.STDOUT
+        log_handle = None
         if log_path is not None:
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            log_handle = log_path.open("w", encoding="utf-8")
+            log_mode = "w" if step_index == 1 else "a"
+            log_handle = log_path.open(log_mode, encoding="utf-8")
+            if step_index > 1:
+                log_handle.write("\n\n")
+            log_handle.write(f"# external step {step_index}/{len(commands)}\n")
             log_handle.write("$ " + " ".join(command) + "\n\n")
             log_handle.flush()
             stdout_target = log_handle
             stderr_target = subprocess.STDOUT
-        proc = subprocess.run(
-            command,
-            cwd=usct_kwave_root,
-            env=env,
-            text=True,
-            stdout=stdout_target,
-            stderr=stderr_target,
-            timeout=timeout_s,
-            check=False,
-        )
-    except Exception as exc:
-        return ReconstructionResult(
-            algorithm=KWaveFWIAdapterAlgorithm.name,
-            case_id=case.case_id,
-            status=ResultStatus.FAILED,
-            failure_reason=f"external k-Wave FWI launch failed: {type(exc).__name__}: {exc}",
-        )
-    finally:
-        if log_handle is not None:
-            log_handle.close()
+        try:
+            proc = subprocess.run(
+                command,
+                cwd=usct_kwave_root,
+                env=env,
+                text=True,
+                stdout=stdout_target,
+                stderr=stderr_target,
+                timeout=timeout_s,
+                check=False,
+            )
+        except Exception as exc:
+            return ReconstructionResult(
+                algorithm=KWaveFWIAdapterAlgorithm.name,
+                case_id=case.case_id,
+                status=ResultStatus.FAILED,
+                failure_reason=f"external k-Wave FWI step {step_index} failed: {type(exc).__name__}: {exc}",
+            )
+        finally:
+            if log_handle is not None:
+                log_handle.close()
 
-    if proc.returncode != 0:
-        detail = ""
-        if log_path is not None:
-            detail = f"; log={log_path}"
-        elif proc.stdout:
-            detail = f"; stdout={proc.stdout[-1000:]}"
-        return ReconstructionResult(
-            algorithm=KWaveFWIAdapterAlgorithm.name,
-            case_id=case.case_id,
-            status=ResultStatus.FAILED,
-            failure_reason=f"external k-Wave FWI returned {proc.returncode}{detail}",
-        )
+        if proc.returncode != 0:
+            detail = ""
+            if log_path is not None:
+                detail = f"; log={log_path}"
+            elif proc.stdout:
+                detail = f"; stdout={proc.stdout[-1000:]}"
+            return ReconstructionResult(
+                algorithm=KWaveFWIAdapterAlgorithm.name,
+                case_id=case.case_id,
+                status=ResultStatus.FAILED,
+                failure_reason=f"external k-Wave FWI step {step_index} returned {proc.returncode}{detail}",
+            )
     return ReconstructionResult(algorithm=KWaveFWIAdapterAlgorithm.name, case_id=case.case_id)
 
 
@@ -266,14 +286,14 @@ def _build_external_pipeline_command(case: USCTCase, config: AlgorithmConfig, re
         dataset_path = Path(_expand_text(dataset_from_case)).expanduser() if dataset_from_case else None
     if mode in _INVERT_EXISTING_DATASET_MODES and dataset_path is None:
         return {
-            "command": [],
+            "commands": [],
             "dataset_path": None,
             "mode": mode,
             "error": "run_external in invert_existing_dataset mode requires parameters.dataset_path or case.metadata.source_path",
         }
     if mode not in _INVERT_EXISTING_DATASET_MODES and mode not in _FULL_PIPELINE_MODES:
         return {
-            "command": [],
+            "commands": [],
             "dataset_path": dataset_path,
             "mode": mode,
             "error": f"unsupported k-Wave external execution_mode: {mode}",
@@ -306,7 +326,59 @@ def _build_external_pipeline_command(case: USCTCase, config: AlgorithmConfig, re
             command.append(flag)
 
     command.extend(_expand_text(value) for value in config.parameters.get("pipeline_args", []))
-    return {"command": command, "dataset_path": dataset_path, "mode": mode, "error": None}
+    commands = _with_optional_warm_start_steps(command, mode=mode, dataset_path=dataset_path, result_path=result_path, config=config)
+    return {"commands": commands, "dataset_path": dataset_path, "mode": mode, "error": None}
+
+
+def _with_optional_warm_start_steps(
+    inversion_command: list[str],
+    *,
+    mode: str,
+    dataset_path: Path | None,
+    result_path: Path,
+    config: AlgorithmConfig,
+) -> list[list[str]]:
+    builder = _expand_text(config.parameters.get("warm_start_builder", "")).strip().lower()
+    if builder not in _TRAVELTIME_WARM_START_BUILDERS:
+        return [inversion_command]
+    if dataset_path is None:
+        raise ValueError("warm_start_builder requires parameters.dataset_path")
+
+    warm_start_path = _configured_path(config, "warm_start_path") or result_path.with_name(result_path.stem + "_traveltime_init.mat")
+    warm_start_summary_path = _configured_path(config, "warm_start_summary_path") or warm_start_path.with_suffix(".json")
+    diagnostic_prefix = _configured_path(config, "warm_start_diagnostic_prefix") or warm_start_path.with_suffix("")
+    python_bin = _expand_text(config.parameters.get("python_bin", sys.executable))
+    warm_module = _expand_text(config.parameters.get("warm_start_module", "openbreastus_diffusion.kwave_dps.make_traveltime_init"))
+    warm_command = [
+        python_bin,
+        "-m",
+        warm_module,
+        "--dataset-path",
+        str(dataset_path),
+        "--output-path",
+        str(warm_start_path),
+        "--summary-path",
+        str(warm_start_summary_path),
+        "--diagnostic-prefix",
+        str(diagnostic_prefix),
+    ]
+    warm_command.extend(_expand_text(value) for value in config.parameters.get("warm_start_args", []))
+
+    final_inversion_command = list(inversion_command)
+    if mode in _FULL_PIPELINE_MODES:
+        generation_command = list(inversion_command)
+        generation_command.append("--skip-inversion")
+        final_inversion_command.extend(["--skip-siminfo", "--skip-rf", "--skip-assemble"])
+    else:
+        generation_command = None
+    final_inversion_command.extend(["--warm-start-result", str(warm_start_path)])
+
+    commands = []
+    if generation_command is not None:
+        commands.append(generation_command)
+    commands.append(warm_command)
+    commands.append(final_inversion_command)
+    return commands
 
 
 def _configured_path(config: AlgorithmConfig, key: str) -> Path | None:

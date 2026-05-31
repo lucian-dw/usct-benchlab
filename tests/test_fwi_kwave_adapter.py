@@ -21,6 +21,7 @@ def test_read_kwave_fwi_result_extracts_metrics(tmp_path):
 
     assert result["sound_speed_mps"].shape == (6, 6)
     assert result["attenuation_np_per_m"].shape == (6, 6)
+    assert result["ground_truth_sound_speed_mps"].shape == (6, 6)
     assert result["iterations"] == 3
     assert result["loss_decreased"] is True
     assert result["dataset_path"] == "/tmp/dataset.mat"
@@ -40,6 +41,7 @@ def test_kwave_adapter_ingests_existing_result(tmp_path):
     assert result.metrics["iterations"] == 3
     assert result.metrics["loss_decreased"] is True
     assert "rmse" in result.metrics
+    assert "kwave_gt_rmse" in result.metrics
 
 
 def test_kwave_adapter_missing_result_skips(tmp_path):
@@ -151,6 +153,47 @@ def test_kwave_adapter_external_dataset_mode_keeps_skip_flags(tmp_path, monkeypa
     assert command[command.index("--dataset-path") + 1] == str(dataset_path)
 
 
+def test_kwave_adapter_traveltime_warm_start_runs_three_external_steps(tmp_path, monkeypatch):
+    result_path = tmp_path / "result.mat"
+    dataset_path = tmp_path / "dataset.mat"
+    warm_start_path = tmp_path / "warm_start.mat"
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        _write_result(result_path)
+        return subprocess.CompletedProcess(command, 0, stdout="ok")
+
+    monkeypatch.setattr("usctbench.algorithms.fwi.kwave_adapter.subprocess.run", fake_run)
+    case = make_sound_speed_case(shape=(4, 4), n_transducers=8)
+
+    result = KWaveFWIAdapterAlgorithm().run(
+        case,
+        AlgorithmConfig(
+            parameters={
+                "result_path": str(result_path),
+                "run_external": True,
+                "execution_mode": "full_pipeline_from_speed_map",
+                "dataset_path": str(dataset_path),
+                "warm_start_builder": "traveltime",
+                "warm_start_path": str(warm_start_path),
+                "usct_kwave_root": str(tmp_path),
+                "mat_path": str(tmp_path / "speed.mat"),
+            }
+        ),
+    )
+
+    assert result.status == "success"
+    assert len(commands) == 3
+    assert "--skip-inversion" in commands[0]
+    assert "openbreastus_diffusion.kwave_dps.make_traveltime_init" in commands[1]
+    assert commands[1][commands[1].index("--output-path") + 1] == str(warm_start_path)
+    assert "--skip-siminfo" in commands[2]
+    assert "--skip-rf" in commands[2]
+    assert "--skip-assemble" in commands[2]
+    assert commands[2][commands[2].index("--warm-start-result") + 1] == str(warm_start_path)
+
+
 def _write_result(path):
     sound_speed = np.linspace(1450.0, 1520.0, 36, dtype=np.float32).reshape(6, 6)
     attenuation = np.linspace(0.0, 1.0, 36, dtype=np.float32).reshape(6, 6)
@@ -158,6 +201,7 @@ def _write_result(path):
     with h5py.File(path, "w") as handle:
         handle.create_dataset("VEL_ESTIM", data=sound_speed)
         handle.create_dataset("ATTEN_ESTIM", data=attenuation)
+        handle.create_dataset("C_INTERP", data=sound_speed + 1.0)
         handle.create_dataset("LOSS_ITER", data=np.asarray([[3.0, 2.0, 1.0]], dtype=np.float64))
         handle.create_dataset("psnr_value", data=np.asarray([[20.0]], dtype=np.float64))
         handle.create_dataset("ssim_value", data=np.asarray([[0.5]], dtype=np.float64))
