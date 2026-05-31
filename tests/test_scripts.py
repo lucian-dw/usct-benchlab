@@ -24,6 +24,7 @@ def test_shell_scripts_source_local_env():
         Path("scripts/run_openbreastus_smoke.sh"),
         Path("scripts/run_fwi_kwave_adapter_smoke.sh"),
         Path("scripts/run_fwi_kwave_full_pipeline_smoke.sh"),
+        Path("scripts/run_external_matlab_adapter_smoke.sh"),
         Path("scripts/run_nbpslice2d_smoke.sh"),
         Path("scripts/run_openbreastus_quality.sh"),
         Path("scripts/run_nbpslice2d_quality.sh"),
@@ -82,6 +83,28 @@ def test_external_matlab_entrypoint_templates_match_adapter_contract():
     assert "reconstructGreensImage.m" in rwave
 
 
+def test_external_matlab_adapter_smoke_script_and_protocol_are_reproducible():
+    import yaml
+
+    script = Path("scripts/run_external_matlab_adapter_smoke.sh").read_text(encoding="utf-8")
+    protocol = yaml.safe_load(Path("configs/benchmarks/external_matlab_adapter_smoke.yaml").read_text(encoding="utf-8"))
+    bent_config = yaml.safe_load(Path("configs/algorithms/bent_ray_gn_external_matlab.yaml").read_text(encoding="utf-8"))
+    rwave_config = yaml.safe_load(Path("configs/algorithms/rwave_adapter_external_matlab.yaml").read_text(encoding="utf-8"))
+
+    assert "configs/benchmarks/external_matlab_adapter_smoke.yaml" in script
+    assert "USCT_REFRACTION_CORRECTED_ROOT" in script
+    assert "USCT_RWAVE_ROOT" in script
+    assert "MATLAB_BIN" in script
+    assert "render_class_comparison_panels.py" in script
+    assert "external_matlab_smoke_${USCT_SMOKE_CONVERTED_SHAPE}_gray.png" in script
+    assert protocol["expected_algorithms"] == ["bent_ray_gn", "rwave_adapter"]
+    assert protocol["required_metrics"]["bent_ray_gn"] == protocol["required_metrics"]["rwave_adapter"]
+    assert bent_config["parameters"]["backend"] == "matlab"
+    assert rwave_config["parameters"]["backend"] == "matlab"
+    assert "refractionCorrectedUSCT.github.io" in bent_config["parameters"]["external_root"]
+    assert "ray-based-quantitative-ultrasound-tomography" in rwave_config["parameters"]["external_root"]
+
+
 def test_fwi_kwave_adapter_smoke_script_runs_adapter_flow():
     text = Path("scripts/run_fwi_kwave_adapter_smoke.sh").read_text(encoding="utf-8")
 
@@ -122,7 +145,7 @@ def test_fwi_kwave_full_pipeline_smoke_script_runs_speed_map_flow():
     assert "USCT_KWAVE_SAMPLE_INDEX:-201" in text
     assert "USCT_KWAVE_RUN_ID:-fwi_kwave_full_pipeline_success201_dense" in text
     assert "USCT_KWAVE_WRAPPER_CONVERTED_SHAPE:-256" in text
-    assert "USCT_KWAVE_RECONSTRUCTION_ITERATION:-final" in text
+    assert "USCT_KWAVE_RECONSTRUCTION_ITERATION:-best" in text
     assert "benchmark wrapper" in text
     assert "output_shape=($USCT_KWAVE_WRAPPER_CONVERTED_SHAPE, $USCT_KWAVE_WRAPPER_CONVERTED_SHAPE)" in text
     assert "--render-best-and-final" in text
@@ -196,7 +219,7 @@ def test_fwi_kwave_full_pipeline_config_uses_multifrequency_rf_warm_start():
     assert params["atten_bkgnd"] == 0.0
     assert params["sos2atten"] == 0.0
     assert params["save_raw_grad_iters"] == 0
-    assert params["reconstruction_iteration"] == "final"
+    assert params["reconstruction_iteration"] == "${USCT_KWAVE_RECONSTRUCTION_ITERATION:-best}"
     warm_args = params["warm_start_args"]
     assert warm_args[warm_args.index("--background-speed") + 1] == "1500"
     assert warm_args[warm_args.index("--coarse-dxi-mm") + 1] == "3.0"
@@ -219,6 +242,7 @@ def test_fwi_kwave_full_pipeline_protocol_uses_native_kwave_metrics():
     assert "final_iteration_rmse" in required
     assert "kwave_gt_rmse" in required
     assert "kwave_gt_init_rmse" in required
+    assert "kwave_gt_selected_relative_rmse_improvement" in required
     assert "kwave_gt_final_relative_rmse_improvement" in required
     assert "kwave_gt_ssim" in required
     assert "kwave_native_psnr" in required
@@ -226,7 +250,8 @@ def test_fwi_kwave_full_pipeline_protocol_uses_native_kwave_metrics():
     assert "kwave_gt_water_relative_rmse_improvement" not in required
     assert "water_relative_rmse_improvement" not in required
     assert "kwave_gt_water_relative_rmse_improvement" not in protocol["minimums"]["fwi_kwave_adapter"]
-    assert "kwave_gt_final_relative_rmse_improvement" in protocol["minimums"]["fwi_kwave_adapter"]
+    assert "kwave_gt_selected_relative_rmse_improvement" in protocol["minimums"]["fwi_kwave_adapter"]
+    assert "kwave_gt_final_relative_rmse_improvement" not in protocol["minimums"]["fwi_kwave_adapter"]
     assert "water_relative_rmse_improvement" not in protocol["minimums"]["fwi_kwave_adapter"]
     assert "kwave_gt_init_water_relative_rmse_improvement" not in protocol["minimums"]["fwi_kwave_adapter"]
 

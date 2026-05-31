@@ -78,6 +78,7 @@ REQUIRED_FILES = [
     "scripts/run_openbreastus_smoke.sh",
     "scripts/run_fwi_kwave_adapter_smoke.sh",
     "scripts/run_fwi_kwave_full_pipeline_smoke.sh",
+    "scripts/run_external_matlab_adapter_smoke.sh",
     "scripts/run_nbpslice2d_smoke.sh",
     "scripts/run_openbreastus_quality.sh",
     "scripts/run_nbpslice2d_quality.sh",
@@ -101,10 +102,13 @@ REQUIRED_FILES = [
     "configs/benchmarks/openbreastus_mini.yaml",
     "configs/benchmarks/fwi_kwave_adapter_smoke.yaml",
     "configs/benchmarks/fwi_kwave_full_pipeline_smoke.yaml",
+    "configs/benchmarks/external_matlab_adapter_smoke.yaml",
     "configs/benchmarks/openbreastus_quality.yaml",
     "configs/benchmarks/nbpslice2d_smoke.yaml",
     "configs/benchmarks/nbpslice2d_quality.yaml",
     "configs/algorithms/fwi_kwave_full_pipeline.yaml",
+    "configs/algorithms/bent_ray_gn_external_matlab.yaml",
+    "configs/algorithms/rwave_adapter_external_matlab.yaml",
     "configs/algorithms/fwi_tiny_nbp.yaml",
 ]
 

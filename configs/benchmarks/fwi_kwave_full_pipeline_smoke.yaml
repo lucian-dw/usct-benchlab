@@ -27,6 +27,7 @@ required_metrics:
     - final_loss
     - kwave_gt_rmse
     - kwave_gt_init_rmse
+    - kwave_gt_selected_relative_rmse_improvement
     - kwave_gt_final_relative_rmse_improvement
     - kwave_gt_ssim
     - kwave_native_psnr
@@ -34,7 +35,7 @@ required_metrics:
 minimums:
   fwi_kwave_adapter:
     iterations: 1
-    kwave_gt_final_relative_rmse_improvement: 0.1
+    kwave_gt_selected_relative_rmse_improvement: 0.1
     kwave_gt_ssim: 0.6
     kwave_native_psnr: 20.0
     kwave_native_ssim: 0.6

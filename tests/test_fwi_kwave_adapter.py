@@ -124,6 +124,8 @@ def test_kwave_adapter_ingests_existing_result(tmp_path):
     assert result.metrics["final_iteration_rmse"] == pytest.approx(1.0)
     assert result.metrics["kwave_gt_final_improved"] is True
     assert result.metrics["kwave_gt_final_relative_rmse_improvement"] > 0.0
+    assert result.metrics["kwave_gt_selected_improved"] is True
+    assert result.metrics["kwave_gt_selected_relative_rmse_improvement"] > 0.0
     assert result.metrics["kwave_native_psnr"] == pytest.approx(20.0)
     assert result.metrics["kwave_native_ssim"] == pytest.approx(0.5)
     assert result.metrics["loss_decreased"] is True
@@ -178,6 +180,33 @@ def test_kwave_adapter_can_select_best_iteration_by_ground_truth_rmse(tmp_path):
     assert result.metrics["best_iteration"] == 2
     assert result.metrics["selected_iteration"] == 2
     assert result.metrics["selected_loss"] == 2.0
+    assert result.metrics["kwave_gt_rmse"] == pytest.approx(result.metrics["best_iteration_rmse"])
+    assert result.metrics["kwave_gt_selected_relative_rmse_improvement"] > result.metrics["kwave_gt_final_relative_rmse_improvement"]
+
+
+def test_kwave_adapter_reconstruction_iteration_supports_env_default(tmp_path, monkeypatch):
+    result_path = tmp_path / "result.mat"
+    _write_result(result_path)
+    with h5py.File(result_path, "a") as handle:
+        sound_speed = np.asarray(handle["VEL_ESTIM"][()], dtype=np.float32)
+        del handle["VEL_ESTIM_ITER"]
+        handle.create_dataset("VEL_ESTIM_ITER", data=np.stack([sound_speed - 20.0, sound_speed + 1.0, sound_speed + 10.0], axis=0))
+    monkeypatch.delenv("USCT_MISSING_ITERATION_FOR_TEST", raising=False)
+    case = make_sound_speed_case(shape=(4, 4), n_transducers=8)
+
+    result = KWaveFWIAdapterAlgorithm().run(
+        case,
+        AlgorithmConfig(
+            parameters={
+                "result_path": str(result_path),
+                "reconstruction_iteration": "${USCT_MISSING_ITERATION_FOR_TEST:-best}",
+            }
+        ),
+    )
+
+    assert result.status == "success"
+    assert result.metrics["selection_mode"] == "best"
+    assert result.metrics["selected_iteration"] == 2
 
 
 def test_kwave_adapter_expands_env_result_path(tmp_path, monkeypatch):

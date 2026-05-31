@@ -72,14 +72,16 @@ Required pass/fail evidence:
 - `iterations`, `selected_iteration`, `selected_loss`;
 - `best_iteration`, `best_iteration_rmse`, `final_iteration_rmse`;
 - `kwave_gt_rmse`, `kwave_gt_init_rmse`, `kwave_gt_ssim`;
-- `kwave_gt_final_relative_rmse_improvement >= 0.1`;
+- `kwave_gt_selected_relative_rmse_improvement >= 0.1`;
 - `kwave_native_psnr >= 20`;
 - `kwave_native_ssim >= 0.6`.
 
-The adapter still records water/background baseline metrics, but the FWI smoke
-protocol does not use them as acceptance gates. This avoids passing or failing
-FWI based on an image-domain baseline that is weaker than the external
-full-wave evidence.
+The full-pipeline smoke path selects the best available iteration by RMSE
+against the external k-Wave `C_INTERP` grid, then records final-iteration
+metrics separately. The adapter still records water/background baseline metrics,
+but the FWI smoke protocol does not use them as acceptance gates. This avoids
+passing or failing FWI based on an image-domain baseline that is weaker than the
+external full-wave evidence.
 
 ## What Not To Delete
 

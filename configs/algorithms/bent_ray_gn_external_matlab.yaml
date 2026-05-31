@@ -1,0 +1,20 @@
+name: bent_ray_gn
+parameters:
+  backend: matlab
+  matlab_bin: ${MATLAB_BIN:-/usr/local/MATLAB/R2021b/bin/matlab}
+  external_root: ${USCT_REFRACTION_CORRECTED_ROOT:-/home/wudalong/usct-benchlab/external/refractionCorrectedUSCT.github.io}
+  entrypoint: ${USCT_BENT_RAY_ENTRYPOINT:-/home/wudalong/usct-benchlab/code/scripts/matlab_adapters/refraction_corrected_usct_entrypoint.m}
+  timeout_s: 900
+  outer_iterations: 4
+  inner_iterations: 24
+  step_length: 1.0
+  regularization: laplacian
+  regularization_lambda: 3.0e-5
+  smooth_sigma: 0.6
+  roi_update_only: false
+  reference_sound_speed_mps: 1500.0
+  sound_speed_bounds_mps: [1300.0, 1700.0]
+metadata:
+  external_reference: rehmanali1994/refractionCorrectedUSCT.github.io
+  external_entrypoint_template: scripts/matlab_adapters/refraction_corrected_usct_entrypoint.m
+  benchmark_role: optional external MATLAB smoke for the public refraction-corrected travel-time lineage.

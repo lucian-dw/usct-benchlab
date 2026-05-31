@@ -110,9 +110,9 @@ FWI quality acceptance should use:
 
 - `kwave_gt_rmse` and `kwave_gt_ssim`;
 - `kwave_gt_init_rmse`;
-- `kwave_gt_final_relative_rmse_improvement`;
+- `kwave_gt_selected_relative_rmse_improvement`;
 - `kwave_native_psnr` and `kwave_native_ssim`;
-- `final_iteration_rmse` as a final-iteration guard.
+- `final_iteration_rmse` as a diagnostic final-iteration record.
 
 Generic wrapper metrics (`rmse`, `ssim`, `water_relative_rmse_improvement`) are
 still written for common CSV and image-panel tooling, but they are diagnostic

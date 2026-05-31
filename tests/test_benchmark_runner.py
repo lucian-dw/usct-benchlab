@@ -6,7 +6,7 @@ import json
 import pytest
 import yaml
 
-from usctbench.benchmark.runner import run_algorithm_case, run_benchmark_suite
+from usctbench.benchmark.runner import load_algorithm_config, run_algorithm_case, run_benchmark_suite
 from usctbench.cli import main
 from usctbench.data.synthetic import make_sound_speed_case
 from usctbench.io.hdf5 import write_case_hdf5
@@ -14,6 +14,31 @@ from usctbench.registry import register_algorithm
 from usctbench.schema import ReconstructionResult
 
 pytest.importorskip("h5py")
+
+
+def test_load_algorithm_config_expands_environment_defaults(tmp_path, monkeypatch):
+    monkeypatch.delenv("USCT_MISSING_CONFIG_VALUE", raising=False)
+    monkeypatch.setenv("USCT_PRESENT_CONFIG_VALUE", "present")
+    config_path = tmp_path / "algorithm.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "name": "adapter",
+                "parameters": {
+                    "missing_default": "${USCT_MISSING_CONFIG_VALUE:-fallback}",
+                    "present_default": "${USCT_PRESENT_CONFIG_VALUE:-fallback}",
+                    "items": ["${USCT_MISSING_CONFIG_VALUE:-nested}"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_algorithm_config(config_path)
+
+    assert config.parameters["missing_default"] == "fallback"
+    assert config.parameters["present_default"] == "present"
+    assert config.parameters["items"] == ["nested"]
 
 
 def test_eval_aggregates_run_metrics(tmp_path):

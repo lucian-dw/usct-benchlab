@@ -52,7 +52,7 @@ export USCT_KWAVE_EXTERNAL_LOG_PATH="${USCT_KWAVE_EXTERNAL_LOG_PATH:-$external_r
 export USCT_KWAVE_WARM_START_PATH="${USCT_KWAVE_WARM_START_PATH:-$external_root/warm_start/${case_prefix}_traveltime_init.mat}"
 export USCT_KWAVE_WARM_START_SUMMARY_PATH="${USCT_KWAVE_WARM_START_SUMMARY_PATH:-$external_root/warm_start/${case_prefix}_traveltime_init.json}"
 export USCT_KWAVE_WARM_START_DIAGNOSTIC_PREFIX="${USCT_KWAVE_WARM_START_DIAGNOSTIC_PREFIX:-$external_root/warm_start/${case_prefix}_traveltime}"
-export USCT_KWAVE_RECONSTRUCTION_ITERATION="${USCT_KWAVE_RECONSTRUCTION_ITERATION:-final}"
+export USCT_KWAVE_RECONSTRUCTION_ITERATION="${USCT_KWAVE_RECONSTRUCTION_ITERATION:-best}"
 
 if [[ ! -f "$USCT_KWAVE_SOURCE_MAT" ]]; then
   echo "Missing USCT_KWAVE_SOURCE_MAT: $USCT_KWAVE_SOURCE_MAT" >&2

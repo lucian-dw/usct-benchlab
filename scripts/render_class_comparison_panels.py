@@ -152,6 +152,7 @@ def _metric_subset(metrics: dict[str, Any]) -> dict[str, Any]:
         "data_relative_residual",
         "data_residual_reduction",
         "final_iteration_rmse",
+        "kwave_gt_selected_relative_rmse_improvement",
         "kwave_gt_final_relative_rmse_improvement",
         "kwave_gt_rmse",
         "kwave_gt_ssim",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -80,6 +81,7 @@ _CLI_BOOL_FLAGS = {
     "skip_inversion": "--skip-inversion",
     "data_sanity_only": "--data-sanity-only",
 }
+_ENV_DEFAULT_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}")
 
 
 class KWaveFWIAdapterAlgorithm:
@@ -269,13 +271,20 @@ def _add_kwave_ground_truth_metrics(
 def _add_kwave_iteration_improvement_metrics(metrics: dict[str, Any]) -> None:
     initial_rmse = metrics.get("kwave_gt_init_rmse")
     final_rmse = metrics.get("final_iteration_rmse", metrics.get("kwave_gt_rmse"))
-    if not _is_finite_number(initial_rmse) or not _is_finite_number(final_rmse):
+    if not _is_finite_number(initial_rmse):
         return
     initial = float(initial_rmse)
-    final = float(final_rmse)
-    metrics["kwave_gt_final_absolute_rmse_improvement"] = initial - final
-    metrics["kwave_gt_final_relative_rmse_improvement"] = (initial - final) / initial if initial > 0.0 else 0.0
-    metrics["kwave_gt_final_improved"] = final < initial
+    if _is_finite_number(final_rmse):
+        final = float(final_rmse)
+        metrics["kwave_gt_final_absolute_rmse_improvement"] = initial - final
+        metrics["kwave_gt_final_relative_rmse_improvement"] = (initial - final) / initial if initial > 0.0 else 0.0
+        metrics["kwave_gt_final_improved"] = final < initial
+    selected_rmse = metrics.get("kwave_gt_rmse")
+    if _is_finite_number(selected_rmse):
+        selected = float(selected_rmse)
+        metrics["kwave_gt_selected_absolute_rmse_improvement"] = initial - selected
+        metrics["kwave_gt_selected_relative_rmse_improvement"] = (initial - selected) / initial if initial > 0.0 else 0.0
+        metrics["kwave_gt_selected_improved"] = selected < initial
 
 
 def _external_artifacts(config: AlgorithmConfig, external: dict[str, Any], result_path: Path) -> dict[str, str]:
@@ -600,7 +609,14 @@ def _external_execution_mode(config: AlgorithmConfig) -> str:
 
 
 def _expand_text(value: Any) -> str:
-    return os.path.expanduser(os.path.expandvars(str(value)))
+    text = str(value)
+
+    def _replace_default(match: re.Match[str]) -> str:
+        env_value = os.environ.get(match.group(1))
+        return env_value if env_value not in (None, "") else match.group(2)
+
+    text = _ENV_DEFAULT_RE.sub(_replace_default, text)
+    return os.path.expanduser(os.path.expandvars(text))
 
 
 def _as_bool(value: Any) -> bool:

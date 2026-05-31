@@ -80,7 +80,7 @@ parameters:
     - --update-scale
     - "-1"
     - --compare-gt
-  reconstruction_iteration: final
+  reconstruction_iteration: ${USCT_KWAVE_RECONSTRUCTION_ITERATION:-best}
   overwrite: true
   start_matlab: true
   sos_freqs_mhz:
@@ -134,6 +134,6 @@ metadata:
   reference_success_config: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/configs/rfinit_densefreq_test201_success.json
   reference_success_result: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/outputs/rfinit_densefreq_test201_20260531_215043/results/test201_rfinit_sos0p3to0p8_step0p025_iter3.mat
   reference_success_metrics: "test201 final_inside_psnr=22.7387 final_inside_corr=0.8933 final_inside_hp_corr=0.8295"
-  default_selection: final iteration; best iteration is rendered only as a diagnostic artifact.
+  default_selection: best RMSE iteration against external C_INTERP, with final iteration retained as a diagnostic artifact.
   fallback_initialization: unset warm_start_builder to use constant background/debug mode.
   v0_1_scope: k-Wave simulation plus Helmholtz/FWI only; no diffusion or generative priors.

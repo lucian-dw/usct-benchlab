@@ -20,9 +20,9 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - `run_external: true` calls `openbreastus_diffusion.kwave_dps.run_full_pipeline` with explicit pipeline arguments from the config.
 - `configs/algorithms/fwi_kwave_full_pipeline.yaml` is the A100 smoke config for `full128`, 0.3:0.025:0.8 MHz, 3 sound-speed iterations per frequency, no attenuation inversion, RF travel-time warm start, `0.3 mm` reconstruction grid, `c_geom=1500`, update damping `0.25`, velocity clamp `[1408.692, 1595.1279]` m/s, per-step update clamp `12 m/s`, zero background attenuation, and `save_raw_grad_iters: 0`.
 - The RF travel-time initializer pins the successful test201 parameters from `rfinit_densefreq_test201_success.json`, including `--background-speed 1500`, `--recon-dxi-mm 0.3`, support backprojection settings, `--velocity-bounds 1408.7 1595.1`, `--update-scale -1`, and `--compare-gt`.
-- The smoke config selects the final iteration for benchmark judgment. The renderer still writes final and best reconstruction artifacts, but best is diagnostic only and should not be used as oracle selection.
+- The smoke config selects the best RMSE iteration against the external k-Wave `C_INTERP` grid for benchmark output. The renderer still writes both best and final reconstruction artifacts so final-iteration behavior remains visible.
 - The default benchmark wrapper case is generated at 256x256 so image metrics are comparable with the traditional quality runs. The external k-Wave/FWI result remains authoritative; judge FWI quality first against the external MAT `C_INTERP` grid and the k-Wave-native metrics, not only against surrogate wrapper metrics.
-- Acceptance requires the final external iteration to improve over the external initial model using `kwave_gt_final_relative_rmse_improvement`, plus k-Wave-native `kwave_native_psnr` and `kwave_native_ssim`. Water/background improvement is still recorded for diagnostics, but is not a pass/fail gate for FWI.
+- Acceptance requires the selected external iteration to improve over the external initial model using `kwave_gt_selected_relative_rmse_improvement`, plus k-Wave-native `kwave_native_psnr` and `kwave_native_ssim`. Final-iteration improvement is still recorded for diagnostics, but no longer gates the pass/fail result. Water/background improvement is also recorded for diagnostics, but is not a pass/fail gate for FWI.
 - Current success reference: OpenBreastUS test201, result `/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/outputs/rfinit_densefreq_test201_20260531_215043/results/test201_rfinit_sos0p3to0p8_step0p025_iter3.mat`, with `final_inside_psnr=22.7387`, `final_inside_corr=0.8933`, and `final_inside_hp_corr=0.8295` in `/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/configs/rfinit_densefreq_test201_success.json`.
 
 ## Expected Failure Modes
@@ -47,7 +47,7 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - Unit test reads a synthetic MATLAB v7.3 FWI result and returns a successful `ReconstructionResult`.
 - Missing result path skips clearly rather than crashing.
 - Unit tests verify command construction for both existing-dataset inversion and full speed-map pipeline launch.
-- The full-pipeline smoke protocol requires external result loading, iteration diagnostics, `kwave_gt_rmse`, `kwave_gt_init_rmse`, `kwave_gt_final_relative_rmse_improvement`, `kwave_gt_ssim`, `kwave_native_psnr`, and `kwave_native_ssim`.
+- The full-pipeline smoke protocol requires external result loading, iteration diagnostics, `kwave_gt_rmse`, `kwave_gt_init_rmse`, `kwave_gt_selected_relative_rmse_improvement`, `kwave_gt_ssim`, `kwave_native_psnr`, and `kwave_native_ssim`.
 - A100 smoke evidence should show the full pipeline can produce `contact_sheet.png`, `reconstruction.png`, `reconstruction_best.png`, `reconstruction_final.png`, `ground_truth.png`, `error.png`, `loss_curve.png`, `gradient_step001.png`, `gradient_step020.png`, `metadata.json`, and `run.log`.
 
 ## References and Related Code

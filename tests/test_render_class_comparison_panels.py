@@ -72,6 +72,7 @@ def test_metric_subset_keeps_fwi_acceptance_metrics():
             "kwave_gt_rmse": 17.7,
             "kwave_gt_ssim": 0.7,
             "kwave_native_psnr": 22.8,
+            "kwave_gt_selected_relative_rmse_improvement": 0.34,
             "kwave_gt_final_relative_rmse_improvement": 0.29,
             "unrelated": 1,
         }
@@ -80,5 +81,6 @@ def test_metric_subset_keeps_fwi_acceptance_metrics():
     assert subset["kwave_gt_rmse"] == 17.7
     assert subset["kwave_gt_ssim"] == 0.7
     assert subset["kwave_native_psnr"] == 22.8
+    assert subset["kwave_gt_selected_relative_rmse_improvement"] == 0.34
     assert subset["kwave_gt_final_relative_rmse_improvement"] == 0.29
     assert "unrelated" not in subset

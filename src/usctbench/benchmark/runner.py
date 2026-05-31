@@ -9,6 +9,7 @@ import math
 import numpy as np
 import os
 import platform
+import re
 import resource
 import subprocess
 import sys
@@ -24,6 +25,8 @@ from usctbench.registry import get_algorithm
 from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
 from usctbench.viz.preview import write_preview_png
 
+_ENV_DEFAULT_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}")
+
 
 def load_algorithm_config(path: str | Path) -> AlgorithmConfig:
     with Path(path).open("r", encoding="utf-8") as handle:
@@ -36,7 +39,11 @@ def load_algorithm_config(path: str | Path) -> AlgorithmConfig:
         raise ValueError("config parameters must be a mapping")
     if not isinstance(metadata, dict):
         raise ValueError("config metadata must be a mapping")
-    return AlgorithmConfig(name=payload.get("name") or payload.get("algorithm"), parameters=parameters, metadata=metadata)
+    return AlgorithmConfig(
+        name=payload.get("name") or payload.get("algorithm"),
+        parameters=_expand_config_value(parameters),
+        metadata=_expand_config_value(metadata),
+    )
 
 
 def run_algorithm_case(
@@ -346,9 +353,24 @@ def _load_yaml(path: str | Path | None) -> dict[str, Any]:
 
 
 def _expand(value: str) -> str:
-    import os
+    def _replace_default(match: re.Match[str]) -> str:
+        env_value = os.environ.get(match.group(1))
+        return env_value if env_value not in (None, "") else match.group(2)
 
+    value = _ENV_DEFAULT_RE.sub(_replace_default, value)
     return os.path.expandvars(os.path.expanduser(value))
+
+
+def _expand_config_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return _expand(value)
+    if isinstance(value, list):
+        return [_expand_config_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_expand_config_value(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _expand_config_value(item) for key, item in value.items()}
+    return value
 
 
 def _assess_record(
