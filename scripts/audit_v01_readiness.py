@@ -81,6 +81,8 @@ REQUIRED_FILES = [
     "scripts/run_nbpslice2d_smoke.sh",
     "scripts/run_openbreastus_quality.sh",
     "scripts/run_nbpslice2d_quality.sh",
+    "scripts/matlab_adapters/refraction_corrected_usct_entrypoint.m",
+    "scripts/matlab_adapters/rwave_tof_greens_entrypoint.m",
     "scripts/render_class_comparison_panels.py",
     "scripts/render_kwave_fwi_smoke_outputs.py",
     "docs/architecture.md",

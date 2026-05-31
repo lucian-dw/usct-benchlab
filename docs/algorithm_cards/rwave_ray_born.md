@@ -19,6 +19,10 @@ This adapter targets weak-scattering ray-Born or r-Wave style reconstruction. In
   `usctbench_read_case.m` and `usctbench_write_result.m`. An r-Wave entrypoint
   can call these helpers before mapping fields into the public toolbox's
   `reconstructTimeofFlightImage.m` and `reconstructGreensImage.m` workflows.
+- Project wrapper template:
+  `scripts/matlab_adapters/rwave_tof_greens_entrypoint.m`. Configure
+  `external_root` to the public repository checkout and `entrypoint` to this
+  template's absolute path when testing the MATLAB path.
 
 ## Default Settings
 
@@ -65,4 +69,5 @@ This adapter targets weak-scattering ray-Born or r-Wave style reconstruction. In
 - MATLAB wrapper utilities: `src/usctbench/adapters/matlab.py`
 - Tests: `tests/test_matlab_adapters.py`
 - External source policy and candidate code: `docs/EXTERNAL_SOURCES_AND_LICENSES.md`
+- Entrypoint template: `scripts/matlab_adapters/rwave_tof_greens_entrypoint.m`
 - Public reference: `https://github.com/Ash1362/ray-based-quantitative-ultrasound-tomography`

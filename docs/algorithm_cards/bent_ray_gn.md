@@ -21,6 +21,10 @@ This adapter targets refraction-corrected travel-time tomography. In v0.1 the de
   `ctReconLaplacianRegularized.m` pattern and `Functions/eikProjMat.m` /
   `Functions/laplacianOperator.m` internals without re-implementing the
   usct-benchlab HDF5 contract.
+- Project wrapper template:
+  `scripts/matlab_adapters/refraction_corrected_usct_entrypoint.m`. Configure
+  `external_root` to the public repository checkout and `entrypoint` to this
+  template's absolute path when testing the MATLAB path.
 
 ## Default Settings
 
@@ -67,4 +71,5 @@ This adapter targets refraction-corrected travel-time tomography. In v0.1 the de
 - MATLAB wrapper utilities: `src/usctbench/adapters/matlab.py`
 - Tests: `tests/test_matlab_adapters.py`
 - External source policy and candidate code: `docs/EXTERNAL_SOURCES_AND_LICENSES.md`
+- Entrypoint template: `scripts/matlab_adapters/refraction_corrected_usct_entrypoint.m`
 - Public reference: `https://github.com/rehmanali1994/refractionCorrectedUSCT.github.io`

@@ -49,6 +49,16 @@ native structs or variables, then call `usctbench_write_result` with
 project-standard image, water-baseline, and travel-time residual metrics when
 they are not provided by MATLAB.
 
+Repository-specific wrapper templates live under `scripts/matlab_adapters/`.
+They are usct-benchlab glue code, not vendored third-party source. Configure
+`external_root` to an external checkout and `entrypoint` to the template's
+absolute path:
+
+- `refraction_corrected_usct_entrypoint.m` for
+  `rehmanali1994/refractionCorrectedUSCT.github.io`.
+- `rwave_tof_greens_entrypoint.m` for
+  `Ash1362/ray-based-quantitative-ultrasound-tomography`.
+
 `fwi_kwave_adapter` reads existing MATLAB v7.3 FWI result files and can optionally launch the external A100 `USCT_kwave` pipeline. The external approach is derived from `rehmanali1994/WaveformInversionUST`, which is MIT licensed upstream. Keep the full MATLAB/k-Wave code and generated FWI datasets/results outside this Git repository.
 
 `NBPslices2D` is a CC BY numerical phantom dataset. The repository only stores

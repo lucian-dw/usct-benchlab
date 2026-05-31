@@ -17,4 +17,5 @@ parameters:
 metadata:
   default_backend: project-native ray-Born/r-Wave surrogate over benchmark travel-time features.
   external_reference: Ash1362/ray-based-quantitative-ultrasound-tomography
+  external_entrypoint_template: scripts/matlab_adapters/rwave_tof_greens_entrypoint.m
   v0_1_scope: smoke/quality benchmark path; optional MATLAB entrypoints use standard input/output MAT artifacts.

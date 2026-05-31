@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Callable
 
@@ -87,7 +88,7 @@ def run_matlab_placeholder(
         return skipped_matlab_adapter(algorithm, case, missing_config_reason)
 
     external_root_path = Path(external_root).expanduser()
-    entry_path = external_root_path / str(entrypoint)
+    entry_path = _entrypoint_path(external_root_path, str(entrypoint))
     if not entry_path.exists():
         return skipped_matlab_adapter(algorithm, case, f"{missing_entrypoint_prefix}: {entry_path}")
 
@@ -101,6 +102,7 @@ def run_matlab_placeholder(
         f"usctbench_input_mat='{_matlab_string(input_path)}'; "
         f"usctbench_output_mat='{_matlab_string(output_path)}'; "
         f"usctbench_output_dir='{_matlab_string(adapter.work_dir)}'; "
+        f"usctbench_parameters_json='{_matlab_string(_parameters_json(params))}'; "
         f"disp('{_matlab_string(configured_message)}'); "
         f"{_entrypoint_call(params, entry_path)}"
     )
@@ -179,8 +181,20 @@ def _entrypoint_call(params: dict, entry_path: Path) -> str:
     return f"run('{_matlab_string(entry_path)}');"
 
 
+def _entrypoint_path(external_root: Path, entrypoint: str) -> Path:
+    path = Path(entrypoint).expanduser()
+    if path.is_absolute():
+        return path
+    return external_root / path
+
+
 def _safe_stem(value: str) -> str:
     return "".join(char if char.isalnum() or char in "._-" else "_" for char in str(value)).strip("._") or "case"
+
+
+def _parameters_json(params: dict) -> str:
+    public_params = {str(key): value for key, value in params.items() if not str(key).startswith("_")}
+    return json.dumps(public_params, default=str, sort_keys=True)
 
 
 def _augment_external_result_metrics(result: ReconstructionResult, case: USCTCase, config: AlgorithmConfig) -> None:

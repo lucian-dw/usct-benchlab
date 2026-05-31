@@ -10,7 +10,7 @@ from usctbench.adapters.matlab import (
     write_matlab_adapter_result,
     write_usct_case_mat,
 )
-from usctbench.algorithms.adapters._matlab_optional import requests_matlab_backend
+from usctbench.algorithms.adapters._matlab_optional import _entrypoint_path, requests_matlab_backend
 from usctbench.algorithms.adapters.refraction_gn import BentRayGNAdapter
 from usctbench.algorithms.adapters.rwave import RWaveAdapter
 from usctbench.cli import main
@@ -46,6 +46,17 @@ def test_optional_matlab_backend_request_detection():
     assert requests_matlab_backend(AlgorithmConfig(parameters={"backend": "matlab"})) is True
     assert requests_matlab_backend(AlgorithmConfig(parameters={"external_root": "/tmp/external"})) is True
     assert requests_matlab_backend(AlgorithmConfig(parameters={"entrypoint": "run.m"})) is True
+
+
+def test_optional_matlab_backend_accepts_absolute_entrypoint(tmp_path):
+    external_root = tmp_path / "external"
+    entrypoint = tmp_path / "scripts" / "entrypoint.m"
+    external_root.mkdir()
+    entrypoint.parent.mkdir()
+    entrypoint.write_text("% placeholder", encoding="utf-8")
+
+    assert _entrypoint_path(external_root, str(entrypoint)) == entrypoint
+    assert _entrypoint_path(external_root, "relative_entrypoint.m") == external_root / "relative_entrypoint.m"
 
 
 def test_matlab_adapters_skip_without_matlab():
@@ -97,6 +108,7 @@ def test_matlab_adapter_exports_input_before_external_execution_skip(tmp_path, m
         def run_batch(self, code, *, log_name="matlab.log", timeout_s=None):
             assert "usctbench_input_mat" in code
             assert "usctbench_output_mat" in code
+            assert "usctbench_parameters_json" in code
             assert "run_refraction.m" in code
             assert "addpath" in code
             log_path = self.work_dir / log_name

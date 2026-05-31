@@ -62,6 +62,26 @@ def test_openbreastus_smoke_script_builds_64_smoke_and_panel():
     assert "--transpose" in text
 
 
+def test_external_matlab_entrypoint_templates_match_adapter_contract():
+    refraction = Path("scripts/matlab_adapters/refraction_corrected_usct_entrypoint.m").read_text(encoding="utf-8")
+    rwave = Path("scripts/matlab_adapters/rwave_tof_greens_entrypoint.m").read_text(encoding="utf-8")
+
+    for text in (refraction, rwave):
+        assert "usctbench_read_case(usctbench_input_mat)" in text
+        assert "usctbench_write_result(usctbench_output_mat" in text
+        assert "usctbench_parameters_json" in text
+        assert "measurement.delta_tof_s" in text
+        assert "regularization_lambda" in text
+        assert "sound_speed_mps" in text or "sound_speed" in text
+
+    assert "refractionCorrectedUSCT" in refraction
+    assert "ctReconLaplacianRegularized.m" in refraction
+    assert "eikProjMat" in refraction
+    assert "ray-based-quantitative-ultrasound-tomography" in rwave
+    assert "reconstructTimeofFlightImage.m" in rwave
+    assert "reconstructGreensImage.m" in rwave
+
+
 def test_fwi_kwave_adapter_smoke_script_runs_adapter_flow():
     text = Path("scripts/run_fwi_kwave_adapter_smoke.sh").read_text(encoding="utf-8")
 
