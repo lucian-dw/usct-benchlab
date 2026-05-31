@@ -24,6 +24,7 @@ def main() -> int:
     parser.add_argument("--out", required=True, help="Output PNG path.")
     parser.add_argument("--field", choices=["sound_speed", "attenuation"], default="sound_speed")
     parser.add_argument("--algorithms", nargs="+", default=DEFAULT_SOUND_SPEED_ALGORITHMS)
+    parser.add_argument("--case-ids", nargs="+", default=None, help="Optional case ids to include, in the requested order.")
     parser.add_argument("--title", default="")
     parser.add_argument("--max-cases", type=int, default=0, help="Optional cap on displayed cases.")
     parser.add_argument("--cmap", default="gray", help="Matplotlib colormap. Use gray for sound-speed review.")
@@ -31,6 +32,7 @@ def main() -> int:
     args = parser.parse_args()
 
     cases = [read_case_hdf5(path) for path in sorted(Path(args.cases_dir).glob("*.h5"))]
+    cases = _filter_cases_by_id(cases, args.case_ids)
     if args.max_cases > 0:
         cases = cases[: args.max_cases]
     if not cases:
@@ -71,6 +73,7 @@ def main() -> int:
                 "out": str(Path(args.out)),
                 "field": args.field,
                 "algorithms": args.algorithms,
+                "case_ids": args.case_ids or [],
                 "cmap": args.cmap,
                 "cases": [case.case_id for case in cases],
             },
@@ -81,6 +84,16 @@ def main() -> int:
     )
     print(args.out)
     return 0
+
+
+def _filter_cases_by_id(cases: list[Any], case_ids: list[str] | None) -> list[Any]:
+    if not case_ids:
+        return cases
+    by_id = {case.case_id: case for case in cases}
+    missing = [case_id for case_id in case_ids if case_id not in by_id]
+    if missing:
+        raise SystemExit(f"requested case ids not found: {', '.join(missing)}")
+    return [by_id[case_id] for case_id in case_ids]
 
 
 def _ground_truth(case: Any, field: str) -> np.ndarray:
@@ -102,6 +115,11 @@ def _result_image(result: Any, field: str) -> np.ndarray | None:
 
 def _format_label(algorithm: str, metrics: dict[str, Any]) -> str:
     pieces = [algorithm]
+    if algorithm == "fwi_kwave_adapter" and _is_finite_number(metrics.get("kwave_gt_rmse")):
+        pieces.append(f"kWave RMSE={float(metrics['kwave_gt_rmse']):.1f}")
+        if _is_finite_number(metrics.get("kwave_gt_ssim")):
+            pieces.append(f"kWave SSIM={float(metrics['kwave_gt_ssim']):.3f}")
+        return "\n".join(pieces)
     if _is_finite_number(metrics.get("rmse")):
         pieces.append(f"RMSE={float(metrics['rmse']):.1f}")
     if _is_finite_number(metrics.get("ssim")):
@@ -118,6 +136,12 @@ def _metric_subset(metrics: dict[str, Any]) -> dict[str, Any]:
         "psnr",
         "data_relative_residual",
         "data_residual_reduction",
+        "final_iteration_rmse",
+        "kwave_gt_final_relative_rmse_improvement",
+        "kwave_gt_rmse",
+        "kwave_gt_ssim",
+        "kwave_native_psnr",
+        "kwave_native_ssim",
         "water_relative_rmse_improvement",
         "ring_artifact_index",
         "coverage_abs_error_corr",
