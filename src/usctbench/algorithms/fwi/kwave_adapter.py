@@ -128,71 +128,20 @@ class KWaveFWIAdapterAlgorithm:
             )
 
         selected_iteration, selection_metrics = _configured_iteration(config, external, case)
-        selected_sound_speed = _select_iteration_image(external, "sound_speed_iter_mps", "sound_speed_mps", selected_iteration)
-        selected_attenuation = _select_iteration_image(external, "attenuation_iter_np_per_m", "attenuation_np_per_m", selected_iteration)
-        sound_speed = _resize_to_shape(selected_sound_speed, case.grid.shape)
-        attenuation = _resize_to_shape(external["attenuation_np_per_m"], case.grid.shape) if external.get("attenuation_np_per_m") is not None else None
-        if selected_attenuation is not None:
-            attenuation = _resize_to_shape(selected_attenuation, case.grid.shape)
+        sound_speed, attenuation = _selected_result_images(external, selected_iteration, case.grid.shape)
         c0 = float(config.parameters.get("baseline_sound_speed_mps", case.metadata.get("reference_sound_speed_mps", 1500.0)))
-        log_path = _configured_path(config, "external_log_path")
-        configured_dataset_path = _configured_path(config, "dataset_path")
-        losses = external.get("losses", [])
-        metrics: dict[str, Any] = {
-            "external_result_loaded": True,
-            "external_result_path": str(result_path),
-            "external_dataset_path": external.get("dataset_path") or (str(configured_dataset_path) if configured_dataset_path else ""),
-            "external_execution_mode": _external_execution_mode(config),
-            "external_log_path": str(log_path) if log_path else "",
-            "iterations": int(external.get("iterations", 0)),
-            "selected_iteration": selected_iteration or int(external.get("iterations", 0)),
-            "selected_loss": _loss_at_iteration(losses, selected_iteration),
-            "initial_loss": external.get("initial_loss"),
-            "final_loss": external.get("final_loss"),
-            "loss_decreased": external.get("loss_decreased"),
-            "matlab_psnr_value": external.get("psnr_value"),
-            "matlab_ssim_value": external.get("ssim_value"),
-            "warm_start_builder": _expand_text(config.parameters.get("warm_start_builder", "")),
-            "warm_start_path": str(_configured_path(config, "warm_start_path") or _configured_path(config, "warm_start_result") or ""),
-        }
+        metrics = _base_result_metrics(
+            config,
+            external,
+            result_path=result_path,
+            selected_iteration=selected_iteration,
+        )
         metrics.update(selection_metrics)
         if "best_iteration" not in metrics or "final_iteration_rmse" not in metrics:
             _best_iteration, diagnostic_metrics = _best_iteration_by_rmse(external, case)
             metrics.update(diagnostic_metrics)
-        if case.ground_truth.sound_speed_mps is not None:
-            truth = np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
-            metrics.update(compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask))
-            metrics.update(compute_baseline_improvement_metrics(sound_speed, truth, c0, mask=case.grid.roi_mask))
-            if external.get("initial_sound_speed_mps") is not None:
-                init = _resize_to_shape(np.asarray(external["initial_sound_speed_mps"], dtype=float), case.grid.shape)
-                metrics.update(compute_image_metrics(init, truth, mask=case.grid.roi_mask, prefix="init_"))
-                metrics.update(
-                    compute_baseline_improvement_metrics(init, truth, c0, mask=case.grid.roi_mask, prefix="init_water_")
-                )
-        if external.get("ground_truth_sound_speed_mps") is not None:
-            kwave_truth = _resize_to_shape(external["ground_truth_sound_speed_mps"], case.grid.shape)
-            metrics.update(compute_image_metrics(sound_speed, kwave_truth, mask=case.grid.roi_mask, prefix="kwave_gt_"))
-            metrics.update(
-                compute_baseline_improvement_metrics(
-                    sound_speed,
-                    kwave_truth,
-                    c0,
-                    mask=case.grid.roi_mask,
-                    prefix="kwave_gt_water_",
-                )
-            )
-            if external.get("initial_sound_speed_mps") is not None:
-                kwave_init = _resize_to_shape(np.asarray(external["initial_sound_speed_mps"], dtype=float), case.grid.shape)
-                metrics.update(compute_image_metrics(kwave_init, kwave_truth, mask=case.grid.roi_mask, prefix="kwave_gt_init_"))
-                metrics.update(
-                    compute_baseline_improvement_metrics(
-                        kwave_init,
-                        kwave_truth,
-                        c0,
-                        mask=case.grid.roi_mask,
-                        prefix="kwave_gt_init_water_",
-                    )
-                )
+        _add_case_ground_truth_metrics(metrics, sound_speed, external, case, c0)
+        _add_kwave_ground_truth_metrics(metrics, sound_speed, external, case, c0)
         if attenuation is not None and case.ground_truth.attenuation_np_per_m is not None:
             metrics.update(
                 compute_image_metrics(
@@ -202,18 +151,141 @@ class KWaveFWIAdapterAlgorithm:
                     prefix="attenuation_",
                 )
             )
+        artifacts = _external_artifacts(config, external, result_path)
         return ReconstructionResult(
             algorithm=self.name,
             case_id=case.case_id,
             sound_speed_mps=sound_speed,
             attenuation_np_per_m=attenuation,
             metrics=metrics,
-            artifacts={
-                "external_result_path": str(result_path),
-                "external_dataset_path": external.get("dataset_path") or (str(configured_dataset_path) if configured_dataset_path else ""),
-                "external_log_path": str(log_path) if log_path else "",
-            },
+            artifacts=artifacts,
         )
+
+
+def _selected_result_images(external: dict[str, Any], selected_iteration: int | None, shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray | None]:
+    selected_sound_speed = _select_iteration_image(external, "sound_speed_iter_mps", "sound_speed_mps", selected_iteration)
+    selected_attenuation = _select_iteration_image(external, "attenuation_iter_np_per_m", "attenuation_np_per_m", selected_iteration)
+    sound_speed = _resize_to_shape(selected_sound_speed, shape)
+    attenuation = _resize_to_shape(external["attenuation_np_per_m"], shape) if external.get("attenuation_np_per_m") is not None else None
+    if selected_attenuation is not None:
+        attenuation = _resize_to_shape(selected_attenuation, shape)
+    return sound_speed, attenuation
+
+
+def _base_result_metrics(
+    config: AlgorithmConfig,
+    external: dict[str, Any],
+    *,
+    result_path: Path,
+    selected_iteration: int | None,
+) -> dict[str, Any]:
+    log_path = _configured_path(config, "external_log_path")
+    configured_dataset_path = _configured_path(config, "dataset_path")
+    losses = external.get("losses", [])
+    psnr_value = external.get("psnr_value")
+    ssim_value = external.get("ssim_value")
+    return {
+        "external_result_loaded": True,
+        "external_result_path": str(result_path),
+        "external_dataset_path": external.get("dataset_path") or (str(configured_dataset_path) if configured_dataset_path else ""),
+        "external_execution_mode": _external_execution_mode(config),
+        "external_log_path": str(log_path) if log_path else "",
+        "iterations": int(external.get("iterations", 0)),
+        "selected_iteration": selected_iteration or int(external.get("iterations", 0)),
+        "selected_loss": _loss_at_iteration(losses, selected_iteration),
+        "initial_loss": external.get("initial_loss"),
+        "final_loss": external.get("final_loss"),
+        "loss_decreased": external.get("loss_decreased"),
+        "kwave_native_psnr": psnr_value,
+        "kwave_native_ssim": ssim_value,
+        "matlab_psnr_value": psnr_value,
+        "matlab_ssim_value": ssim_value,
+        "warm_start_builder": _expand_text(config.parameters.get("warm_start_builder", "")),
+        "warm_start_path": str(_configured_path(config, "warm_start_path") or _configured_path(config, "warm_start_result") or ""),
+    }
+
+
+def _add_case_ground_truth_metrics(
+    metrics: dict[str, Any],
+    sound_speed: np.ndarray,
+    external: dict[str, Any],
+    case: USCTCase,
+    baseline_sound_speed_mps: float,
+) -> None:
+    if case.ground_truth.sound_speed_mps is None:
+        return
+    truth = np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
+    metrics.update(compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask))
+    metrics.update(compute_baseline_improvement_metrics(sound_speed, truth, baseline_sound_speed_mps, mask=case.grid.roi_mask))
+    if external.get("initial_sound_speed_mps") is not None:
+        init = _resize_to_shape(np.asarray(external["initial_sound_speed_mps"], dtype=float), case.grid.shape)
+        metrics.update(compute_image_metrics(init, truth, mask=case.grid.roi_mask, prefix="init_"))
+        metrics.update(
+            compute_baseline_improvement_metrics(
+                init,
+                truth,
+                baseline_sound_speed_mps,
+                mask=case.grid.roi_mask,
+                prefix="init_water_",
+            )
+        )
+
+
+def _add_kwave_ground_truth_metrics(
+    metrics: dict[str, Any],
+    sound_speed: np.ndarray,
+    external: dict[str, Any],
+    case: USCTCase,
+    baseline_sound_speed_mps: float,
+) -> None:
+    if external.get("ground_truth_sound_speed_mps") is None:
+        return
+    kwave_truth = _resize_to_shape(external["ground_truth_sound_speed_mps"], case.grid.shape)
+    metrics.update(compute_image_metrics(sound_speed, kwave_truth, mask=case.grid.roi_mask, prefix="kwave_gt_"))
+    metrics.update(
+        compute_baseline_improvement_metrics(
+            sound_speed,
+            kwave_truth,
+            baseline_sound_speed_mps,
+            mask=case.grid.roi_mask,
+            prefix="kwave_gt_water_",
+        )
+    )
+    if external.get("initial_sound_speed_mps") is not None:
+        kwave_init = _resize_to_shape(np.asarray(external["initial_sound_speed_mps"], dtype=float), case.grid.shape)
+        metrics.update(compute_image_metrics(kwave_init, kwave_truth, mask=case.grid.roi_mask, prefix="kwave_gt_init_"))
+        metrics.update(
+            compute_baseline_improvement_metrics(
+                kwave_init,
+                kwave_truth,
+                baseline_sound_speed_mps,
+                mask=case.grid.roi_mask,
+                prefix="kwave_gt_init_water_",
+            )
+        )
+    _add_kwave_iteration_improvement_metrics(metrics)
+
+
+def _add_kwave_iteration_improvement_metrics(metrics: dict[str, Any]) -> None:
+    initial_rmse = metrics.get("kwave_gt_init_rmse")
+    final_rmse = metrics.get("final_iteration_rmse", metrics.get("kwave_gt_rmse"))
+    if not _is_finite_number(initial_rmse) or not _is_finite_number(final_rmse):
+        return
+    initial = float(initial_rmse)
+    final = float(final_rmse)
+    metrics["kwave_gt_final_absolute_rmse_improvement"] = initial - final
+    metrics["kwave_gt_final_relative_rmse_improvement"] = (initial - final) / initial if initial > 0.0 else 0.0
+    metrics["kwave_gt_final_improved"] = final < initial
+
+
+def _external_artifacts(config: AlgorithmConfig, external: dict[str, Any], result_path: Path) -> dict[str, str]:
+    log_path = _configured_path(config, "external_log_path")
+    configured_dataset_path = _configured_path(config, "dataset_path")
+    return {
+        "external_result_path": str(result_path),
+        "external_dataset_path": external.get("dataset_path") or (str(configured_dataset_path) if configured_dataset_path else ""),
+        "external_log_path": str(log_path) if log_path else "",
+    }
 
 
 def read_kwave_fwi_result(path: str | Path) -> dict[str, Any]:
@@ -539,6 +611,13 @@ def _as_bool(value: Any) -> bool:
     if isinstance(value, (int, float)):
         return bool(value)
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_finite_number(value: Any) -> bool:
+    try:
+        return bool(np.isfinite(float(value)))
+    except (TypeError, ValueError):
+        return False
 
 
 def _resize_to_shape(image: np.ndarray, shape: tuple[int, int]) -> np.ndarray:

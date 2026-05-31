@@ -122,6 +122,10 @@ def test_kwave_adapter_ingests_existing_result(tmp_path):
     assert result.metrics["best_iteration_target"] == "kwave_gt"
     assert result.metrics["best_iteration_rmse"] == pytest.approx(1.0)
     assert result.metrics["final_iteration_rmse"] == pytest.approx(1.0)
+    assert result.metrics["kwave_gt_final_improved"] is True
+    assert result.metrics["kwave_gt_final_relative_rmse_improvement"] > 0.0
+    assert result.metrics["kwave_native_psnr"] == pytest.approx(20.0)
+    assert result.metrics["kwave_native_ssim"] == pytest.approx(0.5)
     assert result.metrics["loss_decreased"] is True
     assert "rmse" in result.metrics
     assert "kwave_gt_rmse" in result.metrics

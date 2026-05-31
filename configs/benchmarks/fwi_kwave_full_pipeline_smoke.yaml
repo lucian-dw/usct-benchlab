@@ -26,17 +26,18 @@ required_metrics:
     - initial_loss
     - final_loss
     - kwave_gt_rmse
-    - kwave_gt_water_relative_rmse_improvement
+    - kwave_gt_init_rmse
+    - kwave_gt_final_relative_rmse_improvement
     - kwave_gt_ssim
-    - matlab_psnr_value
-    - matlab_ssim_value
+    - kwave_native_psnr
+    - kwave_native_ssim
 minimums:
   fwi_kwave_adapter:
     iterations: 1
-    kwave_gt_water_relative_rmse_improvement: 0.0
+    kwave_gt_final_relative_rmse_improvement: 0.1
     kwave_gt_ssim: 0.6
-    matlab_psnr_value: 20.0
-    matlab_ssim_value: 0.6
+    kwave_native_psnr: 20.0
+    kwave_native_ssim: 0.6
 thresholds:
   fwi_kwave_adapter:
     kwave_gt_rmse: 30.0

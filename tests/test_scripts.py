@@ -72,6 +72,15 @@ def test_fwi_kwave_full_pipeline_smoke_script_runs_speed_map_flow():
     assert "--render-best-and-final" in text
 
 
+def test_fwi_kwave_render_script_writes_contact_sheet():
+    text = Path("scripts/render_kwave_fwi_smoke_outputs.py").read_text(encoding="utf-8")
+
+    assert "contact_sheet.png" in text
+    assert "_write_contact_sheet" in text
+    assert "k-Wave FWI comparison" in text
+    assert "Ground truth" in text
+
+
 def test_fwi_kwave_full_pipeline_config_uses_multifrequency_rf_warm_start():
     import yaml
 
@@ -150,10 +159,15 @@ def test_fwi_kwave_full_pipeline_protocol_uses_native_kwave_metrics():
     assert "best_iteration" in required
     assert "final_iteration_rmse" in required
     assert "kwave_gt_rmse" in required
+    assert "kwave_gt_init_rmse" in required
+    assert "kwave_gt_final_relative_rmse_improvement" in required
     assert "kwave_gt_ssim" in required
-    assert "matlab_psnr_value" in required
-    assert "matlab_ssim_value" in required
+    assert "kwave_native_psnr" in required
+    assert "kwave_native_ssim" in required
+    assert "kwave_gt_water_relative_rmse_improvement" not in required
     assert "water_relative_rmse_improvement" not in required
+    assert "kwave_gt_water_relative_rmse_improvement" not in protocol["minimums"]["fwi_kwave_adapter"]
+    assert "kwave_gt_final_relative_rmse_improvement" in protocol["minimums"]["fwi_kwave_adapter"]
     assert "water_relative_rmse_improvement" not in protocol["minimums"]["fwi_kwave_adapter"]
     assert "kwave_gt_init_water_relative_rmse_improvement" not in protocol["minimums"]["fwi_kwave_adapter"]
 

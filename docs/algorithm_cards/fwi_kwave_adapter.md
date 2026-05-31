@@ -22,6 +22,7 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - The RF travel-time initializer pins the successful test201 parameters from `rfinit_densefreq_test201_success.json`, including `--background-speed 1500`, `--recon-dxi-mm 0.3`, support backprojection settings, `--velocity-bounds 1408.7 1595.1`, `--update-scale -1`, and `--compare-gt`.
 - The smoke config selects the final iteration for benchmark judgment. The renderer still writes final and best reconstruction artifacts, but best is diagnostic only and should not be used as oracle selection.
 - The default benchmark wrapper case is generated at 256x256 so image metrics are comparable with the traditional quality runs. The external k-Wave/FWI result remains authoritative; judge FWI quality first against the external MAT `C_INTERP` grid and the k-Wave-native metrics, not only against surrogate wrapper metrics.
+- Acceptance requires the final external iteration to improve over the external initial model using `kwave_gt_final_relative_rmse_improvement`, plus k-Wave-native `kwave_native_psnr` and `kwave_native_ssim`. Water/background improvement is still recorded for diagnostics, but is not a pass/fail gate for FWI.
 - Current success reference: OpenBreastUS test201, result `/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/outputs/rfinit_densefreq_test201_20260531_215043/results/test201_rfinit_sos0p3to0p8_step0p025_iter3.mat`, with `final_inside_psnr=22.7387`, `final_inside_corr=0.8933`, and `final_inside_hp_corr=0.8295` in `/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/configs/rfinit_densefreq_test201_success.json`.
 
 ## Expected Failure Modes
@@ -46,7 +47,8 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - Unit test reads a synthetic MATLAB v7.3 FWI result and returns a successful `ReconstructionResult`.
 - Missing result path skips clearly rather than crashing.
 - Unit tests verify command construction for both existing-dataset inversion and full speed-map pipeline launch.
-- A100 smoke evidence should show the full pipeline can produce `reconstruction.png`, `reconstruction_best.png`, `reconstruction_final.png`, `ground_truth.png`, `error.png`, `loss_curve.png`, `gradient_step001.png`, `gradient_step020.png`, `metadata.json`, and `run.log`.
+- The full-pipeline smoke protocol requires external result loading, iteration diagnostics, `kwave_gt_rmse`, `kwave_gt_init_rmse`, `kwave_gt_final_relative_rmse_improvement`, `kwave_gt_ssim`, `kwave_native_psnr`, and `kwave_native_ssim`.
+- A100 smoke evidence should show the full pipeline can produce `contact_sheet.png`, `reconstruction.png`, `reconstruction_best.png`, `reconstruction_final.png`, `ground_truth.png`, `error.png`, `loss_curve.png`, `gradient_step001.png`, `gradient_step020.png`, `metadata.json`, and `run.log`.
 
 ## References and Related Code
 
@@ -56,5 +58,6 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - `scripts/run_fwi_kwave_full_pipeline_smoke.sh`
 - `scripts/render_kwave_fwi_smoke_outputs.py`
 - `tests/test_fwi_kwave_adapter.py`
+- `docs/FWI_KWAVE_SUCCESS_NOTES.md`
 - A100 reference project: `$HOME/USCT_kwave/openbreastus_diffusion/kwave_dps`
 - Upstream reference: `rehmanali1994/WaveformInversionUST`, frequency-domain waveform inversion UST using a ring-array transducer.

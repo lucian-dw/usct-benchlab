@@ -47,6 +47,7 @@ def main() -> int:
     reconstruction = _select_reconstruction(args.result, selected_iteration)
     if reconstruction is None:
         reconstruction = final_reconstruction
+    best_reconstruction = _select_reconstruction(args.result, best_iteration) if best_iteration is not None else None
 
     losses = np.asarray(external.get("losses", []), dtype=float).reshape(-1)
     gradients = _read_result_dataset(args.result, "GRAD_IMG_ITER")
@@ -65,7 +66,6 @@ def main() -> int:
             symmetric=True,
         )
         if best_iteration is not None:
-            best_reconstruction = _select_reconstruction(args.result, best_iteration)
             if best_reconstruction is not None:
                 _write_image(
                     args.out / "reconstruction_best.png",
@@ -83,6 +83,18 @@ def main() -> int:
                     symmetric=True,
                 )
     _write_loss(args.out / "loss_curve.png", losses)
+    _write_contact_sheet(
+        args.out / "contact_sheet.png",
+        _contact_sheet_panels(
+            ground_truth=ground_truth,
+            reconstruction=reconstruction,
+            final_reconstruction=final_reconstruction,
+            best_reconstruction=best_reconstruction,
+            selected_iteration=selected_iteration,
+            best_iteration=best_iteration,
+            total_iterations=total_iterations,
+        ),
+    )
 
     gradient_metadata: dict[str, Any] = {}
     if gradients is not None and gradients.size:
@@ -126,6 +138,7 @@ def main() -> int:
         "ssim_value": external.get("ssim_value"),
         "reconstruction_shape": list(reconstruction.shape),
         "ground_truth_shape": list(ground_truth.shape),
+        "contact_sheet": "contact_sheet.png",
         **gradient_metadata,
     }
     (args.out / "metadata.json").write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
@@ -278,6 +291,107 @@ def _write_loss(path: Path, losses: np.ndarray) -> None:
     fig.tight_layout()
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
+
+
+def _contact_sheet_panels(
+    *,
+    ground_truth: np.ndarray,
+    reconstruction: np.ndarray,
+    final_reconstruction: np.ndarray,
+    best_reconstruction: np.ndarray | None,
+    selected_iteration: int | None,
+    best_iteration: int | None,
+    total_iterations: int,
+) -> list[tuple[str, np.ndarray, np.ndarray | None]]:
+    selected_title = "Final reconstruction" if selected_iteration is None else f"Selected reconstruction iter {selected_iteration:03d}"
+    panels: list[tuple[str, np.ndarray, np.ndarray | None]] = [
+        ("Ground truth", ground_truth, None),
+        (selected_title, reconstruction, reconstruction - ground_truth),
+    ]
+    if selected_iteration is not None:
+        final_title = f"Final reconstruction iter {total_iterations:03d}" if total_iterations > 0 else "Final reconstruction"
+        panels.append((final_title, final_reconstruction, final_reconstruction - ground_truth))
+    if best_reconstruction is not None and best_iteration is not None and best_iteration != selected_iteration:
+        panels.append((f"Best reconstruction iter {best_iteration:03d}", best_reconstruction, best_reconstruction - ground_truth))
+    return panels
+
+
+def _write_contact_sheet(path: Path, panels: list[tuple[str, np.ndarray, np.ndarray | None]]) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    speed_images = [image for _label, image, _error in panels]
+    error_images = [error for _label, _image, error in panels if error is not None]
+    speed_vmin, speed_vmax = _shared_limits(speed_images)
+    error_limit = _shared_symmetric_limit(error_images)
+
+    ncols = max(1, len(panels))
+    fig, axes = plt.subplots(2, ncols, figsize=(max(7.0, 3.0 * ncols), 6.0), dpi=180, squeeze=False)
+    speed_artist = None
+    error_artist = None
+    for col, (label, image, error) in enumerate(panels):
+        top = axes[0][col]
+        top.set_axis_off()
+        speed_artist = top.imshow(image, cmap="gray", vmin=speed_vmin, vmax=speed_vmax, interpolation="nearest")
+        top.set_title(label, fontsize=9, pad=3)
+
+        bottom = axes[1][col]
+        bottom.set_axis_off()
+        if error is None:
+            bottom.text(0.5, 0.5, "reference", ha="center", va="center", fontsize=9, transform=bottom.transAxes)
+            bottom.set_title("Error", fontsize=9, pad=3)
+        else:
+            error_artist = bottom.imshow(
+                error,
+                cmap="coolwarm",
+                vmin=-error_limit,
+                vmax=error_limit,
+                interpolation="nearest",
+            )
+            bottom.set_title("Error vs GT", fontsize=9, pad=3)
+
+    fig.suptitle("k-Wave FWI comparison", fontsize=11)
+    fig.subplots_adjust(left=0.02, right=0.9, bottom=0.03, top=0.9, wspace=0.06, hspace=0.16)
+    if speed_artist is not None:
+        speed_bar = fig.colorbar(speed_artist, ax=axes[0].ravel().tolist(), fraction=0.018, pad=0.012)
+        speed_bar.set_label("m/s", fontsize=8)
+        speed_bar.ax.tick_params(labelsize=7)
+    if error_artist is not None:
+        error_bar = fig.colorbar(error_artist, ax=axes[1].ravel().tolist(), fraction=0.018, pad=0.012)
+        error_bar.set_label("m/s", fontsize=8)
+        error_bar.ax.tick_params(labelsize=7)
+    fig.savefig(path, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+
+
+def _shared_limits(images: list[np.ndarray]) -> tuple[float, float]:
+    finite_values = [np.asarray(image, dtype=float)[np.isfinite(image)].reshape(-1) for image in images]
+    nonempty = [values for values in finite_values if values.size]
+    if not nonempty:
+        return 0.0, 1.0
+    finite = np.concatenate(nonempty)
+    if finite.size == 0:
+        return 0.0, 1.0
+    low, high = np.percentile(finite, [1.0, 99.0])
+    if high <= low:
+        high = low + 1.0
+    return float(low), float(high)
+
+
+def _shared_symmetric_limit(images: list[np.ndarray]) -> float:
+    finite_values = [np.abs(np.asarray(image, dtype=float)[np.isfinite(image)]).reshape(-1) for image in images]
+    nonempty = [values for values in finite_values if values.size]
+    if not nonempty:
+        return 1.0
+    finite = np.concatenate(nonempty)
+    if finite.size == 0:
+        return 1.0
+    limit = float(np.percentile(finite, 99.0))
+    if not np.isfinite(limit) or limit <= 0:
+        return 1.0
+    return limit
 
 
 def _resize_to_shape(image: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
