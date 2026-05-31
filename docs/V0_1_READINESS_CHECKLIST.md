@@ -122,6 +122,10 @@ Representative A100 evidence from the current branch:
   `/home/wudalong/usct-benchlab/runs/usctbench_runs/external_matlab_adapter_smoke_20260531T215551Z`
   - run check: `benchmark_run_checks.json`
   - panel: `comparison_artifacts/external_matlab_smoke_64_gray.png`
+- External MATLAB adapter 256 quality entrypoint:
+  `scripts/run_external_matlab_adapter_quality.sh`
+  - suite: `configs/benchmarks/external_matlab_adapter_quality.yaml`
+  - target panel: `comparison_artifacts/external_matlab_quality_256_4class_gray.png`
 
 The current evidence bundle can be audited on A100 with:
 

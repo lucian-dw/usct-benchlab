@@ -25,6 +25,7 @@ def test_shell_scripts_source_local_env():
         Path("scripts/run_fwi_kwave_adapter_smoke.sh"),
         Path("scripts/run_fwi_kwave_full_pipeline_smoke.sh"),
         Path("scripts/run_external_matlab_adapter_smoke.sh"),
+        Path("scripts/run_external_matlab_adapter_quality.sh"),
         Path("scripts/run_nbpslice2d_smoke.sh"),
         Path("scripts/run_openbreastus_quality.sh"),
         Path("scripts/run_nbpslice2d_quality.sh"),
@@ -103,6 +104,25 @@ def test_external_matlab_adapter_smoke_script_and_protocol_are_reproducible():
     assert rwave_config["parameters"]["backend"] == "matlab"
     assert "refractionCorrectedUSCT.github.io" in bent_config["parameters"]["external_root"]
     assert "ray-based-quantitative-ultrasound-tomography" in rwave_config["parameters"]["external_root"]
+
+
+def test_external_matlab_adapter_quality_script_and_protocol_are_reproducible():
+    import yaml
+
+    script = Path("scripts/run_external_matlab_adapter_quality.sh").read_text(encoding="utf-8")
+    protocol = yaml.safe_load(Path("configs/benchmarks/external_matlab_adapter_quality.yaml").read_text(encoding="utf-8"))
+
+    assert "make-quality" in script
+    assert "USCT_QUALITY_CONVERTED_SHAPE:-256" in script
+    assert "USCT_QUALITY_N_TRANSDUCERS:-128" in script
+    assert "configs/benchmarks/external_matlab_adapter_quality.yaml" in script
+    assert "external_matlab_quality_${USCT_QUALITY_CONVERTED_SHAPE}_4class_gray.png" in script
+    assert "--cmap gray" in script
+    assert "--transpose" in script
+    assert protocol["min_cases"] == 4
+    assert protocol["min_records"] == 8
+    assert protocol["expected_algorithms"] == ["bent_ray_gn", "rwave_adapter"]
+    assert "external_adapter_output_loaded" in protocol["required_metrics"]["default"]
 
 
 def test_fwi_kwave_adapter_smoke_script_runs_adapter_flow():
