@@ -63,7 +63,12 @@ def test_fwi_kwave_full_pipeline_smoke_script_runs_speed_map_flow():
     assert "USCT_KWAVE_PYTHON_BIN" in text
     assert "USCT_KWAVE_WARM_START_PATH" in text
     assert "USCT_KWAVE_RECONSTRUCTION_ITERATION" in text
-    assert "USCT_KWAVE_RECONSTRUCTION_ITERATION:-best" in text
+    assert "USCT_KWAVE_SAMPLE_INDEX:-201" in text
+    assert "USCT_KWAVE_RUN_ID:-fwi_kwave_full_pipeline_success201_dense" in text
+    assert "USCT_KWAVE_WRAPPER_CONVERTED_SHAPE:-256" in text
+    assert "USCT_KWAVE_RECONSTRUCTION_ITERATION:-final" in text
+    assert "benchmark wrapper" in text
+    assert "output_shape=($USCT_KWAVE_WRAPPER_CONVERTED_SHAPE, $USCT_KWAVE_WRAPPER_CONVERTED_SHAPE)" in text
     assert "--render-best-and-final" in text
 
 
@@ -72,9 +77,42 @@ def test_fwi_kwave_full_pipeline_config_uses_multifrequency_rf_warm_start():
 
     config = yaml.safe_load(Path("configs/algorithms/fwi_kwave_full_pipeline.yaml").read_text(encoding="utf-8"))
     params = config["parameters"]
+    expected_freqs = [
+        0.3,
+        0.325,
+        0.35,
+        0.375,
+        0.4,
+        0.425,
+        0.45,
+        0.475,
+        0.5,
+        0.525,
+        0.55,
+        0.575,
+        0.6,
+        0.625,
+        0.65,
+        0.675,
+        0.7,
+        0.725,
+        0.75,
+        0.775,
+        0.8,
+    ]
 
+    assert params["array_mode"] == "full128"
+    assert params["object_scale"] == 1.0
+    assert params["object_pose"] == "native"
+    assert params["background_speed"] == 1500.0
+    assert params["ncalc"] == 512
+    assert params["xmax_mm"] == 120.0
+    assert params["circle_radius_mm"] == 110.0
+    assert params["backend"] == "cuda-binary"
     assert params["warm_start_builder"] == "traveltime"
-    assert params["sos_freqs_mhz"] == [0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8]
+    assert params["start_matlab"] is True
+    assert params["no_connect_existing"] is True
+    assert params["sos_freqs_mhz"] == expected_freqs
     assert params["sos_iters"] == [3]
     assert params["atten_iters"] == [0]
     assert params["recon_dxi_mm"] == 0.3
@@ -83,9 +121,24 @@ def test_fwi_kwave_full_pipeline_config_uses_multifrequency_rf_warm_start():
     assert params["step_damping"] == 0.25
     assert params["max_update_mps"] == 12.0
     assert params["velocity_bounds"] == [1408.692, 1595.1279]
+    assert params["exclude_neighbor_fraction"] == 0.123046875
+    assert params["perc_outliers"] == 0.99
+    assert params["tof_pre_frac"] == 0.05
+    assert params["filter_cutoff"] == 0.75
     assert params["atten_bkgnd"] == 0.0
     assert params["sos2atten"] == 0.0
-    assert params["reconstruction_iteration"] == "best"
+    assert params["save_raw_grad_iters"] == 0
+    assert params["reconstruction_iteration"] == "final"
+    warm_args = params["warm_start_args"]
+    assert warm_args[warm_args.index("--background-speed") + 1] == "1500"
+    assert warm_args[warm_args.index("--coarse-dxi-mm") + 1] == "3.0"
+    assert warm_args[warm_args.index("--support-mode") + 1] == "backprojection"
+    assert warm_args[warm_args.index("--velocity-bounds") + 1 : warm_args.index("--velocity-bounds") + 3] == [
+        "1408.7",
+        "1595.1",
+    ]
+    assert warm_args[warm_args.index("--update-scale") + 1] == "-1"
+    assert "--compare-gt" in warm_args
 
 
 def test_nbpslice2d_smoke_script_runs_dataset_flow():

@@ -13,6 +13,82 @@ from usctbench.schema import AlgorithmConfig
 h5py = pytest.importorskip("h5py")
 
 
+DENSE_SUCCESS_FREQS = [
+    0.3,
+    0.325,
+    0.35,
+    0.375,
+    0.4,
+    0.425,
+    0.45,
+    0.475,
+    0.5,
+    0.525,
+    0.55,
+    0.575,
+    0.6,
+    0.625,
+    0.65,
+    0.675,
+    0.7,
+    0.725,
+    0.75,
+    0.775,
+    0.8,
+]
+
+RF_INIT_SUCCESS_ARGS = [
+    "--background-speed",
+    "1500",
+    "--recon-dxi-mm",
+    "0.3",
+    "--coarse-dxi-mm",
+    "3.0",
+    "--fov-radius-mm",
+    "85.0",
+    "--calibration-impact-radius-mm",
+    "78.0",
+    "--exclude-neighbor-fraction",
+    "0.123046875",
+    "--arrival-picker",
+    "abs",
+    "--min-confidence",
+    "2.0",
+    "--residual-clip-us",
+    "8.0",
+    "--residual-percentile",
+    "99.0",
+    "--max-rays",
+    "5000",
+    "--ray-step-mm",
+    "1.5",
+    "--min-path-mm",
+    "6.0",
+    "--lsqr-damp",
+    "0.03",
+    "--lsqr-iter-lim",
+    "250",
+    "--smooth-sigma-mm",
+    "6.0",
+    "--support-mode",
+    "backprojection",
+    "--support-percentile",
+    "45.0",
+    "--support-sigma-mm",
+    "5.0",
+    "--support-alpha-sigma-mm",
+    "2.5",
+    "--support-dilate-mm",
+    "4.0",
+    "--velocity-bounds",
+    "1408.7",
+    "1595.1",
+    "--update-scale",
+    "-1",
+    "--compare-gt",
+]
+
+
 def test_read_kwave_fwi_result_extracts_metrics(tmp_path):
     result_path = tmp_path / "result.mat"
     _write_result(result_path)
@@ -142,8 +218,9 @@ def test_kwave_adapter_full_pipeline_launch_uses_speed_map_command(tmp_path, mon
                 "dataset_path": str(dataset_path),
                 "external_log_path": str(log_path),
                 "start_matlab": True,
+                "no_connect_existing": True,
                 "overwrite": True,
-                "sos_freqs_mhz": [0.3],
+                "sos_freqs_mhz": DENSE_SUCCESS_FREQS,
                 "sos_iters": [20],
             }
         ),
@@ -156,7 +233,11 @@ def test_kwave_adapter_full_pipeline_launch_uses_speed_map_command(tmp_path, mon
     assert command[command.index("--mat-path") + 1] == str(source_mat)
     assert command[command.index("--dataset-path") + 1] == str(dataset_path)
     assert "--start-matlab" in command
+    assert "--no-connect-existing" in command
     assert "--overwrite" in command
+    assert command[command.index("--sos-freqs-mhz") + 1 : command.index("--sos-freqs-mhz") + 22] == [
+        str(freq) for freq in DENSE_SUCCESS_FREQS
+    ]
     assert command[command.index("--sos-iters") + 1] == "20"
     assert result.metrics["external_execution_mode"] == "full_pipeline_from_speed_map"
     assert result.metrics["external_log_path"] == str(log_path)
@@ -220,7 +301,9 @@ def test_kwave_adapter_traveltime_warm_start_runs_three_external_steps(tmp_path,
                 "dataset_path": str(dataset_path),
                 "warm_start_builder": "traveltime",
                 "warm_start_path": str(warm_start_path),
-                "warm_start_args": ["--update-scale", "-1"],
+                "warm_start_args": RF_INIT_SUCCESS_ARGS,
+                "no_connect_existing": True,
+                "sos_freqs_mhz": DENSE_SUCCESS_FREQS,
                 "usct_kwave_root": str(tmp_path),
                 "mat_path": str(tmp_path / "speed.mat"),
             }
@@ -230,12 +313,22 @@ def test_kwave_adapter_traveltime_warm_start_runs_three_external_steps(tmp_path,
     assert result.status == "success"
     assert len(commands) == 3
     assert "--skip-inversion" in commands[0]
+    assert "--no-connect-existing" in commands[0]
+    assert commands[0][commands[0].index("--sos-freqs-mhz") + 1 : commands[0].index("--sos-freqs-mhz") + 22] == [
+        str(freq) for freq in DENSE_SUCCESS_FREQS
+    ]
     assert "openbreastus_diffusion.kwave_dps.make_traveltime_init" in commands[1]
     assert commands[1][commands[1].index("--output-path") + 1] == str(warm_start_path)
+    assert commands[1][-len(RF_INIT_SUCCESS_ARGS) :] == RF_INIT_SUCCESS_ARGS
     assert commands[1][commands[1].index("--update-scale") + 1] == "-1"
+    assert "--compare-gt" in commands[1]
     assert "--skip-siminfo" in commands[2]
     assert "--skip-rf" in commands[2]
     assert "--skip-assemble" in commands[2]
+    assert "--no-connect-existing" in commands[2]
+    assert commands[2][commands[2].index("--sos-freqs-mhz") + 1 : commands[2].index("--sos-freqs-mhz") + 22] == [
+        str(freq) for freq in DENSE_SUCCESS_FREQS
+    ]
     assert commands[2][commands[2].index("--warm-start-result") + 1] == str(warm_start_path)
 
 

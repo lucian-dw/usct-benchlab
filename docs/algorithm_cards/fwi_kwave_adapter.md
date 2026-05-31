@@ -18,10 +18,11 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - Default mode is result ingestion only: `run_external: false`.
 - `result_path` must point to an existing k-Wave FWI result `.mat`.
 - `run_external: true` calls `openbreastus_diffusion.kwave_dps.run_full_pipeline` with explicit pipeline arguments from the config.
-- `configs/algorithms/fwi_kwave_full_pipeline.yaml` is the A100 smoke config for `full128`, 0.3:0.05:0.8 MHz, 3 sound-speed iterations per frequency, no attenuation inversion, RF travel-time warm start, `0.3 mm` reconstruction grid, `c_geom=1500`, update damping `0.25`, velocity clamp `[1408.692, 1595.1279]` m/s, per-step update clamp `12 m/s`, zero background attenuation, and `save_raw_grad_iters: 33`.
-- The RF travel-time initializer uses a sign-corrected slowness update (`--update-scale -1`) based on A100 sweeps: the default sign produced negative object correlation on the smoke case, while the sign-corrected initializer improved RMSE against the k-Wave `C_INTERP` truth.
-- The smoke config selects the best image-domain iteration when `C_INTERP` or case ground truth is available, and the renderer always writes final and best reconstruction artifacts so review is not locked to iteration 1.
-- Output images are resized to the input case grid for benchmark metrics and artifact writing.
+- `configs/algorithms/fwi_kwave_full_pipeline.yaml` is the A100 smoke config for `full128`, 0.3:0.025:0.8 MHz, 3 sound-speed iterations per frequency, no attenuation inversion, RF travel-time warm start, `0.3 mm` reconstruction grid, `c_geom=1500`, update damping `0.25`, velocity clamp `[1408.692, 1595.1279]` m/s, per-step update clamp `12 m/s`, zero background attenuation, and `save_raw_grad_iters: 0`.
+- The RF travel-time initializer pins the successful test201 parameters from `rfinit_densefreq_test201_success.json`, including `--background-speed 1500`, `--recon-dxi-mm 0.3`, support backprojection settings, `--velocity-bounds 1408.7 1595.1`, `--update-scale -1`, and `--compare-gt`.
+- The smoke config selects the final iteration for benchmark judgment. The renderer still writes final and best reconstruction artifacts, but best is diagnostic only and should not be used as oracle selection.
+- The default benchmark wrapper case is generated at 256x256 so image metrics are comparable with the traditional quality runs. The external k-Wave/FWI result remains authoritative; judge FWI quality first against the external MAT `C_INTERP` grid and the k-Wave-native metrics, not only against surrogate wrapper metrics.
+- Current success reference: OpenBreastUS test201, result `/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/outputs/rfinit_densefreq_test201_20260531_215043/results/test201_rfinit_sos0p3to0p8_step0p025_iter3.mat`, with `final_inside_psnr=22.7387`, `final_inside_corr=0.8933`, and `final_inside_hp_corr=0.8295` in `/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/configs/rfinit_densefreq_test201_success.json`.
 
 ## Expected Failure Modes
 

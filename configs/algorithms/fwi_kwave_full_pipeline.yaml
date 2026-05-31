@@ -20,6 +20,7 @@ parameters:
   xmax_mm: 120.0
   circle_radius_mm: 110.0
   backend: cuda-binary
+  no_connect_existing: true
   generation_mode: split
   output_dir: ${USCT_KWAVE_OUTPUT_DIR}
   siminfo_path: ${USCT_KWAVE_SIMINFO_PATH}
@@ -31,27 +32,78 @@ parameters:
   warm_start_summary_path: ${USCT_KWAVE_WARM_START_SUMMARY_PATH}
   warm_start_diagnostic_prefix: ${USCT_KWAVE_WARM_START_DIAGNOSTIC_PREFIX}
   warm_start_args:
-    - --update-scale
-    - "-1"
+    - --background-speed
+    - "1500"
     - --recon-dxi-mm
     - "0.3"
+    - --coarse-dxi-mm
+    - "3.0"
+    - --fov-radius-mm
+    - "85.0"
+    - --calibration-impact-radius-mm
+    - "78.0"
+    - --exclude-neighbor-fraction
+    - "0.123046875"
+    - --arrival-picker
+    - abs
+    - --min-confidence
+    - "2.0"
+    - --residual-clip-us
+    - "8.0"
+    - --residual-percentile
+    - "99.0"
+    - --max-rays
+    - "5000"
+    - --ray-step-mm
+    - "1.5"
+    - --min-path-mm
+    - "6.0"
+    - --lsqr-damp
+    - "0.03"
+    - --lsqr-iter-lim
+    - "250"
+    - --smooth-sigma-mm
+    - "6.0"
+    - --support-mode
+    - backprojection
+    - --support-percentile
+    - "45.0"
+    - --support-sigma-mm
+    - "5.0"
+    - --support-alpha-sigma-mm
+    - "2.5"
+    - --support-dilate-mm
+    - "4.0"
     - --velocity-bounds
     - "1408.7"
     - "1595.1"
-  reconstruction_iteration: best
+    - --update-scale
+    - "-1"
+    - --compare-gt
+  reconstruction_iteration: final
   overwrite: true
   start_matlab: true
   sos_freqs_mhz:
     - 0.3
+    - 0.325
     - 0.35
+    - 0.375
     - 0.4
+    - 0.425
     - 0.45
+    - 0.475
     - 0.5
+    - 0.525
     - 0.55
+    - 0.575
     - 0.6
+    - 0.625
     - 0.65
+    - 0.675
     - 0.7
+    - 0.725
     - 0.75
+    - 0.775
     - 0.8
   sos_iters:
     - 3
@@ -67,14 +119,21 @@ parameters:
   velocity_bounds:
     - 1408.692
     - 1595.1279
+  exclude_neighbor_fraction: 0.123046875
+  perc_outliers: 0.99
+  tof_pre_frac: 0.05
+  filter_cutoff: 0.75
   max_update_mps: 12.0
-  save_raw_grad_iters: 33
+  save_raw_grad_iters: 0
   timeout_s: 21600
 metadata:
   external_source: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/run_full_pipeline.py
   default_mode: full_pipeline_from_speed_map
   default_initialization: RF travel-time warm start with sign-corrected slowness update.
-  frequency_schedule_mhz: "0.3:0.05:0.8 with 3 sound-speed iterations per frequency"
-  default_selection: best available image-domain iteration, with final and best artifacts rendered for review.
+  frequency_schedule_mhz: "0.3:0.025:0.8 with 3 sound-speed iterations per frequency"
+  reference_success_config: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/configs/rfinit_densefreq_test201_success.json
+  reference_success_result: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/outputs/rfinit_densefreq_test201_20260531_215043/results/test201_rfinit_sos0p3to0p8_step0p025_iter3.mat
+  reference_success_metrics: "test201 final_inside_psnr=22.7387 final_inside_corr=0.8933 final_inside_hp_corr=0.8295"
+  default_selection: final iteration; best iteration is rendered only as a diagnostic artifact.
   fallback_initialization: unset warm_start_builder to use constant background/debug mode.
   v0_1_scope: k-Wave simulation plus Helmholtz/FWI only; no diffusion or generative priors.
