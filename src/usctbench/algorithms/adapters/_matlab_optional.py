@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from usctbench.adapters.matlab import MatlabAdapter, MatlabUnavailable
 from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
@@ -12,6 +13,34 @@ def requests_matlab_backend(config: AlgorithmConfig) -> bool:
     params = config.parameters
     backend = str(params.get("backend", "")).strip().lower()
     return backend == "matlab" or any(params.get(key) for key in ("matlab_bin", "external_root", "entrypoint"))
+
+
+def run_optional_matlab_backend(
+    *,
+    algorithm: str,
+    case: USCTCase,
+    config: AlgorithmConfig,
+    native_runner: Callable[[], ReconstructionResult],
+    missing_config_reason: str,
+    missing_entrypoint_prefix: str,
+    configured_message: str,
+    log_name: str,
+    unimplemented_reason: str,
+) -> ReconstructionResult:
+    if not requests_matlab_backend(config):
+        from usctbench.algorithms.ray._common import run_with_failure_capture
+
+        return run_with_failure_capture(algorithm, case, native_runner)
+    return run_matlab_placeholder(
+        algorithm=algorithm,
+        case=case,
+        config=config,
+        missing_config_reason=missing_config_reason,
+        missing_entrypoint_prefix=missing_entrypoint_prefix,
+        configured_message=configured_message,
+        log_name=log_name,
+        unimplemented_reason=unimplemented_reason,
+    )
 
 
 def run_matlab_placeholder(

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from usctbench.algorithms.adapters._matlab_optional import requests_matlab_backend, run_matlab_placeholder
+from usctbench.algorithms.adapters._matlab_optional import run_optional_matlab_backend
 from usctbench.algorithms.adapters._travel_time import run_iterative_travel_time_solver
-from usctbench.algorithms.ray._common import run_with_failure_capture
 from usctbench.schema import AlgorithmConfig, ReconstructionResult, USCTCase
 
 
@@ -20,9 +19,17 @@ class BentRayGNAdapter:
     name = "bent_ray_gn"
 
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
-        if not requests_matlab_backend(config):
-            return run_with_failure_capture(self.name, case, lambda: _run_python_bent_ray(self.name, case, config))
-        return _run_matlab_placeholder(self.name, case, config)
+        return run_optional_matlab_backend(
+            algorithm=self.name,
+            case=case,
+            config=config,
+            native_runner=lambda: _run_python_bent_ray(self.name, case, config),
+            missing_config_reason="MATLAB refraction GN adapter requires parameters.external_root and parameters.entrypoint",
+            missing_entrypoint_prefix="MATLAB refraction GN entrypoint not found",
+            configured_message="USCT bent_ray_gn adapter configured",
+            log_name="bent_ray_gn_matlab.log",
+            unimplemented_reason="External MATLAB entrypoint is configured, but data marshaling is not implemented yet.",
+        )
 
 
 def _run_python_bent_ray(algorithm: str, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
@@ -40,17 +47,4 @@ def _run_python_bent_ray(algorithm: str, case: USCTCase, config: AlgorithmConfig
             "refraction_correction_enabled": True,
             "external_reference": "rehmanali1994/refractionCorrectedUSCT.github.io",
         },
-    )
-
-
-def _run_matlab_placeholder(algorithm: str, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
-    return run_matlab_placeholder(
-        algorithm=algorithm,
-        case=case,
-        config=config,
-        missing_config_reason="MATLAB refraction GN adapter requires parameters.external_root and parameters.entrypoint",
-        missing_entrypoint_prefix="MATLAB refraction GN entrypoint not found",
-        configured_message="USCT bent_ray_gn adapter configured",
-        log_name="bent_ray_gn_matlab.log",
-        unimplemented_reason="External MATLAB entrypoint is configured, but data marshaling is not implemented yet.",
     )
