@@ -8,12 +8,12 @@ from usctbench.schema import AlgorithmConfig, ReconstructionResult, USCTCase
 
 
 class BentRayGNAdapter:
-    """Callable placeholder for established MATLAB bent-ray GN code.
+    """Callable adapter for refraction-corrected travel-time tomography.
 
     The default v0.1 backend is a project-native regularized travel-time
     inversion that preserves the same I/O and metrics as the external adapter.
-    Set `backend: matlab` or provide MATLAB-specific parameters to exercise the
-    dependency-checking external path.
+    Set `backend: matlab` with `external_root` and `entrypoint` to run the
+    public-package MATLAB bridge through the standard adapter MAT contract.
     """
 
     name = "bent_ray_gn"

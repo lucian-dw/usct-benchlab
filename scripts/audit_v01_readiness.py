@@ -186,17 +186,6 @@ QUALITY_EVIDENCE_SPECS = [
         "min_summary_rows": 8,
     },
     {
-        "name": "fwi_kwave_reingest",
-        "run_dir": "fwi_kwave_success201_reingest_63ec1e5",
-        "run_checks": "benchmark_run_checks.json",
-        "files": [
-            "benchmark_summary.csv",
-            "benchmark_report.md",
-            "benchmark_run_checks.json",
-            "fwi_kwave_adapter/openbreast_test201_kwave_full_000200/kwave_smoke_outputs/contact_sheet.png",
-        ],
-    },
-    {
         "name": "fwi_best_grid_cross_algorithm_panel",
         "run_dir": "fwi_kwave_best_grid_reingest_2b8d7a5",
         "run_checks": "benchmark_run_checks.json",

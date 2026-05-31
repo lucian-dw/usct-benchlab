@@ -49,7 +49,7 @@ def run_optional_matlab_backend(
         from usctbench.algorithms.ray._common import run_with_failure_capture
 
         return run_with_failure_capture(algorithm, case, native_runner)
-    return run_matlab_placeholder(
+    return run_matlab_backend(
         algorithm=algorithm,
         case=case,
         config=config,
@@ -61,7 +61,7 @@ def run_optional_matlab_backend(
     )
 
 
-def run_matlab_placeholder(
+def run_matlab_backend(
     *,
     algorithm: str,
     case: USCTCase,
