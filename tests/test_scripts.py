@@ -117,9 +117,11 @@ def test_fwi_kwave_adapter_smoke_script_runs_adapter_flow():
 def test_fwi_kwave_adapter_smoke_protocol_is_ingestion_only():
     import yaml
 
+    config = yaml.safe_load(Path("configs/algorithms/fwi_kwave_adapter.yaml").read_text(encoding="utf-8"))
     protocol = yaml.safe_load(Path("configs/benchmarks/fwi_kwave_adapter_smoke.yaml").read_text(encoding="utf-8"))
     required = protocol["required_metrics"]["fwi_kwave_adapter"]
 
+    assert config["parameters"]["reconstruction_iteration"] == "${USCT_KWAVE_RECONSTRUCTION_ITERATION:-best}"
     assert "external_result_loaded" in required
     assert "selected_iteration" in required
     assert "selected_loss" in required
