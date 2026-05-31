@@ -24,8 +24,11 @@ def test_convert_nbp_slice2d_mat_to_standard_case(tmp_path):
     case = read_case_hdf5(record["path"])
     assert case.case_id == "A000001"
     assert case.grid.shape == (4, 4)
-    assert case.grid.spacing_m == (2.0e-4, 2.0e-4)
+    assert np.allclose(case.grid.spacing_m, (1.5e-4, 1.5e-4))
     assert case.grid.roi_mask is not None
+    assert case.metadata["roi_fit"]["enabled"] is True
+    assert case.metadata["roi_fit"]["crop_shape_pixels"] == [6, 6]
+    assert record["fitted_source_shape"] == [6, 6]
     assert case.measurement.delta_tof_s.shape == (6, 6)
     assert case.measurement.log_amp.shape == (6, 6)
     assert case.ground_truth.sound_speed_mps is not None

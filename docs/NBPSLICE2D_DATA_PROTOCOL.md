@@ -58,6 +58,13 @@ surrogates:
 These assumptions are recorded in each case metadata under `conversion`,
 `feature_provenance`, and `measurement_limitations`.
 
+Before downsampling and inversion, the converter fits the image-domain field of
+view to the breast label mask. It crops a square region around `label > 0`,
+leaving margin so the breast occupies about 72% of the reconstruction width.
+The original source shape, crop box, and effective meter spacing are recorded in
+`metadata.roi_fit` and `metadata.effective_spacing_m`. This avoids wasting most
+of the reconstruction grid on blank background for small NBPslice2D samples.
+
 ## Smoke benchmark
 
 The script:

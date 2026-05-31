@@ -17,6 +17,7 @@ from usctbench.schema import GeometrySpec, GridSpec, GroundTruthSpec, Measuremen
 
 NBP_PIXEL_SPACING_M = 1.0e-4
 NBP_DEFAULT_ATTENUATION_FREQUENCY_MHZ = 1.0
+NBP_ROI_FOV_FRACTION = 0.72
 NBP_DENSITY_CLASSES = {
     "A": "almost_entirely_fatty",
     "B": "scattered_fibroglandular",
@@ -429,16 +430,22 @@ def _nbp_handle_to_case_record(
     density_label = chr(type_code) if 0 <= type_code <= 255 else str(type_code)
     density_class = NBP_DENSITY_CLASSES.get(density_label, "unknown")
 
-    sound_speed_mps = _downsample_mean(sos_mps_raw, output_shape)
-    attenuation_np_per_m = _downsample_mean(attenuation_np_per_m_raw, output_shape)
-    label_small = _downsample_label(label_raw, output_shape)
+    sos_mps_crop, attenuation_np_per_m_crop, label_crop, crop_info = _fit_nbp_field_of_view(
+        sos_mps_raw,
+        attenuation_np_per_m_raw,
+        label_raw,
+    )
+
+    sound_speed_mps = _downsample_mean(sos_mps_crop, output_shape)
+    attenuation_np_per_m = _downsample_mean(attenuation_np_per_m_crop, output_shape)
+    label_small = _downsample_label(label_crop, output_shape)
     roi_mask = label_small > 0
     if not np.any(roi_mask):
         roi_mask = np.ones(output_shape, dtype=bool)
 
     spacing_m = (
-        NBP_PIXEL_SPACING_M * sos_mps_raw.shape[0] / float(output_shape[0]),
-        NBP_PIXEL_SPACING_M * sos_mps_raw.shape[1] / float(output_shape[1]),
+        NBP_PIXEL_SPACING_M * sos_mps_crop.shape[0] / float(output_shape[0]),
+        NBP_PIXEL_SPACING_M * sos_mps_crop.shape[1] / float(output_shape[1]),
     )
     grid = make_grid(shape=output_shape, spacing_m=spacing_m)
     grid = grid.model_copy(update={"roi_mask": roi_mask})
@@ -470,6 +477,8 @@ def _nbp_handle_to_case_record(
             "source_member": source_member,
             "source_ref": source_ref,
             "source_shape": list(sos_mps_raw.shape),
+            "fitted_source_shape": list(sos_mps_crop.shape),
+            "roi_fit": crop_info,
             "conversion": "nbpslice2d_to_feature_case",
             "feature_provenance": "surrogate_delta_tof_from_nbp_sound_speed_and_attenuation_line_integral_from_nbp_ground_truth",
             "measurement_domain": "features",
@@ -504,6 +513,8 @@ def _nbp_handle_to_case_record(
         "source_dataset": "NBPslices2D",
         "shape": list(sound_speed_mps.shape),
         "source_shape": list(sos_mps_raw.shape),
+        "fitted_source_shape": list(sos_mps_crop.shape),
+        "roi_fit": crop_info,
         "conversion": case.metadata["conversion"],
         "feature_provenance": case.metadata["feature_provenance"],
         "measurement_limitations": case.metadata["measurement_limitations"],
@@ -538,6 +549,58 @@ def _downsample_mean(image: np.ndarray, output_shape: tuple[int, int]) -> np.nda
     start_x = (nx - crop_x) // 2
     cropped = image[start_y : start_y + crop_y, start_x : start_x + crop_x]
     return cropped.reshape(out_y, block_y, out_x, block_x).mean(axis=(1, 3))
+
+
+def _fit_nbp_field_of_view(
+    sound_speed_mps: np.ndarray,
+    attenuation_np_per_m: np.ndarray,
+    label: np.ndarray,
+    *,
+    roi_fov_fraction: float = NBP_ROI_FOV_FRACTION,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+    """Crop an NBPslice2D map so the breast ROI occupies a useful FOV."""
+
+    label = np.asarray(label)
+    roi = label > 0
+    if not np.any(roi):
+        info = {
+            "enabled": False,
+            "reason": "no_positive_label",
+            "source_bbox_pixels": [0, 0, int(label.shape[0]), int(label.shape[1])],
+            "crop_bbox_pixels": [0, 0, int(label.shape[0]), int(label.shape[1])],
+            "target_roi_fov_fraction": float(roi_fov_fraction),
+        }
+        return sound_speed_mps, attenuation_np_per_m, label, info
+
+    rows, cols = np.where(roi)
+    y0, y1 = int(rows.min()), int(rows.max()) + 1
+    x0, x1 = int(cols.min()), int(cols.max()) + 1
+    roi_h = y1 - y0
+    roi_w = x1 - x0
+    if not 0.0 < roi_fov_fraction <= 1.0:
+        raise ValueError("roi_fov_fraction must be in (0, 1]")
+    side = int(np.ceil(max(roi_h, roi_w) / roi_fov_fraction))
+    side = max(side, roi_h, roi_w, 1)
+    side = min(side, int(label.shape[0]), int(label.shape[1]))
+    center_y = 0.5 * (y0 + y1)
+    center_x = 0.5 * (x0 + x1)
+    crop_y0 = int(round(center_y - 0.5 * side))
+    crop_x0 = int(round(center_x - 0.5 * side))
+    crop_y0 = min(max(crop_y0, 0), int(label.shape[0]) - side)
+    crop_x0 = min(max(crop_x0, 0), int(label.shape[1]) - side)
+    crop_y1 = crop_y0 + side
+    crop_x1 = crop_x0 + side
+    info = {
+        "enabled": True,
+        "source_bbox_pixels": [y0, x0, y1, x1],
+        "crop_bbox_pixels": [crop_y0, crop_x0, crop_y1, crop_x1],
+        "source_roi_shape_pixels": [roi_h, roi_w],
+        "crop_shape_pixels": [side, side],
+        "target_roi_fov_fraction": float(roi_fov_fraction),
+        "actual_roi_fov_fraction": float(max(roi_h, roi_w) / side),
+    }
+    crop = np.s_[crop_y0:crop_y1, crop_x0:crop_x1]
+    return sound_speed_mps[crop], attenuation_np_per_m[crop], label[crop], info
 
 
 def _downsample_label(label: np.ndarray, output_shape: tuple[int, int]) -> np.ndarray:
