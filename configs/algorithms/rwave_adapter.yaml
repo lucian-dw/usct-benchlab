@@ -1,12 +1,12 @@
 name: rwave_adapter
 parameters:
   backend: python
-  outer_iterations: 3
-  inner_iterations: 20
+  outer_iterations: 4
+  inner_iterations: 24
   step_length: 1.0
   regularization: laplacian
-  regularization_lambda: 1.0e-5
-  smooth_sigma: 0.35
+  regularization_lambda: 1.0e-4
+  smooth_sigma: 1.0
   roi_update_only: false
   reference_sound_speed_mps: 1500.0
   sound_speed_bounds_mps: [1300.0, 1700.0]

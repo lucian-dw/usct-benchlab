@@ -2,7 +2,7 @@ name: bent_ray_gn
 parameters:
   backend: python
   outer_iterations: 4
-  inner_iterations: 16
+  inner_iterations: 24
   step_length: 1.0
   regularization: laplacian
   regularization_lambda: 3.0e-5

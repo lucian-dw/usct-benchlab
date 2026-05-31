@@ -27,10 +27,10 @@ This adapter targets weak-scattering ray-Born or r-Wave style reconstruction. In
 ## Default Settings
 
 - `backend: python`
-- Outer ray-Born-style residual iterations: `3`
-- Inner CGLS iterations: `20`
-- Regularization: Laplacian, `regularization_lambda=1.0e-5`
-- Smoothing: `smooth_sigma=0.35`
+- Outer ray-Born-style residual iterations: `4`
+- Inner CGLS iterations: `24`
+- Regularization: Laplacian, `regularization_lambda=1.0e-4`
+- Smoothing: `smooth_sigma=1.0`
 - Bounds: `[1300, 1700] m/s`
 - Set `backend: matlab` or provide MATLAB-specific parameters to run the external dependency-checking path.
 

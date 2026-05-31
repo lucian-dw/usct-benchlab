@@ -30,7 +30,7 @@ This adapter targets refraction-corrected travel-time tomography. In v0.1 the de
 
 - `backend: python`
 - Outer Gauss-Newton-style iterations: `4`
-- Inner CGLS iterations: `16`
+- Inner CGLS iterations: `24`
 - Regularization: Laplacian, `regularization_lambda=3.0e-5`
 - Smoothing: `smooth_sigma=0.6`
 - Bounds: `[1300, 1700] m/s`
