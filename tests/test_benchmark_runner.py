@@ -204,6 +204,17 @@ def test_bench_runs_suite_on_synthetic_case(tmp_path):
     assert "USCT_DATA_ROOT:" in report
 
 
+def test_cli_make_synthetic_smoke_writes_cases_and_manifest(tmp_path):
+    out = tmp_path / "synthetic_smoke"
+
+    exit_code = main(["data", "make-synthetic-smoke", "--out", str(out), "--shape", "12", "--n-transducers", "12"])
+
+    assert exit_code == 0
+    assert (out / "manifest.json").exists()
+    cases = sorted((out / "cases").glob("*.h5"))
+    assert [path.stem for path in cases] == ["synthetic_circular_sos", "synthetic_homogeneous_sos"]
+
+
 def test_bench_suite_rejects_empty_case_glob(tmp_path):
     suite = tmp_path / "suite.yaml"
     suite.write_text(

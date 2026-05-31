@@ -80,7 +80,14 @@ The smoke suite covers the local runnable algorithm library flow:
 - `straight_sirt`
 - `straight_cgls`
 - `attenuation_sirt`
-- `fwi_tiny` with `configs/algorithms/fwi_tiny_nbp.yaml`
 
-External MATLAB/k-Wave adapters are intentionally not run by this smoke suite
-unless a matching external result or launch contract is added later.
+`fwi_tiny` is intentionally not part of this smoke comparison. It is a
+synthetic proof-of-life FWI check, and on map-surrogate NBPslice2D samples it
+can produce visually uninformative near-constant panels. External MATLAB/k-Wave
+adapters are also intentionally not run by this smoke suite unless a matching
+external result or launch contract is added later.
+
+Sound-speed comparison panels should use a grayscale colormap and include GT
+plus traditional sound-speed algorithms only. Use
+`scripts/render_class_comparison_panels.py` for reproducible class-comparison
+figures.

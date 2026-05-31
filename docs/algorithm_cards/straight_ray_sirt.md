@@ -20,7 +20,9 @@ It updates all rays simultaneously with row and column path-length normalization
 ## Default Settings
 
 - iterations: `50`
-- relaxation: `0.8`
+- relaxation: `0.3`
+- optional post-update smoothing: disabled by default
+- optional ROI-only update: disabled by default
 - reference sound speed: `1500 m/s`
 - sound-speed bounds: `[1300, 1700] m/s`
 
@@ -37,12 +39,14 @@ It updates all rays simultaneously with row and column path-length normalization
 2. Inspect the travel-time sinogram and valid mask.
 3. Lower relaxation if residuals oscillate.
 4. Increase iterations gradually.
+5. Enable light smoothing or ROI-only updates only after the sinogram and coverage diagnostics look sane.
 
 ## Acceptance Tests
 
 - homogeneous phantom returns the reference sound speed;
 - slower inclusion produces a slower reconstructed center;
-- data residual remains finite.
+- data residual remains finite;
+- benchmark runs write coverage diagnostics and a residual curve.
 
 ## References and Related Code
 

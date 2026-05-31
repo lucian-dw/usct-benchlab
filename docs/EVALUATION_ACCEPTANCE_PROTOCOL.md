@@ -62,6 +62,7 @@ Sound-speed algorithms should report:
 - PSNR and SSIM where valid;
 - water/reference baseline RMSE improvement;
 - data residual norm when a forward model is available;
+- coverage nonzero fraction, valid ray fraction, row/column norm ranges, ring artifact index, and coverage/error correlation for straight-ray algorithms;
 - runtime and peak memory.
 
 Attenuation algorithms should report:
@@ -79,6 +80,9 @@ Attenuation algorithms should report:
 - `benchmark_report.md`
 
 The CSV includes pass/fail booleans, pass reasons, fail reasons, runtime, peak memory, artifact completeness, and failure-report presence.
+It also carries `case_type` and `benchmark_type` when the case metadata records
+them, so synthetic-oracle, speed-map-surrogate, and wavefield-derived runs are
+not silently merged.
 The run-check JSON records protocol-level failures such as missing algorithms,
 too few records, too few cases, or an incomplete algorithm/case matrix. CLI
 commands return non-zero if any per-case record fails or if run-level checks

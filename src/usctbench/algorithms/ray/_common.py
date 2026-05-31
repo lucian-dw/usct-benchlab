@@ -102,6 +102,7 @@ def cgls_solve(
     *,
     iterations: int,
     damping: float = 0.0,
+    regularization: str = "identity",
 ) -> tuple[np.ndarray, list[float]]:
     """Solve a masked least-squares system with CGLS."""
 
@@ -109,7 +110,7 @@ def cgls_solve(
     residual = apply_mask(target - projector.forward(x), mask)
     s = projector.adjoint(residual)
     if damping > 0:
-        s = s - damping * x
+        s = s - damping * _regularization_normal(x, regularization)
     p = s.copy()
     gamma = float(np.vdot(s, s))
     residual_norms = [float(np.linalg.norm(residual[mask]))]
@@ -120,7 +121,8 @@ def cgls_solve(
         q = apply_mask(projector.forward(p), mask)
         denom = float(np.vdot(q, q))
         if damping > 0:
-            denom += damping * float(np.vdot(p, p))
+            reg_p = _regularization_forward(p, regularization)
+            denom += damping * float(np.vdot(reg_p, reg_p))
         if denom <= 0:
             break
         alpha = gamma / denom
@@ -128,7 +130,7 @@ def cgls_solve(
         residual = residual - alpha * q
         s_next = projector.adjoint(residual)
         if damping > 0:
-            s_next = s_next - damping * x
+            s_next = s_next - damping * _regularization_normal(x, regularization)
         gamma_next = float(np.vdot(s_next, s_next))
         residual_norms.append(float(np.linalg.norm(residual[mask])))
         if gamma_next <= 1.0e-30:
@@ -140,6 +142,36 @@ def cgls_solve(
     return x, residual_norms
 
 
+def _regularization_forward(image: np.ndarray, kind: str) -> np.ndarray:
+    kind_normalized = str(kind).lower()
+    if kind_normalized in ("identity", "l2"):
+        return np.asarray(image, dtype=float)
+    if kind_normalized in ("laplacian", "roughness"):
+        return _laplacian(image)
+    raise ValueError("regularization must be 'identity' or 'laplacian'")
+
+
+def _regularization_normal(image: np.ndarray, kind: str) -> np.ndarray:
+    kind_normalized = str(kind).lower()
+    if kind_normalized in ("identity", "l2"):
+        return np.asarray(image, dtype=float)
+    if kind_normalized in ("laplacian", "roughness"):
+        return _laplacian(_laplacian(image))
+    raise ValueError("regularization must be 'identity' or 'laplacian'")
+
+
+def _laplacian(image: np.ndarray) -> np.ndarray:
+    array = np.asarray(image, dtype=float)
+    padded = np.pad(array, ((1, 1), (1, 1)), mode="edge")
+    return (
+        padded[:-2, 1:-1]
+        + padded[2:, 1:-1]
+        + padded[1:-1, :-2]
+        + padded[1:-1, 2:]
+        - 4.0 * padded[1:-1, 1:-1]
+    )
+
+
 def sirt_solve(
     projector: StraightRayProjector,
     target: np.ndarray,
@@ -148,6 +180,9 @@ def sirt_solve(
     iterations: int,
     relaxation: float,
     nonnegative: bool = False,
+    smooth_sigma: float = 0.0,
+    smooth_every: int = 0,
+    roi_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[float]]:
     """Run a normalized simultaneous iterative reconstruction update."""
 
@@ -162,8 +197,7 @@ def sirt_solve(
         residual_norms.append(float(np.linalg.norm(residual[mask])))
         update = projector.adjoint(residual / row_norm) / col_norm
         x = x + float(relaxation) * update
-        if nonnegative:
-            x = np.maximum(x, 0.0)
+        x = _post_update(x, iteration_index=_ + 1, nonnegative=nonnegative, smooth_sigma=smooth_sigma, smooth_every=smooth_every, roi_mask=roi_mask)
     residual = apply_mask(target - projector.forward(x), mask)
     residual_norms.append(float(np.linalg.norm(residual[mask])))
     return x, residual_norms
@@ -176,26 +210,65 @@ def sart_solve(
     *,
     iterations: int,
     relaxation: float,
+    subsets: int = 8,
+    smooth_sigma: float = 0.0,
+    smooth_every: int = 0,
+    roi_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[float]]:
-    """Run a simple ray-sequential ART/SART-style update."""
+    """Run subset-normalized SART updates over masked rays."""
 
-    x = np.zeros(projector.n_pixels, dtype=float)
+    x = np.zeros(projector.grid.shape, dtype=float)
     target = np.asarray(target, dtype=float).reshape(-1)
+    row_norm = projector.row_norms(power=1)
+    row_norm[row_norm <= 0.0] = 1.0
+    ray_ids = np.flatnonzero(np.asarray(mask, dtype=bool))
+    subset_count = max(1, min(int(subsets), int(ray_ids.size) if ray_ids.size else 1))
     residual_norms: list[float] = []
 
     for _ in range(max(0, int(iterations))):
-        for ray_id, (indices, lengths) in enumerate(zip(projector.indices_by_ray, projector.lengths_by_ray_m, strict=True)):
-            if not mask[ray_id] or indices.size == 0:
+        for subset in np.array_split(ray_ids, subset_count):
+            if subset.size == 0:
                 continue
-            estimate = float(np.dot(lengths, x[indices]))
-            denom = float(np.dot(lengths, lengths))
-            if denom <= 0:
-                continue
-            correction = float(relaxation) * (target[ray_id] - estimate) / denom
-            x[indices] += correction * lengths
-        residual = apply_mask(target - projector.forward(x.reshape(projector.grid.shape)), mask)
+            subset_mask = np.zeros(projector.n_rays, dtype=bool)
+            subset_mask[subset] = True
+            residual = apply_mask(target - projector.forward(x), subset_mask)
+            col_norm = projector.adjoint(subset_mask.astype(float))
+            col_norm[col_norm <= 0.0] = 1.0
+            update = projector.adjoint(residual / row_norm) / col_norm
+            x = x + float(relaxation) * update
+            x = _post_update(x, iteration_index=_ + 1, nonnegative=False, smooth_sigma=smooth_sigma, smooth_every=smooth_every, roi_mask=roi_mask)
+        residual = apply_mask(target - projector.forward(x), mask)
         residual_norms.append(float(np.linalg.norm(residual[mask])))
-    return x.reshape(projector.grid.shape), residual_norms
+    return x, residual_norms
+
+
+def _post_update(
+    image: np.ndarray,
+    *,
+    iteration_index: int,
+    nonnegative: bool,
+    smooth_sigma: float,
+    smooth_every: int,
+    roi_mask: np.ndarray | None,
+) -> np.ndarray:
+    updated = np.asarray(image, dtype=float)
+    if roi_mask is not None:
+        updated = np.where(np.asarray(roi_mask, dtype=bool), updated, 0.0)
+    if smooth_sigma > 0.0 and smooth_every > 0 and iteration_index % int(smooth_every) == 0:
+        updated = _gaussian_smooth(updated, float(smooth_sigma))
+        if roi_mask is not None:
+            updated = np.where(np.asarray(roi_mask, dtype=bool), updated, 0.0)
+    if nonnegative:
+        updated = np.maximum(updated, 0.0)
+    return updated
+
+
+def _gaussian_smooth(image: np.ndarray, sigma: float) -> np.ndarray:
+    try:
+        from scipy.ndimage import gaussian_filter
+    except ModuleNotFoundError:
+        return image
+    return np.asarray(gaussian_filter(image, sigma=float(sigma), mode="nearest"), dtype=float)
 
 
 def run_with_failure_capture(

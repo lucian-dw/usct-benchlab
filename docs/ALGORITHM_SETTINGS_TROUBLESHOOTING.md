@@ -7,8 +7,10 @@ This is the root troubleshooting entry point. The longer planning note remains u
 1. Check units: positions and spacing in meters, sound speed in `m/s`, delays in seconds.
 2. Check sign convention: positive delay through a slower object should reconstruct lower speed.
 3. Inspect the travel-time sinogram and valid mask before tuning.
-4. Lower relaxation for SART/SIRT if residuals oscillate.
-5. Add damping for CGLS if the operator fits noise.
+4. Inspect coverage maps, row/column norm ranges, and residual curves before tuning.
+5. Lower relaxation for SART/SIRT if residuals oscillate.
+6. For CGLS, sweep `regularization_lambda`; use `regularization: laplacian` when rough ring/streak artifacts remain after the data residual is already small.
+7. Speed-map surrogate OpenBreastUS/NBPslice2D cases are not measured RF benchmarks. Treat them as projector/metric smoke tests and keep that distinction in reports.
 
 ## Attenuation Tomography
 
@@ -30,4 +32,3 @@ This is the root troubleshooting entry point. The longer planning note remains u
 2. Lower frequencies if phase wraps.
 3. Reduce learning rate if loss increases.
 4. Do not treat `fwi_tiny` as production FWI; it is a proof-of-life test.
-

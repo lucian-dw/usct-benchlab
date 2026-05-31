@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 
 from usctbench.algorithms.ray.straight_projector import StraightRayProjector
+from usctbench.io.hdf5 import write_case_hdf5
 from usctbench.schema import GeometrySpec, GridSpec, GroundTruthSpec, MeasurementSpec, USCTCase
 
 
@@ -97,7 +101,13 @@ def make_sound_speed_case(
         geometry=geometry,
         measurement=MeasurementSpec(domain="features", delta_tof_s=delta_tof_s, valid_mask=valid_mask),
         ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed),
-        metadata={"reference_sound_speed_mps": background_mps, "synthetic": True},
+        metadata={
+            "case_type": "synthetic_oracle",
+            "benchmark_type": "synthetic_oracle",
+            "reference_sound_speed_mps": background_mps,
+            "synthetic": True,
+            "feature_provenance": "oracle_straight_ray_forward_from_ground_truth_sound_speed",
+        },
     )
 
 
@@ -121,6 +131,55 @@ def make_attenuation_case(
         geometry=geometry,
         measurement=MeasurementSpec(domain="features", log_amp=-line_integral, valid_mask=valid_mask),
         ground_truth=GroundTruthSpec(attenuation_np_per_m=attenuation),
-        metadata={"synthetic": True, "log_amp_convention": "log(case/reference) = -integral(alpha ds)"},
+        metadata={
+            "case_type": "synthetic_oracle",
+            "benchmark_type": "synthetic_oracle",
+            "synthetic": True,
+            "feature_provenance": "oracle_straight_ray_forward_from_ground_truth_attenuation",
+            "log_amp_convention": "log(case/reference) = -integral(alpha ds)",
+        },
     )
 
+
+def make_synthetic_smoke_subset(
+    out_root: str | Path,
+    *,
+    shape: tuple[int, int] = (24, 24),
+    n_transducers: int = 24,
+) -> list[dict[str, object]]:
+    """Write small deterministic sound-speed cases for local smoke benchmarks."""
+
+    root = Path(out_root)
+    case_dir = root / "cases"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    cases = [
+        make_sound_speed_case(
+            case_id="synthetic_homogeneous_sos",
+            shape=shape,
+            n_transducers=n_transducers,
+            inclusion_mps=1500.0,
+        ),
+        make_sound_speed_case(
+            case_id="synthetic_circular_sos",
+            shape=shape,
+            n_transducers=n_transducers,
+            inclusion_mps=1450.0,
+        ),
+    ]
+    records: list[dict[str, object]] = []
+    for case in cases:
+        path = case_dir / f"{case.case_id}.h5"
+        write_case_hdf5(case, path)
+        records.append(
+            {
+                "case_id": case.case_id,
+                "path": str(path),
+                "case_type": case.metadata.get("case_type", "synthetic_oracle"),
+                "benchmark_type": case.metadata.get("benchmark_type", "synthetic_oracle"),
+                "shape": list(case.grid.shape),
+                "n_transducers": int(case.geometry.tx_pos_m.shape[0]),
+                "feature_provenance": case.metadata.get("feature_provenance", ""),
+            }
+        )
+    (root / "manifest.json").write_text(json.dumps({"cases": records}, indent=2, sort_keys=True), encoding="utf-8")
+    return records

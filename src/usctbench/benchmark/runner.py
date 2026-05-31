@@ -6,6 +6,7 @@ import csv
 import glob
 import json
 import math
+import numpy as np
 import os
 import platform
 import resource
@@ -20,7 +21,7 @@ import yaml
 from usctbench.benchmark.report import write_failure_report
 from usctbench.io.hdf5 import read_case_hdf5, write_result_hdf5
 from usctbench.registry import get_algorithm
-from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus
+from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
 from usctbench.viz.preview import write_preview_png
 
 
@@ -51,6 +52,7 @@ def run_algorithm_case(
     algorithm_for_report = algorithm_name
     config_for_report = str(config_path)
     memory_before_mb = _peak_memory_mb()
+    case: USCTCase | None = None
     try:
         case = read_case_hdf5(case_path)
         case_id = case.case_id
@@ -76,6 +78,7 @@ def run_algorithm_case(
             out_dir,
             config=config_for_report,
             peak_memory_mb=peak_memory_mb,
+            case=case,
         )
     except Exception as exc:
         fallback = ReconstructionResult(
@@ -91,6 +94,7 @@ def run_algorithm_case(
             out_dir,
             config=config_for_report,
             peak_memory_mb=peak_memory_mb,
+            case=case,
         )
     return out_dir
 
@@ -109,6 +113,8 @@ def evaluate_run(run_dir: str | Path, protocol_path: str | Path | None = None) -
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
         record = {
             "case_id": metadata.get("case_id", case_dir.name),
+            "case_type": metadata.get("case_type", ""),
+            "benchmark_type": metadata.get("benchmark_type", ""),
             "algorithm": metadata.get("algorithm", case_dir.parent.name),
             "status": metadata.get("status", "unknown"),
             "runtime_s": metadata.get("runtime_s", ""),
@@ -173,11 +179,19 @@ def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
     return {"run_root": str(run_root), "num_cases": len(cases), **evaluation}
 
 
-def _write_result_artifacts(result: ReconstructionResult, out_dir: Path, *, config: str, peak_memory_mb: float) -> None:
+def _write_result_artifacts(
+    result: ReconstructionResult,
+    out_dir: Path,
+    *,
+    config: str,
+    peak_memory_mb: float,
+    case: USCTCase | None = None,
+) -> None:
     preview_image = result.sound_speed_mps if result.sound_speed_mps is not None else result.attenuation_np_per_m
     if preview_image is not None:
         preview_path = write_preview_png(preview_image, out_dir / "preview.png")
         result.artifacts.setdefault("preview", str(preview_path))
+    _write_straight_ray_diagnostics(result, case, out_dir)
 
     result_path = write_result_hdf5(result, out_dir / "result.h5")
     (out_dir / "metrics.json").write_text(json.dumps(result.metrics, indent=2, sort_keys=True), encoding="utf-8")
@@ -186,6 +200,8 @@ def _write_result_artifacts(result: ReconstructionResult, out_dir: Path, *, conf
             {
                 "algorithm": result.algorithm,
                 "case_id": result.case_id,
+                "case_type": (case.metadata.get("case_type") if case is not None else None),
+                "benchmark_type": (case.metadata.get("benchmark_type") if case is not None else None),
                 "config": config,
                 "error_type": _classify_failure(result.failure_reason),
                 "runtime_s": result.runtime_s,
@@ -209,6 +225,108 @@ def _write_result_artifacts(result: ReconstructionResult, out_dir: Path, *, conf
             likely_causes=["schema mismatch", "data/geometry mismatch", "numerical instability"],
             actions=["inspect case metadata", "inspect sinogram/features", "lower relaxation or iterations"],
         )
+
+
+def _write_straight_ray_diagnostics(result: ReconstructionResult, case: USCTCase | None, out_dir: Path) -> None:
+    if case is None or not str(result.algorithm).startswith("straight_"):
+        return
+    try:
+        from usctbench.algorithms.ray._common import valid_ray_mask
+        from usctbench.algorithms.ray.straight_projector import StraightRayProjector
+    except Exception:
+        return
+
+    projector = StraightRayProjector.from_case(case)
+    mask = valid_ray_mask(case, projector)
+    coverage = projector.adjoint(mask.astype(float))
+    row_norm_l1 = projector.row_norms(power=1)
+    row_norm_l2 = projector.row_norms(power=2)
+    col_norm_l1 = projector.col_norms(power=1)
+
+    coverage_path = write_preview_png(coverage, out_dir / "coverage.png")
+    result.artifacts.setdefault("coverage", str(coverage_path))
+    stats = {
+        "valid_ray_count": int(np.sum(mask)),
+        "total_ray_count": int(mask.size),
+        "valid_ray_fraction": float(np.mean(mask)) if mask.size else 0.0,
+        "coverage": _array_stats(coverage),
+        "coverage_nonzero_fraction": float(np.mean(coverage > 0.0)),
+        "row_norm_l1": _array_stats(row_norm_l1[mask] if np.any(mask) else row_norm_l1),
+        "row_norm_l2": _array_stats(row_norm_l2[mask] if np.any(mask) else row_norm_l2),
+        "col_norm_l1": _array_stats(col_norm_l1),
+    }
+    if result.sound_speed_mps is not None and case.ground_truth.sound_speed_mps is not None:
+        error = np.asarray(result.sound_speed_mps, dtype=float) - np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
+        stats["abs_error_coverage_corr"] = _finite_corr(np.abs(error), coverage)
+        stats["ring_artifact_index"] = _radial_artifact_index(error, case.grid.roi_mask)
+        result.metrics["coverage_abs_error_corr"] = stats["abs_error_coverage_corr"]
+        result.metrics["ring_artifact_index"] = stats["ring_artifact_index"]
+    result.metrics["coverage_nonzero_fraction"] = stats["coverage_nonzero_fraction"]
+    result.metrics["valid_ray_fraction"] = stats["valid_ray_fraction"]
+    result.metrics["row_norm_l1_min"] = stats["row_norm_l1"]["min"]
+    result.metrics["row_norm_l1_max"] = stats["row_norm_l1"]["max"]
+    result.metrics["col_norm_l1_min"] = stats["col_norm_l1"]["min"]
+    result.metrics["col_norm_l1_max"] = stats["col_norm_l1"]["max"]
+
+    stats_path = out_dir / "coverage_stats.json"
+    stats_path.write_text(json.dumps(stats, indent=2, sort_keys=True), encoding="utf-8")
+    result.artifacts.setdefault("coverage_stats", str(stats_path))
+    if "residual_curve" in result.metrics:
+        curve_path = out_dir / "residual_curve.json"
+        curve_path.write_text(json.dumps(result.metrics["residual_curve"], indent=2), encoding="utf-8")
+        result.artifacts.setdefault("residual_curve", str(curve_path))
+
+
+def _array_stats(values: np.ndarray) -> dict[str, float]:
+    array = np.asarray(values, dtype=float)
+    finite = array[np.isfinite(array)]
+    if finite.size == 0:
+        return {"min": math.nan, "max": math.nan, "mean": math.nan, "std": math.nan}
+    return {
+        "min": float(np.min(finite)),
+        "max": float(np.max(finite)),
+        "mean": float(np.mean(finite)),
+        "std": float(np.std(finite)),
+    }
+
+
+def _finite_corr(a: np.ndarray, b: np.ndarray) -> float:
+    x = np.asarray(a, dtype=float).reshape(-1)
+    y = np.asarray(b, dtype=float).reshape(-1)
+    finite = np.isfinite(x) & np.isfinite(y)
+    if int(np.sum(finite)) < 3:
+        return math.nan
+    x = x[finite] - float(np.mean(x[finite]))
+    y = y[finite] - float(np.mean(y[finite]))
+    denom = float(np.linalg.norm(x) * np.linalg.norm(y))
+    if denom == 0.0:
+        return 0.0
+    return float(np.dot(x, y) / denom)
+
+
+def _radial_artifact_index(error: np.ndarray, roi_mask: np.ndarray | None) -> float:
+    image = np.asarray(error, dtype=float)
+    yy, xx = np.indices(image.shape, dtype=float)
+    center_y = 0.5 * (image.shape[0] - 1)
+    center_x = 0.5 * (image.shape[1] - 1)
+    radius = np.rint(np.hypot(yy - center_y, xx - center_x)).astype(int)
+    mask = np.isfinite(image)
+    if roi_mask is not None:
+        mask &= np.asarray(roi_mask, dtype=bool)
+    if not np.any(mask):
+        return math.nan
+    values = np.abs(image)
+    radial_means = []
+    for ridx in np.unique(radius[mask]):
+        shell = mask & (radius == ridx)
+        if int(np.sum(shell)) >= 4:
+            radial_means.append(float(np.mean(values[shell])))
+    if len(radial_means) < 3:
+        return 0.0
+    denom = float(np.std(values[mask]))
+    if denom == 0.0:
+        return 0.0
+    return float(np.std(np.asarray(radial_means, dtype=float)) / denom)
 
 
 def _load_yaml(path: str | Path | None) -> dict[str, Any]:
@@ -403,6 +521,8 @@ def _write_summary_csv(records: list[dict[str, Any]], path: Path) -> None:
     preferred = [
         "algorithm",
         "case_id",
+        "case_type",
+        "benchmark_type",
         "status",
         "pass",
         "pass_reasons",
@@ -466,6 +586,8 @@ def _write_benchmark_report(
     for record in records:
         lines.append(
             f"- `{record.get('algorithm')}` / `{record.get('case_id')}`: "
+            f"case_type={record.get('case_type') or 'unknown'}, "
+            f"benchmark_type={record.get('benchmark_type') or 'unknown'}, "
             f"status={record.get('status')}, pass={record.get('pass')}, runtime_s={record.get('runtime_s')}, "
             f"reasons={record.get('fail_reasons') or record.get('pass_reasons')}"
         )

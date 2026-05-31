@@ -29,7 +29,13 @@ def test_cli_run_writes_standard_artifacts(tmp_path):
     assert (case_dir / "metrics.json").exists()
     assert (case_dir / "metadata.yaml").exists()
     assert (case_dir / "preview.png").exists()
-    assert "rmse" in json.loads((case_dir / "metrics.json").read_text(encoding="utf-8"))
+    assert (case_dir / "coverage.png").exists()
+    assert (case_dir / "coverage_stats.json").exists()
+    assert (case_dir / "residual_curve.json").exists()
+    metrics = json.loads((case_dir / "metrics.json").read_text(encoding="utf-8"))
+    assert "rmse" in metrics
+    assert "coverage_nonzero_fraction" in metrics
+    assert "ring_artifact_index" in metrics
 
 
 def test_cli_run_failure_writes_failure_report(tmp_path):

@@ -9,12 +9,10 @@ algorithms:
     config: configs/algorithms/straight_cgls.yaml
   - name: attenuation_sirt
     config: configs/algorithms/attenuation_sirt.yaml
-  - name: fwi_tiny
-    config: configs/algorithms/fwi_tiny_nbp.yaml
 outputs:
   root: ${USCT_NBP_RUN_ROOT}
 min_cases: 1
-min_records: 5
+min_records: 4
 expected_statuses:
   - success
 require_algorithm_case_matrix: true
@@ -42,11 +40,6 @@ required_metrics:
     - data_relative_residual
     - data_residual_reduction
     - attenuation_input_signal_norm
-  fwi_tiny:
-    - initial_loss
-    - final_loss
-    - loss_decreased
-    - iterations
 thresholds:
   straight_sart:
     rmse: 150.0
@@ -69,6 +62,3 @@ minimums:
   attenuation_sirt:
     attenuation_input_signal_norm: 1.0e-12
     data_residual_reduction: 0.1
-  fwi_tiny:
-    loss_decreased: 1
-    iterations: 1

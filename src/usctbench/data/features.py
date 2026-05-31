@@ -24,6 +24,7 @@ def phase_delay_seconds(
     frequencies_hz: np.ndarray,
     *,
     phase_convention: str = "-omega_t",
+    min_frequencies: int = 3,
 ) -> np.ndarray:
     """Estimate delay from complex phase relative to a reference.
 
@@ -36,12 +37,14 @@ def phase_delay_seconds(
         raise ValueError("frequencies_hz must be a non-empty 1-D array")
     if np.any(frequencies <= 0):
         raise ValueError("frequencies_hz must contain positive frequencies")
+    if frequencies.size < int(min_frequencies):
+        raise ValueError("phase-slope travel-time estimation requires at least three frequencies")
 
     ratio = np.asarray(signal) / np.asarray(reference)
     if ratio.shape[0] != frequencies.size:
         raise ValueError("signal/reference first dimension must match frequencies_hz")
     phase = np.unwrap(np.angle(ratio), axis=0)
-    slope = _fit_phase_slope(frequencies, phase)
+    slope, _ = _fit_phase_slope(frequencies, phase)
     sign = -1.0 if phase_convention == "-omega_t" else 1.0 if phase_convention == "+omega_t" else None
     if sign is None:
         raise ValueError("phase_convention must be '-omega_t' or '+omega_t'")
@@ -60,8 +63,8 @@ def valid_amplitude_mask(
     signal_amp = np.abs(signal)
     reference_amp = np.abs(reference)
     if signal_amp.ndim >= 3:
-        signal_amp = np.nanmax(signal_amp, axis=0)
-        reference_amp = np.nanmax(reference_amp, axis=0)
+        signal_amp = np.nanmin(signal_amp, axis=0)
+        reference_amp = np.nanmin(reference_amp, axis=0)
     return (signal_amp >= min_signal_amplitude) & (reference_amp >= min_reference_amplitude)
 
 
@@ -72,7 +75,10 @@ def extract_frequency_features(
     *,
     min_reference_amplitude: float = 1.0e-8,
     min_signal_amplitude: float = 1.0e-8,
-) -> dict[str, np.ndarray]:
+    min_phase_frequencies: int = 3,
+    allow_low_frequency_count: bool = False,
+    phase_residual_threshold_rad: float = 0.5,
+) -> dict[str, np.ndarray | str]:
     """Extract ray features from frequency-domain data.
 
     Parameters are expected in shape `[n_freq, n_tx, n_rx]`.
@@ -84,24 +90,44 @@ def extract_frequency_features(
         raise ValueError("signal and reference must have identical shapes")
     if signal_array.ndim != 3:
         raise ValueError("frequency-domain feature extraction expects shape [n_freq, n_tx, n_rx]")
+    frequencies = np.asarray(frequencies_hz, dtype=float)
+    if frequencies.size < int(min_phase_frequencies) and not allow_low_frequency_count:
+        raise ValueError("phase-slope travel-time features require at least three frequencies")
+    ratio = signal_array / reference_array
+    phase = np.unwrap(np.angle(ratio), axis=0)
+    if frequencies.size >= 2:
+        slope, fit_residual = _fit_phase_slope(frequencies, phase)
+        delta_tof = -slope / (2.0 * np.pi)
+        phase_fit_rms = np.sqrt(np.nanmean(fit_residual**2, axis=0))
+    else:
+        delta_tof = np.full(signal_array.shape[1:], np.nan, dtype=float)
+        phase_fit_rms = np.full(signal_array.shape[1:], np.inf, dtype=float)
+    amplitude_mask = valid_amplitude_mask(
+        signal_array,
+        reference_array,
+        min_reference_amplitude=min_reference_amplitude,
+        min_signal_amplitude=min_signal_amplitude,
+    )
+    phase_quality_mask = np.isfinite(delta_tof) & (phase_fit_rms <= float(phase_residual_threshold_rad))
     return {
-        "delta_tof_s": phase_delay_seconds(signal_array, reference_array, frequencies_hz),
+        "delta_tof_s": delta_tof,
         "log_amp": log_amplitude_ratio(signal_array, reference_array),
-        "valid_mask": valid_amplitude_mask(
-            signal_array,
-            reference_array,
-            min_reference_amplitude=min_reference_amplitude,
-            min_signal_amplitude=min_signal_amplitude,
-        ),
+        "valid_mask": amplitude_mask & phase_quality_mask,
+        "amplitude_valid_mask": amplitude_mask,
+        "phase_quality_mask": phase_quality_mask,
+        "phase_fit_rms_rad": phase_fit_rms,
+        "feature_quality": "low" if frequencies.size < int(min_phase_frequencies) else "ok",
     }
 
 
-def _fit_phase_slope(frequencies_hz: np.ndarray, phase: np.ndarray) -> np.ndarray:
+def _fit_phase_slope(frequencies_hz: np.ndarray, phase: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     centered_frequency = frequencies_hz - float(np.mean(frequencies_hz))
     denom = float(np.sum(centered_frequency**2))
     if denom == 0.0:
-        # One frequency can only provide phase/frequency delay, not a slope fit.
-        return phase[0] / frequencies_hz[0]
+        slope = phase[0] / frequencies_hz[0]
+        return slope, np.full_like(phase, np.nan, dtype=float)
     centered_phase = phase - np.mean(phase, axis=0, keepdims=True)
-    return np.tensordot(centered_frequency, centered_phase, axes=(0, 0)) / denom
-
+    slope = np.tensordot(centered_frequency, centered_phase, axes=(0, 0)) / denom
+    intercept = np.mean(phase, axis=0) - slope * float(np.mean(frequencies_hz))
+    fitted = frequencies_hz.reshape((-1,) + (1,) * (phase.ndim - 1)) * slope + intercept
+    return slope, phase - fitted

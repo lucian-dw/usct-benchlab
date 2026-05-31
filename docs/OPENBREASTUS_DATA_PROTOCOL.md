@@ -59,6 +59,22 @@ Converted speed-map cases must include provenance metadata:
 
 For compact k-Wave simulation MAT files with datasets `C`, `atten`, `full_dataset`, and `transducerPositionsXY`, conversion creates a standard `USCTCase` with both sound-speed and attenuation ground truth. The smoke HDF5 stores straight-ray delay features from `C` and attenuation line-integral features from the simulated attenuation map. Metadata records that this is simulated attenuation evidence, not raw measured OpenBreastUS RF data, and the source channel tensor is not copied.
 
+Converted cases include explicit type metadata so reports do not mix evidence
+levels:
+
+- `synthetic_oracle`: fully synthetic fixture generated from known ground truth.
+- `openbreastus_speedmap_surrogate`: OpenBreastUS/NBPslice2D map converted to
+  straight-ray feature surrogates; useful for benchmark plumbing and classical
+  tomography diagnostics, but not a measured waveform benchmark.
+- `openbreastus_wavefield`: k-Wave simulation source with wavefield evidence in
+  the source MAT; the current smoke HDF5 still stores feature-domain line
+  integrals rather than raw waveforms.
+
+Sound-speed comparison panels should use a grayscale colormap and include GT
+plus traditional sound-speed algorithms only. Use
+`scripts/render_class_comparison_panels.py` for reproducible class-comparison
+figures.
+
 Converted k-Wave cases must include provenance metadata:
 
 - `conversion: kwave_channel_mat_to_feature_case`

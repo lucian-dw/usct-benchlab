@@ -27,13 +27,29 @@ class StraightRayCGLSAlgorithm:
             projector = StraightRayProjector.from_case(case)
             target, mask = target_delta_tof(case, projector)
             iterations = int(config.parameters.get("iterations", 30))
-            damping = float(config.parameters.get("damping", 0.0))
+            regularization = str(config.parameters.get("regularization", "identity"))
+            lambda_value = float(config.parameters.get("lambda", config.parameters.get("regularization_lambda", 0.0)))
+            damping = float(config.parameters.get("damping", lambda_value**2))
             c0 = reference_sound_speed(case, config)
             initial_norm = masked_norm(target, mask)
-            delta_slowness, residual_norms = cgls_solve(projector, target, mask, iterations=iterations, damping=damping)
+            delta_slowness, residual_norms = cgls_solve(
+                projector,
+                target,
+                mask,
+                iterations=iterations,
+                damping=damping,
+                regularization=regularization,
+            )
             sound_speed = slowness_to_sound_speed(delta_slowness, c0, speed_bounds(config))
             final_norm = residual_norms[-1] if residual_norms else initial_norm
-            metrics = {**residual_metrics(initial_norm, final_norm), "iterations": len(residual_norms) - 1}
+            metrics = {
+                **residual_metrics(initial_norm, final_norm),
+                "iterations": len(residual_norms) - 1,
+                "regularization": regularization,
+                "regularization_lambda": lambda_value,
+                "regularization_lambda_squared": damping,
+                "residual_curve": residual_norms,
+            }
             if case.ground_truth.sound_speed_mps is not None:
                 metrics.update(
                     compute_image_metrics(

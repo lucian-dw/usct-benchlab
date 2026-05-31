@@ -91,6 +91,8 @@ def convert_speed_mat_volume(
                     "source_index": index,
                     "shape": list(sound_speed.shape),
                     "conversion": case.metadata["conversion"],
+                    "case_type": case.metadata["case_type"],
+                    "benchmark_type": case.metadata["benchmark_type"],
                     "feature_provenance": case.metadata["feature_provenance"],
                     "measurement_limitations": case.metadata["measurement_limitations"],
                     "has_measured_attenuation": False,
@@ -185,6 +187,8 @@ def convert_kwave_channel_mat(
             "source_dataset": "kWave_channel_mat",
             "shape": list(sound_speed_small.shape),
             "conversion": case.metadata["conversion"],
+            "case_type": case.metadata["case_type"],
+            "benchmark_type": case.metadata["benchmark_type"],
             "feature_provenance": case.metadata["feature_provenance"],
             "measurement_limitations": case.metadata["measurement_limitations"],
             "has_measured_attenuation": False,
@@ -327,6 +331,8 @@ def _speed_array_to_case(
         ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed_mps),
         metadata={
             "source_dataset": "OpenBreastUS",
+            "case_type": "openbreastus_speedmap_surrogate",
+            "benchmark_type": "openbreastus_speedmap_surrogate",
             "source_path": str(source),
             "source_mat_dataset": dataset_name,
             "source_index": source_index,
@@ -373,6 +379,8 @@ def _kwave_arrays_to_case(
     valid_mask = ~np.eye(projector.ray_shape[0], projector.ray_shape[1], dtype=bool)
     metadata = {
         "source_dataset": "kWave_USCT_simulation",
+        "case_type": "openbreastus_wavefield",
+        "benchmark_type": "openbreastus_wavefield",
         "source_path": str(source),
         "source_label": source_label,
         "source_npy_path": source_npy_path,
@@ -481,6 +489,8 @@ def _nbp_handle_to_case_record(
         ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed_mps, attenuation_np_per_m=attenuation_np_per_m),
         metadata={
             "source_dataset": "NBPslices2D",
+            "case_type": "openbreastus_speedmap_surrogate",
+            "benchmark_type": "openbreastus_speedmap_surrogate",
             "source_path": source_path,
             "source_member": source_member,
             "source_ref": source_ref,
@@ -519,6 +529,8 @@ def _nbp_handle_to_case_record(
         "source_path": source_path,
         "source_member": source_member,
         "source_dataset": "NBPslices2D",
+        "case_type": case.metadata["case_type"],
+        "benchmark_type": case.metadata["benchmark_type"],
         "shape": list(sound_speed_mps.shape),
         "source_shape": list(sos_mps_raw.shape),
         "fitted_source_shape": list(sos_mps_crop.shape),

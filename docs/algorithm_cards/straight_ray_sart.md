@@ -20,7 +20,10 @@ It ignores refraction, diffraction, and waveform effects, so it is a baseline ra
 ## Default Settings
 
 - iterations: `10`
-- relaxation: `0.5`
+- relaxation: `0.2`
+- subsets: `8`
+- optional post-update smoothing: disabled by default
+- optional ROI-only update: disabled by default
 - reference sound speed: `1500 m/s`
 - sound-speed bounds: `[1300, 1700] m/s`
 
@@ -37,12 +40,14 @@ It ignores refraction, diffraction, and waveform effects, so it is a baseline ra
 2. Confirm the sign convention with a slower inclusion.
 3. Lower relaxation.
 4. Increase iterations gradually.
+5. Enable light smoothing or ROI-only updates only after the sinogram and coverage diagnostics look sane.
 
 ## Acceptance Tests
 
 - homogeneous phantom returns the reference sound speed;
 - straight-ray projector adjoint dot-product test passes;
 - positive delay through a slower object reconstructs a slower center.
+- benchmark runs write coverage diagnostics and a residual curve.
 
 ## References and Related Code
 

@@ -27,7 +27,11 @@ class StraightRaySARTAlgorithm:
             projector = StraightRayProjector.from_case(case)
             target, mask = target_delta_tof(case, projector)
             iterations = int(config.parameters.get("iterations", 10))
-            relaxation = float(config.parameters.get("relaxation", 0.5))
+            relaxation = float(config.parameters.get("relaxation", 0.2))
+            subsets = int(config.parameters.get("subsets", 8))
+            smooth_sigma = float(config.parameters.get("smooth_sigma", 0.0))
+            smooth_every = int(config.parameters.get("smooth_every", 0))
+            roi_update_only = bool(config.parameters.get("roi_update_only", False))
             c0 = reference_sound_speed(case, config)
             initial_norm = masked_norm(target, mask)
             delta_slowness, residual_norms = sart_solve(
@@ -36,10 +40,23 @@ class StraightRaySARTAlgorithm:
                 mask,
                 iterations=iterations,
                 relaxation=relaxation,
+                subsets=subsets,
+                smooth_sigma=smooth_sigma,
+                smooth_every=smooth_every,
+                roi_mask=case.grid.roi_mask if roi_update_only else None,
             )
             sound_speed = slowness_to_sound_speed(delta_slowness, c0, speed_bounds(config))
             final_norm = residual_norms[-1] if residual_norms else initial_norm
-            metrics = {**residual_metrics(initial_norm, final_norm), "iterations": iterations}
+            metrics = {
+                **residual_metrics(initial_norm, final_norm),
+                "iterations": iterations,
+                "relaxation": relaxation,
+                "subsets": subsets,
+                "smooth_sigma": smooth_sigma,
+                "smooth_every": smooth_every,
+                "roi_update_only": roi_update_only,
+                "residual_curve": residual_norms,
+            }
             if case.ground_truth.sound_speed_mps is not None:
                 metrics.update(
                     compute_image_metrics(
