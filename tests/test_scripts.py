@@ -63,6 +63,29 @@ def test_fwi_kwave_full_pipeline_smoke_script_runs_speed_map_flow():
     assert "USCT_KWAVE_PYTHON_BIN" in text
     assert "USCT_KWAVE_WARM_START_PATH" in text
     assert "USCT_KWAVE_RECONSTRUCTION_ITERATION" in text
+    assert "USCT_KWAVE_RECONSTRUCTION_ITERATION:-best" in text
+    assert "--render-best-and-final" in text
+
+
+def test_fwi_kwave_full_pipeline_config_uses_multifrequency_rf_warm_start():
+    import yaml
+
+    config = yaml.safe_load(Path("configs/algorithms/fwi_kwave_full_pipeline.yaml").read_text(encoding="utf-8"))
+    params = config["parameters"]
+
+    assert params["warm_start_builder"] == "traveltime"
+    assert params["sos_freqs_mhz"] == [0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8]
+    assert params["sos_iters"] == [3]
+    assert params["atten_iters"] == [0]
+    assert params["recon_dxi_mm"] == 0.3
+    assert params["c_geom"] == 1500.0
+    assert params["c_init"] == 1500.0
+    assert params["step_damping"] == 0.25
+    assert params["max_update_mps"] == 12.0
+    assert params["velocity_bounds"] == [1408.692, 1595.1279]
+    assert params["atten_bkgnd"] == 0.0
+    assert params["sos2atten"] == 0.0
+    assert params["reconstruction_iteration"] == "best"
 
 
 def test_nbpslice2d_smoke_script_runs_dataset_flow():

@@ -18,9 +18,9 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - Default mode is result ingestion only: `run_external: false`.
 - `result_path` must point to an existing k-Wave FWI result `.mat`.
 - `run_external: true` calls `openbreastus_diffusion.kwave_dps.run_full_pipeline` with explicit pipeline arguments from the config.
-- `configs/algorithms/fwi_kwave_full_pipeline.yaml` is the A100 smoke config for `full128`, 0.3 MHz, 20 sound-speed iterations, no attenuation inversion, RF travel-time warm start, update damping `0.1`, velocity clamp `[1350, 1600]` m/s, per-step update clamp `5 m/s`, and `save_raw_grad_iters: 20`.
+- `configs/algorithms/fwi_kwave_full_pipeline.yaml` is the A100 smoke config for `full128`, 0.3:0.05:0.8 MHz, 3 sound-speed iterations per frequency, no attenuation inversion, RF travel-time warm start, `0.3 mm` reconstruction grid, `c_geom=1500`, update damping `0.25`, velocity clamp `[1408.692, 1595.1279]` m/s, per-step update clamp `12 m/s`, zero background attenuation, and `save_raw_grad_iters: 33`.
 - The RF travel-time initializer uses a sign-corrected slowness update (`--update-scale -1`) based on A100 sweeps: the default sign produced negative object correlation on the smoke case, while the sign-corrected initializer improved RMSE against the k-Wave `C_INTERP` truth.
-- The smoke config reports a fixed early-stopped reconstruction checkpoint (`reconstruction_iteration: 1`) because A100 evidence showed later iterations reduce waveform loss while worsening image RMSE. The full 20-step loss curve and gradient checkpoints are still saved for diagnostics.
+- The smoke config selects the best image-domain iteration when `C_INTERP` or case ground truth is available, and the renderer always writes final and best reconstruction artifacts so review is not locked to iteration 1.
 - Output images are resized to the input case grid for benchmark metrics and artifact writing.
 
 ## Expected Failure Modes
@@ -35,7 +35,7 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 
 - Verify `result_path`, `dataset_path`, `mat_path`, `mat_key`, and `sample_index` refer to the same case.
 - Start with an existing validated result before enabling `run_external`, then move to `invert_existing_dataset`, then `full_pipeline_from_speed_map`.
-- Use low starting frequency, small iteration counts, and conservative update damping.
+- Use the configured low-to-high frequency schedule first; if image RMSE worsens while waveform loss decreases, inspect both final and best artifacts before changing the schedule.
 - Validate RF warm-start sign, scale, and support before tuning FWI iterations; wrong sign can produce plausible-looking outlines with negative object correlation.
 - If image RMSE worsens while waveform loss decreases, reduce iterations, clamp per-step updates, or use a better multi-frequency schedule before claiming reconstruction quality.
 - Check the external stdout/stderr log before changing inversion parameters.
@@ -45,7 +45,7 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - Unit test reads a synthetic MATLAB v7.3 FWI result and returns a successful `ReconstructionResult`.
 - Missing result path skips clearly rather than crashing.
 - Unit tests verify command construction for both existing-dataset inversion and full speed-map pipeline launch.
-- A100 smoke evidence should show the full pipeline can produce `reconstruction.png`, `ground_truth.png`, `error.png`, `loss_curve.png`, `gradient_step001.png`, `gradient_step020.png`, `metadata.json`, and `run.log`.
+- A100 smoke evidence should show the full pipeline can produce `reconstruction.png`, `reconstruction_best.png`, `reconstruction_final.png`, `ground_truth.png`, `error.png`, `loss_curve.png`, `gradient_step001.png`, `gradient_step020.png`, `metadata.json`, and `run.log`.
 
 ## References and Related Code
 

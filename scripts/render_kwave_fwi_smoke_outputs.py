@@ -21,7 +21,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--result", required=True, type=Path, help="External k-Wave FWI result MAT/HDF5 file.")
     parser.add_argument("--out", required=True, type=Path, help="Directory for rendered smoke artifacts.")
     parser.add_argument("--log", type=Path, default=None, help="External pipeline log to copy to run.log.")
-    parser.add_argument("--iteration", default="final", help="1-based VEL_ESTIM_ITER checkpoint to render, or final.")
+    parser.add_argument("--iteration", default="final", help="1-based VEL_ESTIM_ITER checkpoint to render, best, or final.")
+    parser.add_argument("--render-best-and-final", action="store_true", help="Also render reconstruction_best.png and reconstruction_final.png.")
     return parser.parse_args()
 
 
@@ -31,17 +32,21 @@ def main() -> int:
 
     external = read_kwave_fwi_result(args.result)
     case = read_case_hdf5(args.case)
-    selected_iteration = _parse_iteration(args.iteration, int(external.get("iterations", 0)))
-    reconstruction = _select_reconstruction(args.result, selected_iteration)
-    if reconstruction is None:
-        reconstruction = np.asarray(external["sound_speed_mps"], dtype=float)
+    total_iterations = int(external.get("iterations", 0))
+    final_reconstruction = np.asarray(external["sound_speed_mps"], dtype=float)
     ground_truth = _read_result_dataset(args.result, "C_INTERP")
     if ground_truth is None and case.ground_truth.sound_speed_mps is not None:
-        ground_truth = _resize_to_shape(np.asarray(case.ground_truth.sound_speed_mps, dtype=float), reconstruction.shape)
+        ground_truth = _resize_to_shape(np.asarray(case.ground_truth.sound_speed_mps, dtype=float), final_reconstruction.shape)
     if ground_truth is None:
-        ground_truth = np.full_like(reconstruction, np.nan)
+        ground_truth = np.full_like(final_reconstruction, np.nan)
     else:
-        ground_truth = _resize_to_shape(np.asarray(ground_truth, dtype=float), reconstruction.shape)
+        ground_truth = _resize_to_shape(np.asarray(ground_truth, dtype=float), final_reconstruction.shape)
+
+    best_iteration, best_metrics = _best_iteration(args.result, ground_truth)
+    selected_iteration = _parse_iteration(args.iteration, total_iterations, best_iteration)
+    reconstruction = _select_reconstruction(args.result, selected_iteration)
+    if reconstruction is None:
+        reconstruction = final_reconstruction
 
     losses = np.asarray(external.get("losses", []), dtype=float).reshape(-1)
     gradients = _read_result_dataset(args.result, "GRAD_IMG_ITER")
@@ -49,6 +54,34 @@ def main() -> int:
     _write_image(args.out / "reconstruction.png", reconstruction, title="Reconstruction", cmap="gray", unit="m/s")
     _write_image(args.out / "ground_truth.png", ground_truth, title="Ground truth", cmap="gray", unit="m/s")
     _write_image(args.out / "error.png", reconstruction - ground_truth, title="Reconstruction error", cmap="coolwarm", unit="m/s", symmetric=True)
+    if args.render_best_and_final:
+        _write_image(args.out / "reconstruction_final.png", final_reconstruction, title="Final reconstruction", cmap="gray", unit="m/s")
+        _write_image(
+            args.out / "error_final.png",
+            final_reconstruction - ground_truth,
+            title="Final reconstruction error",
+            cmap="coolwarm",
+            unit="m/s",
+            symmetric=True,
+        )
+        if best_iteration is not None:
+            best_reconstruction = _select_reconstruction(args.result, best_iteration)
+            if best_reconstruction is not None:
+                _write_image(
+                    args.out / "reconstruction_best.png",
+                    best_reconstruction,
+                    title=f"Best reconstruction iter {best_iteration:03d}",
+                    cmap="gray",
+                    unit="m/s",
+                )
+                _write_image(
+                    args.out / "error_best.png",
+                    best_reconstruction - ground_truth,
+                    title=f"Best reconstruction error iter {best_iteration:03d}",
+                    cmap="coolwarm",
+                    unit="m/s",
+                    symmetric=True,
+                )
     _write_loss(args.out / "loss_curve.png", losses)
 
     gradient_metadata: dict[str, Any] = {}
@@ -83,6 +116,9 @@ def main() -> int:
         "external_dataset_path": external.get("dataset_path") or "",
         "iterations": int(external.get("iterations", 0)),
         "selected_iteration": selected_iteration or int(external.get("iterations", 0)),
+        "requested_iteration": str(args.iteration),
+        "best_iteration": best_iteration,
+        **best_metrics,
         "initial_loss": external.get("initial_loss"),
         "final_loss": external.get("final_loss"),
         "loss_decreased": external.get("loss_decreased"),
@@ -114,17 +150,43 @@ def _select_reconstruction(path: Path, iteration: int | None) -> np.ndarray | No
     stack = _read_result_dataset(path, "VEL_ESTIM_ITER")
     if stack is None:
         return None
-    array = np.asarray(stack, dtype=float)
-    if array.ndim < 3 or array.shape[0] == 0:
+    array = _iteration_stack(stack)
+    if array is None or array.shape[0] == 0:
         return None
     index = max(0, min(int(iteration) - 1, array.shape[0] - 1))
     return array[index]
 
 
-def _parse_iteration(value: str, total: int) -> int | None:
+def _best_iteration(path: Path, ground_truth: np.ndarray) -> tuple[int | None, dict[str, float | str]]:
+    stack = _read_result_dataset(path, "VEL_ESTIM_ITER")
+    array = _iteration_stack(stack) if stack is not None else None
+    if array is None or array.shape[0] == 0 or not np.isfinite(ground_truth).any():
+        return None, {"best_iteration_reason": "unavailable"}
+    truth = _resize_to_shape(ground_truth, array.shape[1:])
+    finite = np.isfinite(truth)
+    rmses = []
+    ssims = []
+    for image in array:
+        error = np.asarray(image, dtype=float)[finite] - truth[finite]
+        rmse = float(np.sqrt(np.mean(error**2)))
+        rmses.append(rmse)
+        ssims.append(_global_ssim(np.asarray(image, dtype=float)[finite], truth[finite]))
+    best_index = int(np.argmin(np.asarray(rmses, dtype=float)))
+    return best_index + 1, {
+        "best_iteration_metric": "rmse",
+        "best_iteration_rmse": rmses[best_index],
+        "best_iteration_ssim": ssims[best_index],
+        "final_iteration_rmse": rmses[-1],
+        "final_iteration_ssim": ssims[-1],
+    }
+
+
+def _parse_iteration(value: str, total: int, best_iteration: int | None = None) -> int | None:
     text = str(value).strip().lower()
     if text in {"", "final", "last"}:
         return None
+    if text in {"best", "best_rmse", "auto"}:
+        return best_iteration
     if text in {"first", "initial"}:
         return 1
     iteration = int(text)
@@ -133,6 +195,34 @@ def _parse_iteration(value: str, total: int) -> int | None:
     if total > 0:
         return min(iteration, total)
     return iteration
+
+
+def _iteration_stack(stack: np.ndarray) -> np.ndarray | None:
+    array = np.asarray(stack, dtype=float)
+    if array.ndim < 3:
+        return None
+    if array.shape[0] <= array.shape[-1]:
+        return array
+    return np.moveaxis(array, -1, 0)
+
+
+def _global_ssim(pred: np.ndarray, truth: np.ndarray) -> float:
+    pred = np.asarray(pred, dtype=float)
+    truth = np.asarray(truth, dtype=float)
+    data_range = float(np.nanmax(truth) - np.nanmin(truth))
+    if not np.isfinite(data_range) or data_range <= 0:
+        data_range = max(float(np.nanmax(np.abs(truth))), 1.0)
+    c1 = (0.01 * data_range) ** 2
+    c2 = (0.03 * data_range) ** 2
+    mu_x = float(np.mean(pred))
+    mu_y = float(np.mean(truth))
+    var_x = float(np.mean((pred - mu_x) ** 2))
+    var_y = float(np.mean((truth - mu_y) ** 2))
+    cov_xy = float(np.mean((pred - mu_x) * (truth - mu_y)))
+    denom = (mu_x**2 + mu_y**2 + c1) * (var_x + var_y + c2)
+    if denom == 0:
+        return 1.0
+    return float(((2.0 * mu_x * mu_y + c1) * (2.0 * cov_xy + c2)) / denom)
 
 
 def _write_image(

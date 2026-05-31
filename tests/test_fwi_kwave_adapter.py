@@ -75,6 +75,27 @@ def test_kwave_adapter_can_report_fixed_early_iteration(tmp_path):
     assert np.isclose(float(np.mean(result.sound_speed_mps)), float(np.mean(expected)))
 
 
+def test_kwave_adapter_can_select_best_iteration_by_ground_truth_rmse(tmp_path):
+    result_path = tmp_path / "result.mat"
+    _write_result(result_path)
+    with h5py.File(result_path, "a") as handle:
+        sound_speed = np.asarray(handle["VEL_ESTIM"][()], dtype=np.float32)
+        del handle["VEL_ESTIM_ITER"]
+        handle.create_dataset("VEL_ESTIM_ITER", data=np.stack([sound_speed - 20.0, sound_speed + 1.0, sound_speed + 10.0], axis=0))
+    case = make_sound_speed_case(shape=(4, 4), n_transducers=8)
+
+    result = KWaveFWIAdapterAlgorithm().run(
+        case,
+        AlgorithmConfig(parameters={"result_path": str(result_path), "reconstruction_iteration": "best"}),
+    )
+
+    assert result.status == "success"
+    assert result.metrics["selection_mode"] == "best"
+    assert result.metrics["best_iteration"] == 2
+    assert result.metrics["selected_iteration"] == 2
+    assert result.metrics["selected_loss"] == 2.0
+
+
 def test_kwave_adapter_expands_env_result_path(tmp_path, monkeypatch):
     result_path = tmp_path / "result.mat"
     _write_result(result_path)

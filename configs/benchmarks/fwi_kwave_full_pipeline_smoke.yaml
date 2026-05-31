@@ -20,6 +20,9 @@ required_metrics:
     - iterations
     - selected_iteration
     - selected_loss
+    - best_iteration
+    - best_iteration_rmse
+    - final_iteration_rmse
     - initial_loss
     - final_loss
     - rmse

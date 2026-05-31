@@ -127,7 +127,7 @@ class KWaveFWIAdapterAlgorithm:
                 failure_reason=f"failed to read k-Wave FWI result: {type(exc).__name__}: {exc}",
             )
 
-        selected_iteration = _configured_iteration(config, external)
+        selected_iteration, selection_metrics = _configured_iteration(config, external, case)
         selected_sound_speed = _select_iteration_image(external, "sound_speed_iter_mps", "sound_speed_mps", selected_iteration)
         selected_attenuation = _select_iteration_image(external, "attenuation_iter_np_per_m", "attenuation_np_per_m", selected_iteration)
         sound_speed = _resize_to_shape(selected_sound_speed, case.grid.shape)
@@ -155,6 +155,7 @@ class KWaveFWIAdapterAlgorithm:
             "warm_start_builder": _expand_text(config.parameters.get("warm_start_builder", "")),
             "warm_start_path": str(_configured_path(config, "warm_start_path") or _configured_path(config, "warm_start_result") or ""),
         }
+        metrics.update(selection_metrics)
         if case.ground_truth.sound_speed_mps is not None:
             truth = np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
             metrics.update(compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask))
@@ -422,22 +423,66 @@ def _configured_path(config: AlgorithmConfig, key: str) -> Path | None:
     return Path(_expand_text(value)).expanduser()
 
 
-def _configured_iteration(config: AlgorithmConfig, external: dict[str, Any]) -> int | None:
+def _configured_iteration(config: AlgorithmConfig, external: dict[str, Any], case: USCTCase) -> tuple[int | None, dict[str, Any]]:
     value = config.parameters.get("reconstruction_iteration")
     if value in (None, "", "final", "last"):
-        return None
+        return None, {"selection_mode": "final"}
     expanded = _expand_text(value)
     if "$" in expanded:
-        return None
-    if expanded.strip().lower() in {"first", "initial"}:
-        return 1
+        return None, {"selection_mode": "final_unresolved_env"}
+    mode = expanded.strip().lower()
+    if mode in {"best", "best_rmse", "best_kwave_gt_rmse", "auto"}:
+        best_iteration, best_metrics = _best_iteration_by_rmse(external, case)
+        if best_iteration is None:
+            return None, {"selection_mode": f"{mode}_fallback_final", **best_metrics}
+        return best_iteration, {"selection_mode": mode, **best_metrics}
+    if mode in {"first", "initial"}:
+        return 1, {"selection_mode": mode}
     iteration = int(expanded)
     if iteration <= 0:
-        return None
+        return None, {"selection_mode": "final_nonpositive"}
     total = int(external.get("iterations", 0))
     if total and iteration > total:
-        return total
-    return iteration
+        return total, {"selection_mode": "clamped_configured_iteration"}
+    return iteration, {"selection_mode": "configured_iteration"}
+
+
+def _best_iteration_by_rmse(external: dict[str, Any], case: USCTCase) -> tuple[int | None, dict[str, Any]]:
+    stack = external.get("sound_speed_iter_mps")
+    if stack is None:
+        return None, {"best_iteration_reason": "missing_sound_speed_iter"}
+    images = _iteration_stack(stack)
+    if images is None or images.size == 0:
+        return None, {"best_iteration_reason": "empty_sound_speed_iter"}
+
+    truth = external.get("ground_truth_sound_speed_mps")
+    target_source = "kwave_gt"
+    if truth is None:
+        truth = case.ground_truth.sound_speed_mps
+        target_source = "case_gt"
+    if truth is None:
+        return None, {"best_iteration_reason": "missing_ground_truth"}
+    target = _resize_to_shape(np.asarray(truth, dtype=float), images.shape[1:])
+    finite = np.isfinite(target)
+    if not np.any(finite):
+        return None, {"best_iteration_reason": "nonfinite_ground_truth"}
+
+    rmses: list[float] = []
+    ssims: list[float] = []
+    for image in images:
+        metrics = compute_image_metrics(np.asarray(image, dtype=float), target, mask=finite)
+        rmses.append(float(metrics["rmse"]))
+        ssims.append(float(metrics["ssim"]))
+    best_index = int(np.argmin(np.asarray(rmses, dtype=float)))
+    return best_index + 1, {
+        "best_iteration": best_index + 1,
+        "best_iteration_metric": "rmse",
+        "best_iteration_target": target_source,
+        "best_iteration_rmse": rmses[best_index],
+        "best_iteration_ssim": ssims[best_index],
+        "final_iteration_rmse": rmses[-1],
+        "final_iteration_ssim": ssims[-1],
+    }
 
 
 def _select_iteration_image(external: dict[str, Any], iter_key: str, final_key: str, iteration: int | None) -> np.ndarray | None:
@@ -448,12 +493,21 @@ def _select_iteration_image(external: dict[str, Any], iter_key: str, final_key: 
     if stack is None:
         value = external.get(final_key)
         return np.asarray(value, dtype=float) if value is not None else None
-    array = np.asarray(stack, dtype=float)
-    if array.ndim < 3 or array.shape[0] == 0:
+    array = _iteration_stack(stack)
+    if array is None or array.shape[0] == 0:
         value = external.get(final_key)
         return np.asarray(value, dtype=float) if value is not None else None
     index = max(0, min(int(iteration) - 1, array.shape[0] - 1))
     return array[index]
+
+
+def _iteration_stack(stack: Any) -> np.ndarray | None:
+    array = np.asarray(stack, dtype=float)
+    if array.ndim < 3:
+        return None
+    if array.shape[0] <= array.shape[-1]:
+        return array
+    return np.moveaxis(array, -1, 0)
 
 
 def _loss_at_iteration(losses: Any, iteration: int | None) -> float | None:
