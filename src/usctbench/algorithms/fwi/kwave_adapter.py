@@ -156,6 +156,9 @@ class KWaveFWIAdapterAlgorithm:
             "warm_start_path": str(_configured_path(config, "warm_start_path") or _configured_path(config, "warm_start_result") or ""),
         }
         metrics.update(selection_metrics)
+        if "best_iteration" not in metrics or "final_iteration_rmse" not in metrics:
+            _best_iteration, diagnostic_metrics = _best_iteration_by_rmse(external, case)
+            metrics.update(diagnostic_metrics)
         if case.ground_truth.sound_speed_mps is not None:
             truth = np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
             metrics.update(compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask))

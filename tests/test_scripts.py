@@ -141,6 +141,23 @@ def test_fwi_kwave_full_pipeline_config_uses_multifrequency_rf_warm_start():
     assert "--compare-gt" in warm_args
 
 
+def test_fwi_kwave_full_pipeline_protocol_uses_native_kwave_metrics():
+    import yaml
+
+    protocol = yaml.safe_load(Path("configs/benchmarks/fwi_kwave_full_pipeline_smoke.yaml").read_text(encoding="utf-8"))
+    required = protocol["required_metrics"]["fwi_kwave_adapter"]
+
+    assert "best_iteration" in required
+    assert "final_iteration_rmse" in required
+    assert "kwave_gt_rmse" in required
+    assert "kwave_gt_ssim" in required
+    assert "matlab_psnr_value" in required
+    assert "matlab_ssim_value" in required
+    assert "water_relative_rmse_improvement" not in required
+    assert "water_relative_rmse_improvement" not in protocol["minimums"]["fwi_kwave_adapter"]
+    assert "kwave_gt_init_water_relative_rmse_improvement" not in protocol["minimums"]["fwi_kwave_adapter"]
+
+
 def test_nbpslice2d_smoke_script_runs_dataset_flow():
     text = Path("scripts/run_nbpslice2d_smoke.sh").read_text(encoding="utf-8")
 
