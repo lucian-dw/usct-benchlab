@@ -51,6 +51,7 @@ parameters:
   c_geom: 1540.0
   c_init: 1500.0
   sign_conv: -1.0
+  step_damping: 0.1
   velocity_bounds:
     - 1350.0
     - 1600.0
