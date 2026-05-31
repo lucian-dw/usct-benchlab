@@ -22,6 +22,7 @@ def test_read_kwave_fwi_result_extracts_metrics(tmp_path):
     assert result["sound_speed_mps"].shape == (6, 6)
     assert result["attenuation_np_per_m"].shape == (6, 6)
     assert result["ground_truth_sound_speed_mps"].shape == (6, 6)
+    assert result["sound_speed_iter_mps"].shape == (3, 6, 6)
     assert result["iterations"] == 3
     assert result["loss_decreased"] is True
     assert result["dataset_path"] == "/tmp/dataset.mat"
@@ -39,6 +40,7 @@ def test_kwave_adapter_ingests_existing_result(tmp_path):
     assert result.attenuation_np_per_m.shape == case.grid.shape
     assert result.metrics["external_result_loaded"] is True
     assert result.metrics["iterations"] == 3
+    assert result.metrics["selected_iteration"] == 3
     assert result.metrics["loss_decreased"] is True
     assert "rmse" in result.metrics
     assert "kwave_gt_rmse" in result.metrics
@@ -51,6 +53,23 @@ def test_kwave_adapter_missing_result_skips(tmp_path):
 
     assert result.status == "skipped"
     assert "result file not found" in result.failure_reason
+
+
+def test_kwave_adapter_can_report_fixed_early_iteration(tmp_path):
+    result_path = tmp_path / "result.mat"
+    _write_result(result_path)
+    case = make_sound_speed_case(shape=(4, 4), n_transducers=8)
+
+    result = KWaveFWIAdapterAlgorithm().run(
+        case,
+        AlgorithmConfig(parameters={"result_path": str(result_path), "reconstruction_iteration": 1}),
+    )
+
+    assert result.status == "success"
+    assert result.metrics["selected_iteration"] == 1
+    assert result.metrics["selected_loss"] == 3.0
+    expected = np.linspace(1450.0, 1520.0, 36, dtype=np.float32).reshape(6, 6) - 5.0
+    assert np.isclose(float(np.mean(result.sound_speed_mps)), float(np.mean(expected)))
 
 
 def test_kwave_adapter_expands_env_result_path(tmp_path, monkeypatch):
@@ -202,6 +221,8 @@ def _write_result(path):
         handle.create_dataset("VEL_ESTIM", data=sound_speed)
         handle.create_dataset("ATTEN_ESTIM", data=attenuation)
         handle.create_dataset("C_INTERP", data=sound_speed + 1.0)
+        handle.create_dataset("VEL_ESTIM_ITER", data=np.stack([sound_speed - 5.0, sound_speed - 2.0, sound_speed], axis=0))
+        handle.create_dataset("ATTEN_ESTIM_ITER", data=np.stack([attenuation, attenuation, attenuation], axis=0))
         handle.create_dataset("LOSS_ITER", data=np.asarray([[3.0, 2.0, 1.0]], dtype=np.float64))
         handle.create_dataset("psnr_value", data=np.asarray([[20.0]], dtype=np.float64))
         handle.create_dataset("ssim_value", data=np.asarray([[0.5]], dtype=np.float64))

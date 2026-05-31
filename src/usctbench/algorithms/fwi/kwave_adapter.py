@@ -127,11 +127,17 @@ class KWaveFWIAdapterAlgorithm:
                 failure_reason=f"failed to read k-Wave FWI result: {type(exc).__name__}: {exc}",
             )
 
-        sound_speed = _resize_to_shape(external["sound_speed_mps"], case.grid.shape)
+        selected_iteration = _configured_iteration(config, external)
+        selected_sound_speed = _select_iteration_image(external, "sound_speed_iter_mps", "sound_speed_mps", selected_iteration)
+        selected_attenuation = _select_iteration_image(external, "attenuation_iter_np_per_m", "attenuation_np_per_m", selected_iteration)
+        sound_speed = _resize_to_shape(selected_sound_speed, case.grid.shape)
         attenuation = _resize_to_shape(external["attenuation_np_per_m"], case.grid.shape) if external.get("attenuation_np_per_m") is not None else None
+        if selected_attenuation is not None:
+            attenuation = _resize_to_shape(selected_attenuation, case.grid.shape)
         c0 = float(config.parameters.get("baseline_sound_speed_mps", case.metadata.get("reference_sound_speed_mps", 1500.0)))
         log_path = _configured_path(config, "external_log_path")
         configured_dataset_path = _configured_path(config, "dataset_path")
+        losses = external.get("losses", [])
         metrics: dict[str, Any] = {
             "external_result_loaded": True,
             "external_result_path": str(result_path),
@@ -139,6 +145,8 @@ class KWaveFWIAdapterAlgorithm:
             "external_execution_mode": _external_execution_mode(config),
             "external_log_path": str(log_path) if log_path else "",
             "iterations": int(external.get("iterations", 0)),
+            "selected_iteration": selected_iteration or int(external.get("iterations", 0)),
+            "selected_loss": _loss_at_iteration(losses, selected_iteration),
             "initial_loss": external.get("initial_loss"),
             "final_loss": external.get("final_loss"),
             "loss_decreased": external.get("loss_decreased"),
@@ -191,11 +199,15 @@ def read_kwave_fwi_result(path: str | Path) -> dict[str, Any]:
         sound_speed = _require_dataset(handle, "VEL_ESTIM")
         attenuation = _read_dataset(handle, "ATTEN_ESTIM")
         ground_truth = _read_dataset(handle, "C_INTERP")
+        sound_speed_iter = _read_dataset(handle, "VEL_ESTIM_ITER")
+        attenuation_iter = _read_dataset(handle, "ATTEN_ESTIM_ITER")
         losses = _read_vector(handle, "LOSS_ITER")
         return {
             "sound_speed_mps": np.asarray(sound_speed, dtype=float),
             "attenuation_np_per_m": np.asarray(attenuation, dtype=float) if attenuation is not None else None,
             "ground_truth_sound_speed_mps": np.asarray(ground_truth, dtype=float) if ground_truth is not None else None,
+            "sound_speed_iter_mps": np.asarray(sound_speed_iter, dtype=float) if sound_speed_iter is not None else None,
+            "attenuation_iter_np_per_m": np.asarray(attenuation_iter, dtype=float) if attenuation_iter is not None else None,
             "losses": losses.tolist(),
             "iterations": int(losses.size),
             "initial_loss": float(losses[0]) if losses.size else None,
@@ -386,6 +398,50 @@ def _configured_path(config: AlgorithmConfig, key: str) -> Path | None:
     if not value:
         return None
     return Path(_expand_text(value)).expanduser()
+
+
+def _configured_iteration(config: AlgorithmConfig, external: dict[str, Any]) -> int | None:
+    value = config.parameters.get("reconstruction_iteration")
+    if value in (None, "", "final", "last"):
+        return None
+    expanded = _expand_text(value)
+    if "$" in expanded:
+        return None
+    if expanded.strip().lower() in {"first", "initial"}:
+        return 1
+    iteration = int(expanded)
+    if iteration <= 0:
+        return None
+    total = int(external.get("iterations", 0))
+    if total and iteration > total:
+        return total
+    return iteration
+
+
+def _select_iteration_image(external: dict[str, Any], iter_key: str, final_key: str, iteration: int | None) -> np.ndarray | None:
+    if iteration is None:
+        value = external.get(final_key)
+        return np.asarray(value, dtype=float) if value is not None else None
+    stack = external.get(iter_key)
+    if stack is None:
+        value = external.get(final_key)
+        return np.asarray(value, dtype=float) if value is not None else None
+    array = np.asarray(stack, dtype=float)
+    if array.ndim < 3 or array.shape[0] == 0:
+        value = external.get(final_key)
+        return np.asarray(value, dtype=float) if value is not None else None
+    index = max(0, min(int(iteration) - 1, array.shape[0] - 1))
+    return array[index]
+
+
+def _loss_at_iteration(losses: Any, iteration: int | None) -> float | None:
+    values = np.asarray(losses, dtype=float).reshape(-1)
+    if values.size == 0:
+        return None
+    if iteration is None:
+        return float(values[-1])
+    index = max(0, min(int(iteration) - 1, values.size - 1))
+    return float(values[index])
 
 
 def _external_execution_mode(config: AlgorithmConfig) -> str:

@@ -21,6 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--result", required=True, type=Path, help="External k-Wave FWI result MAT/HDF5 file.")
     parser.add_argument("--out", required=True, type=Path, help="Directory for rendered smoke artifacts.")
     parser.add_argument("--log", type=Path, default=None, help="External pipeline log to copy to run.log.")
+    parser.add_argument("--iteration", default="final", help="1-based VEL_ESTIM_ITER checkpoint to render, or final.")
     return parser.parse_args()
 
 
@@ -30,7 +31,10 @@ def main() -> int:
 
     external = read_kwave_fwi_result(args.result)
     case = read_case_hdf5(args.case)
-    reconstruction = np.asarray(external["sound_speed_mps"], dtype=float)
+    selected_iteration = _parse_iteration(args.iteration, int(external.get("iterations", 0)))
+    reconstruction = _select_reconstruction(args.result, selected_iteration)
+    if reconstruction is None:
+        reconstruction = np.asarray(external["sound_speed_mps"], dtype=float)
     ground_truth = _read_result_dataset(args.result, "C_INTERP")
     if ground_truth is None and case.ground_truth.sound_speed_mps is not None:
         ground_truth = _resize_to_shape(np.asarray(case.ground_truth.sound_speed_mps, dtype=float), reconstruction.shape)
@@ -78,6 +82,7 @@ def main() -> int:
         "result_path": str(args.result),
         "external_dataset_path": external.get("dataset_path") or "",
         "iterations": int(external.get("iterations", 0)),
+        "selected_iteration": selected_iteration or int(external.get("iterations", 0)),
         "initial_loss": external.get("initial_loss"),
         "final_loss": external.get("final_loss"),
         "loss_decreased": external.get("loss_decreased"),
@@ -101,6 +106,33 @@ def _read_result_dataset(path: Path, name: str) -> np.ndarray | None:
         if name not in handle:
             return None
         return np.asarray(handle[name][()])
+
+
+def _select_reconstruction(path: Path, iteration: int | None) -> np.ndarray | None:
+    if iteration is None:
+        return None
+    stack = _read_result_dataset(path, "VEL_ESTIM_ITER")
+    if stack is None:
+        return None
+    array = np.asarray(stack, dtype=float)
+    if array.ndim < 3 or array.shape[0] == 0:
+        return None
+    index = max(0, min(int(iteration) - 1, array.shape[0] - 1))
+    return array[index]
+
+
+def _parse_iteration(value: str, total: int) -> int | None:
+    text = str(value).strip().lower()
+    if text in {"", "final", "last"}:
+        return None
+    if text in {"first", "initial"}:
+        return 1
+    iteration = int(text)
+    if iteration <= 0:
+        return None
+    if total > 0:
+        return min(iteration, total)
+    return iteration
 
 
 def _write_image(

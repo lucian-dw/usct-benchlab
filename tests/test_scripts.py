@@ -62,6 +62,7 @@ def test_fwi_kwave_full_pipeline_smoke_script_runs_speed_map_flow():
     assert "USCT_KWAVE_SOURCE_MAT" in text
     assert "USCT_KWAVE_PYTHON_BIN" in text
     assert "USCT_KWAVE_WARM_START_PATH" in text
+    assert "USCT_KWAVE_RECONSTRUCTION_ITERATION" in text
 
 
 def test_nbpslice2d_smoke_script_runs_dataset_flow():

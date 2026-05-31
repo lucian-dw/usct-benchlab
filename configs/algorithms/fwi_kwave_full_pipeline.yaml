@@ -24,10 +24,7 @@ parameters:
   scratch_dir: ${USCT_KWAVE_SCRATCH_DIR}
   dataset_path: ${USCT_KWAVE_DATASET_PATH}
   external_log_path: ${USCT_KWAVE_EXTERNAL_LOG_PATH}
-  warm_start_builder: traveltime
-  warm_start_path: ${USCT_KWAVE_WARM_START_PATH}
-  warm_start_summary_path: ${USCT_KWAVE_WARM_START_SUMMARY_PATH}
-  warm_start_diagnostic_prefix: ${USCT_KWAVE_WARM_START_DIAGNOSTIC_PREFIX}
+  reconstruction_iteration: ${USCT_KWAVE_RECONSTRUCTION_ITERATION}
   overwrite: true
   start_matlab: true
   sos_freqs_mhz:
@@ -51,5 +48,6 @@ parameters:
 metadata:
   external_source: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/run_full_pipeline.py
   default_mode: full_pipeline_from_speed_map
-  default_initialization: rf_traveltime_warm_start
+  default_initialization: constant_early_stopped
+  optional_initialization: set warm_start_builder=traveltime to use RF travel-time warm start.
   v0_1_scope: k-Wave simulation plus Helmholtz/FWI only; no diffusion or generative priors.

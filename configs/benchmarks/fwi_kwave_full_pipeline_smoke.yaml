@@ -18,6 +18,8 @@ required_metrics:
   fwi_kwave_adapter:
     - external_result_loaded
     - iterations
+    - selected_iteration
+    - selected_loss
     - initial_loss
     - final_loss
     - rmse
