@@ -29,6 +29,7 @@ def main() -> int:
     parser.add_argument("--max-cases", type=int, default=0, help="Optional cap on displayed cases.")
     parser.add_argument("--cmap", default="gray", help="Matplotlib colormap. Use gray for sound-speed review.")
     parser.add_argument("--unit", default=None)
+    parser.add_argument("--transpose", action="store_true", help="Render cases as rows and GT/algorithms as columns.")
     args = parser.parse_args()
 
     cases = [read_case_hdf5(path) for path in sorted(Path(args.cases_dir).glob("*.h5"))]
@@ -55,8 +56,9 @@ def main() -> int:
             summary_rows.append({"case_id": case.case_id, "algorithm": algorithm, **_metric_subset(metrics)})
         panels.append(col)
 
+    plot_panels = _transpose_panels(panels) if args.transpose else panels
     _write_panel(
-        panels,
+        plot_panels,
         Path(args.out),
         title=args.title,
         cmap=args.cmap,
@@ -75,6 +77,7 @@ def main() -> int:
                 "algorithms": args.algorithms,
                 "case_ids": args.case_ids or [],
                 "cmap": args.cmap,
+                "transpose": args.transpose,
                 "cases": [case.case_id for case in cases],
             },
             indent=2,
@@ -94,6 +97,18 @@ def _filter_cases_by_id(cases: list[Any], case_ids: list[str] | None) -> list[An
     if missing:
         raise SystemExit(f"requested case ids not found: {', '.join(missing)}")
     return [by_id[case_id] for case_id in case_ids]
+
+
+def _transpose_panels(
+    panels: list[list[tuple[str, np.ndarray | None, dict[str, Any]]]],
+) -> list[list[tuple[str, np.ndarray | None, dict[str, Any]]]]:
+    if not panels:
+        return panels
+    nrows = max(len(col) for col in panels)
+    transposed: list[list[tuple[str, np.ndarray | None, dict[str, Any]]]] = []
+    for row_idx in range(nrows):
+        transposed.append([col[row_idx] if row_idx < len(col) else ("missing", None, {"missing": True}) for col in panels])
+    return transposed
 
 
 def _ground_truth(case: Any, field: str) -> np.ndarray:

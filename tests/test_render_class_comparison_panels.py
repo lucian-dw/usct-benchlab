@@ -13,6 +13,7 @@ _SPEC.loader.exec_module(_MODULE)
 _filter_cases_by_id = _MODULE._filter_cases_by_id
 _format_label = _MODULE._format_label
 _metric_subset = _MODULE._metric_subset
+_transpose_panels = _MODULE._transpose_panels
 
 
 class _Case:
@@ -47,6 +48,21 @@ def test_fwi_comparison_label_uses_kwave_ground_truth_metrics():
     assert "kWave RMSE=17.7" in label
     assert "kWave SSIM=0.705" in label
     assert "RMSE=99.0" not in label
+
+
+def test_transpose_panels_renders_algorithms_as_columns():
+    panels = [
+        [("GT case_a", None, {}), ("alg1", None, {}), ("alg2", None, {})],
+        [("GT case_b", None, {}), ("alg1", None, {}), ("alg2", None, {})],
+    ]
+
+    transposed = _transpose_panels(panels)
+
+    assert [[cell[0] for cell in col] for col in transposed] == [
+        ["GT case_a", "GT case_b"],
+        ["alg1", "alg1"],
+        ["alg2", "alg2"],
+    ]
 
 
 def test_metric_subset_keeps_fwi_acceptance_metrics():
