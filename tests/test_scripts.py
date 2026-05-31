@@ -77,10 +77,12 @@ def test_fwi_kwave_full_pipeline_smoke_script_runs_speed_map_flow():
     assert "convert_speed_mat_volume" in text
     assert "fwi_kwave_full_pipeline.yaml" in text
     assert "render_kwave_fwi_smoke_outputs.py" in text
+    assert "render_class_comparison_panels.py" in text
     assert "USCT_KWAVE_SOURCE_MAT" in text
     assert "USCT_KWAVE_PYTHON_BIN" in text
     assert "USCT_KWAVE_WARM_START_PATH" in text
     assert "USCT_KWAVE_RECONSTRUCTION_ITERATION" in text
+    assert "USCT_KWAVE_RENDER_CROSS_ALGORITHM" in text
     assert "USCT_KWAVE_SAMPLE_INDEX:-201" in text
     assert "USCT_KWAVE_RUN_ID:-fwi_kwave_full_pipeline_success201_dense" in text
     assert "USCT_KWAVE_WRAPPER_CONVERTED_SHAPE:-256" in text
@@ -88,6 +90,9 @@ def test_fwi_kwave_full_pipeline_smoke_script_runs_speed_map_flow():
     assert "benchmark wrapper" in text
     assert "output_shape=($USCT_KWAVE_WRAPPER_CONVERTED_SHAPE, $USCT_KWAVE_WRAPPER_CONVERTED_SHAPE)" in text
     assert "--render-best-and-final" in text
+    assert "straight_cgls straight_sirt straight_sart bent_ray_gn rwave_adapter fwi_kwave_adapter" in text
+    assert "--transpose" in text
+    assert "fwi_case_${case_id}_cross_algorithm_horizontal_gray.png" in text
 
 
 def test_fwi_kwave_render_script_writes_contact_sheet():

@@ -37,6 +37,7 @@ export USCT_KWAVE_SAMPLE_INDEX="${USCT_KWAVE_SAMPLE_INDEX:-201}"
 export USCT_KWAVE_FWI_SAMPLE_ROOT="${USCT_KWAVE_FWI_SAMPLE_ROOT:-$USCT_WORKSPACE/data/openbreastus_kwave_fwi_smoke}"
 export USCT_KWAVE_RUN_ID="${USCT_KWAVE_RUN_ID:-fwi_kwave_full_pipeline_success201_dense}"
 export USCT_KWAVE_WRAPPER_CONVERTED_SHAPE="${USCT_KWAVE_WRAPPER_CONVERTED_SHAPE:-256}"
+export USCT_KWAVE_RENDER_CROSS_ALGORITHM="${USCT_KWAVE_RENDER_CROSS_ALGORITHM:-1}"
 
 sample_zero_index=$((USCT_KWAVE_SAMPLE_INDEX - 1))
 case_prefix="$(printf 'openbreast_test%03d_kwave_full' "$USCT_KWAVE_SAMPLE_INDEX")"
@@ -86,6 +87,29 @@ PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" "$REPO_DIR/s
   --log "$USCT_KWAVE_EXTERNAL_LOG_PATH" \
   --iteration "$USCT_KWAVE_RECONSTRUCTION_ITERATION" \
   --render-best-and-final
+
+if [[ "$USCT_KWAVE_RENDER_CROSS_ALGORITHM" != "0" ]]; then
+  for algorithm in straight_cgls straight_sirt straight_sart bent_ray_gn rwave_adapter; do
+    PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli run \
+      "$algorithm" \
+      --case "$case_path" \
+      --config "$REPO_DIR/configs/algorithms/${algorithm}.yaml" \
+      --out "$run_root/$algorithm"
+  done
+
+  comparison_dir="$run_root/comparison_artifacts"
+  mkdir -p "$comparison_dir"
+  PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" "$REPO_DIR/scripts/render_class_comparison_panels.py" \
+    --cases-dir "$USCT_KWAVE_FWI_SAMPLE_ROOT" \
+    --run-dir "$run_root" \
+    --out "$comparison_dir/fwi_case_${case_id}_cross_algorithm_horizontal_gray.png" \
+    --field sound_speed \
+    --algorithms straight_cgls straight_sirt straight_sart bent_ray_gn rwave_adapter fwi_kwave_adapter \
+    --case-ids "$case_id" \
+    --title "OpenBreastUS test${USCT_KWAVE_SAMPLE_INDEX} ${USCT_KWAVE_WRAPPER_CONVERTED_SHAPE} cross-algorithm comparison" \
+    --cmap gray \
+    --transpose
+fi
 
 PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli eval \
   --run "$run_root" \

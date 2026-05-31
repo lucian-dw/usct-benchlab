@@ -21,6 +21,11 @@ simulation and inversion live in the external A100 `USCT_kwave` tree.
 - `scripts/render_kwave_fwi_smoke_outputs.py` renders a `contact_sheet.png`
   with GT, selected/final/best reconstructions, aligned error panels, plus the
   individual reconstruction, error, loss, gradient, and metadata artifacts.
+- The full-pipeline smoke script also runs `straight_cgls`, `straight_sirt`,
+  `straight_sart`, `bent_ray_gn`, and `rwave_adapter` on the same 256x256
+  wrapper case by default, then writes a horizontal cross-algorithm panel under
+  `<run_root>/comparison_artifacts/`. Set
+  `USCT_KWAVE_RENDER_CROSS_ALGORITHM=0` to disable this extra comparison step.
 
 ## Preserved Successful Settings
 
@@ -85,6 +90,7 @@ Do not delete the following when cleaning redundant FWI files:
 - `configs/benchmarks/fwi_kwave_full_pipeline_smoke.yaml`;
 - `scripts/run_fwi_kwave_full_pipeline_smoke.sh`;
 - `scripts/render_kwave_fwi_smoke_outputs.py`;
+- the cross-algorithm panel call in `scripts/run_fwi_kwave_full_pipeline_smoke.sh`;
 - this note and the `fwi_kwave_adapter` algorithm card.
 
 Run outputs under `runs/`, external MATLAB/k-Wave code under `external/` or
