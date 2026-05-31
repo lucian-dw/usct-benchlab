@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 
 import numpy as np
 import pytest
@@ -60,6 +61,94 @@ def test_kwave_adapter_expands_env_result_path(tmp_path, monkeypatch):
 
     assert result.status == "success"
     assert os.path.samefile(result.metrics["external_result_path"], result_path)
+
+
+def test_kwave_adapter_full_pipeline_launch_uses_speed_map_command(tmp_path, monkeypatch):
+    result_path = tmp_path / "result.mat"
+    log_path = tmp_path / "external.log"
+    source_mat = tmp_path / "breast_test_speed.mat"
+    source_mat.write_text("placeholder", encoding="utf-8")
+    dataset_path = tmp_path / "dataset.mat"
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        _write_result(result_path)
+        return subprocess.CompletedProcess(command, 0, stdout="ok")
+
+    monkeypatch.setattr("usctbench.algorithms.fwi.kwave_adapter.subprocess.run", fake_run)
+    monkeypatch.setenv("KWAVE_PY_FOR_TEST", "/opt/usct-kwave/bin/python")
+    monkeypatch.setenv("KWAVE_SOURCE_FOR_TEST", str(source_mat))
+    case = make_sound_speed_case(shape=(4, 4), n_transducers=8)
+
+    result = KWaveFWIAdapterAlgorithm().run(
+        case,
+        AlgorithmConfig(
+            parameters={
+                "result_path": str(result_path),
+                "run_external": True,
+                "execution_mode": "full_pipeline_from_speed_map",
+                "usct_kwave_root": str(tmp_path),
+                "python_bin": "$KWAVE_PY_FOR_TEST",
+                "mat_path": "$KWAVE_SOURCE_FOR_TEST",
+                "mat_key": "breast_test",
+                "sample_index": 1,
+                "array_mode": "full128",
+                "dataset_path": str(dataset_path),
+                "external_log_path": str(log_path),
+                "start_matlab": True,
+                "overwrite": True,
+                "sos_freqs_mhz": [0.3],
+                "sos_iters": [20],
+            }
+        ),
+    )
+
+    assert result.status == "success"
+    command = commands[0]
+    assert command[0] == "/opt/usct-kwave/bin/python"
+    assert "--skip-siminfo" not in command
+    assert command[command.index("--mat-path") + 1] == str(source_mat)
+    assert command[command.index("--dataset-path") + 1] == str(dataset_path)
+    assert "--start-matlab" in command
+    assert "--overwrite" in command
+    assert command[command.index("--sos-iters") + 1] == "20"
+    assert result.metrics["external_execution_mode"] == "full_pipeline_from_speed_map"
+    assert result.metrics["external_log_path"] == str(log_path)
+
+
+def test_kwave_adapter_external_dataset_mode_keeps_skip_flags(tmp_path, monkeypatch):
+    result_path = tmp_path / "result.mat"
+    dataset_path = tmp_path / "dataset.mat"
+    dataset_path.write_text("placeholder", encoding="utf-8")
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        _write_result(result_path)
+        return subprocess.CompletedProcess(command, 0, stdout="ok")
+
+    monkeypatch.setattr("usctbench.algorithms.fwi.kwave_adapter.subprocess.run", fake_run)
+    case = make_sound_speed_case(shape=(4, 4), n_transducers=8)
+
+    result = KWaveFWIAdapterAlgorithm().run(
+        case,
+        AlgorithmConfig(
+            parameters={
+                "result_path": str(result_path),
+                "run_external": True,
+                "dataset_path": str(dataset_path),
+                "usct_kwave_root": str(tmp_path),
+            }
+        ),
+    )
+
+    assert result.status == "success"
+    command = commands[0]
+    assert "--skip-siminfo" in command
+    assert "--skip-rf" in command
+    assert "--skip-assemble" in command
+    assert command[command.index("--dataset-path") + 1] == str(dataset_path)
 
 
 def _write_result(path):

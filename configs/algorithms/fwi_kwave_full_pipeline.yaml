@@ -1,0 +1,46 @@
+name: fwi_kwave_adapter
+parameters:
+  result_path: ${USCT_KWAVE_FWI_RESULT_PATH}
+  run_external: true
+  execution_mode: full_pipeline_from_speed_map
+  baseline_sound_speed_mps: 1500.0
+  usct_kwave_root: ${USCT_KWAVE_ROOT}
+  python_bin: ${USCT_KWAVE_PYTHON_BIN}
+  pipeline_module: openbreastus_diffusion.kwave_dps.run_full_pipeline
+  mat_path: ${USCT_KWAVE_SOURCE_MAT}
+  mat_key: ${USCT_KWAVE_MAT_KEY}
+  sample_index: ${USCT_KWAVE_SAMPLE_INDEX}
+  array_mode: full128
+  object_scale: 1.0
+  object_pose: native
+  background_speed: 1500.0
+  ncalc: 512
+  xmax_mm: 120.0
+  circle_radius_mm: 110.0
+  backend: cuda-binary
+  generation_mode: split
+  output_dir: ${USCT_KWAVE_OUTPUT_DIR}
+  siminfo_path: ${USCT_KWAVE_SIMINFO_PATH}
+  scratch_dir: ${USCT_KWAVE_SCRATCH_DIR}
+  dataset_path: ${USCT_KWAVE_DATASET_PATH}
+  external_log_path: ${USCT_KWAVE_EXTERNAL_LOG_PATH}
+  overwrite: true
+  start_matlab: true
+  sos_freqs_mhz:
+    - 0.3
+  sos_iters:
+    - 20
+  sos_atten_freqs_mhz: []
+  atten_iters:
+    - 0
+  tx_downsample: 1
+  recon_dxi_mm: 0.6
+  c_geom: 1540.0
+  c_init: 1480.0
+  sign_conv: -1.0
+  save_raw_grad_iters: 20
+  timeout_s: 21600
+metadata:
+  external_source: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/run_full_pipeline.py
+  default_mode: full_pipeline_from_speed_map
+  v0_1_scope: k-Wave simulation plus Helmholtz/FWI only; no diffusion or generative priors.

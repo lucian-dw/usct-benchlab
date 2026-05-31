@@ -22,6 +22,7 @@ def test_shell_scripts_source_local_env():
         Path("scripts/run_smoke.sh"),
         Path("scripts/run_v01_release_check.sh"),
         Path("scripts/run_fwi_kwave_adapter_smoke.sh"),
+        Path("scripts/run_fwi_kwave_full_pipeline_smoke.sh"),
         Path("scripts/run_nbpslice2d_smoke.sh"),
     ]:
         text = path.read_text(encoding="utf-8")
@@ -50,6 +51,16 @@ def test_fwi_kwave_adapter_smoke_script_runs_adapter_flow():
     assert "fwi_kwave_adapter" in text
     assert "fwi_kwave_adapter_smoke.yaml" in text
     assert "USCT_KWAVE_FWI_RESULT_PATH" in text
+
+
+def test_fwi_kwave_full_pipeline_smoke_script_runs_speed_map_flow():
+    text = Path("scripts/run_fwi_kwave_full_pipeline_smoke.sh").read_text(encoding="utf-8")
+
+    assert "convert_speed_mat_volume" in text
+    assert "fwi_kwave_full_pipeline.yaml" in text
+    assert "render_kwave_fwi_smoke_outputs.py" in text
+    assert "USCT_KWAVE_SOURCE_MAT" in text
+    assert "USCT_KWAVE_PYTHON_BIN" in text
 
 
 def test_nbpslice2d_smoke_script_runs_dataset_flow():

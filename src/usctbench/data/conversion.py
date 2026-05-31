@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 import zipfile
@@ -48,22 +49,24 @@ def convert_speed_mat_volume(
     end-to-end. Metadata records these assumptions explicitly.
     """
 
-    h5py = _h5py()
     source = Path(mat_path).expanduser().resolve()
     out_path = Path(out_dir).expanduser().resolve()
     out_path.mkdir(parents=True, exist_ok=True)
 
     records: list[dict[str, Any]] = []
-    with h5py.File(source, "r") as handle:
-        name = dataset_name or _largest_3d_dataset_name(handle)
-        dataset = handle[name]
-        if dataset.ndim != 3:
-            raise ValueError(f"speed dataset must be 3-D [ny, nx, n_cases], got {dataset.shape}")
+    with _open_speed_volume(source, dataset_name=dataset_name) as speed_volume:
+        name = speed_volume["name"]
+        dataset = speed_volume["dataset"]
+        shape = tuple(int(value) for value in dataset.shape)
+        if len(shape) != 3:
+            raise ValueError(f"speed dataset must be 3-D [ny, nx, n_cases] or [n_cases,ny,nx], got {shape}")
+        sample_axis = _infer_speed_volume_sample_axis(shape)
+        case_count = shape[sample_axis]
         selected_indices = indices if indices is not None else [0]
         for index in selected_indices:
-            if index < 0 or index >= dataset.shape[2]:
-                raise IndexError(f"case index {index} outside dataset shape {dataset.shape}")
-            sound_speed = np.asarray(dataset[:, :, index], dtype=float)
+            if index < 0 or index >= case_count:
+                raise IndexError(f"case index {index} outside dataset shape {shape}")
+            sound_speed = np.asarray(_read_speed_volume_slice(dataset, index, sample_axis), dtype=float)
             sound_speed = _downsample_mean(sound_speed, output_shape)
             case_id = f"{case_id_prefix or source.stem}_{index:06d}"
             case = _speed_array_to_case(
@@ -72,7 +75,7 @@ def convert_speed_mat_volume(
                 source=source,
                 dataset_name=name,
                 source_index=index,
-                source_shape=tuple(int(v) for v in dataset.shape),
+                source_shape=shape,
                 spacing_m=spacing_m,
                 n_transducers=n_transducers,
                 reference_sound_speed_mps=reference_sound_speed_mps,
@@ -100,13 +103,18 @@ def convert_speed_mat_volume(
 def speed_mat_metadata(mat_path: str | Path) -> dict[str, Any] | None:
     """Return lightweight metadata for a MATLAB v7.3 speed volume if possible."""
 
-    h5py = _h5py()
     path = Path(mat_path)
     try:
-        with h5py.File(path, "r") as handle:
-            name = _largest_3d_dataset_name(handle)
-            dataset = handle[name]
-            return {"dataset": name, "shape": list(dataset.shape), "dtype": str(dataset.dtype)}
+        with _open_speed_volume(path) as speed_volume:
+            dataset = speed_volume["dataset"]
+            shape = tuple(int(value) for value in dataset.shape)
+            return {
+                "dataset": str(speed_volume["name"]),
+                "shape": list(shape),
+                "dtype": str(dataset.dtype),
+                "sample_axis": int(_infer_speed_volume_sample_axis(shape)) if len(shape) == 3 else None,
+                "mat_format": str(speed_volume["format"]),
+            }
     except Exception:
         return None
 
@@ -763,6 +771,62 @@ def _largest_3d_dataset_name(handle: Any) -> str:
     if not candidates:
         raise ValueError("no 3-D dataset found in MAT/HDF5 file")
     return sorted(candidates, reverse=True)[0][1]
+
+
+@contextmanager
+def _open_speed_volume(path: Path, *, dataset_name: str | None = None):
+    h5py = _h5py()
+    try:
+        with h5py.File(path, "r") as handle:
+            name = dataset_name or _largest_3d_dataset_name(handle)
+            yield {"name": name, "dataset": handle[name], "format": "matlab-v7.3-hdf5"}
+            return
+    except OSError:
+        pass
+
+    try:
+        from scipy.io import loadmat
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(f"{path} is not HDF5; scipy is required to read MATLAB v5 MAT speed volumes") from exc
+
+    data = loadmat(path)
+    name = dataset_name or _largest_3d_array_name(data)
+    if name not in data:
+        keys = [key for key in data if not key.startswith("__")]
+        raise KeyError(f"{name!r} not found in {path}. Available keys: {keys}")
+    yield {"name": name, "dataset": np.asarray(data[name]), "format": "matlab-v5"}
+
+
+def _largest_3d_array_name(data: dict[str, Any]) -> str:
+    candidates = [
+        (int(np.prod(value.shape)), name)
+        for name, value in data.items()
+        if not name.startswith("__") and hasattr(value, "shape") and len(value.shape) == 3
+    ]
+    if not candidates:
+        keys = [key for key in data if not key.startswith("__")]
+        raise ValueError(f"no 3-D array found in MAT file; available keys: {keys}")
+    return sorted(candidates, reverse=True)[0][1]
+
+
+def _infer_speed_volume_sample_axis(shape: tuple[int, ...]) -> int:
+    if len(shape) != 3:
+        raise ValueError(f"speed dataset must be 3-D, got {shape}")
+    if shape[1] == shape[2] and shape[0] != shape[1]:
+        return 0
+    if shape[0] == shape[1] and shape[2] != shape[0]:
+        return 2
+    return int(np.argmax(shape))
+
+
+def _read_speed_volume_slice(dataset: Any, index: int, sample_axis: int) -> np.ndarray:
+    if sample_axis == 0:
+        return np.asarray(dataset[index, :, :])
+    if sample_axis == 1:
+        return np.asarray(dataset[:, index, :])
+    if sample_axis == 2:
+        return np.asarray(dataset[:, :, index])
+    raise ValueError(f"invalid sample axis {sample_axis}")
 
 
 def _h5py():

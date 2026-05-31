@@ -14,6 +14,73 @@ from usctbench.metrics.image import compute_baseline_improvement_metrics, comput
 from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
 
 
+_INVERT_EXISTING_DATASET_MODES = {"invert_existing_dataset", "dataset", "skip_simulation"}
+_FULL_PIPELINE_MODES = {"full_pipeline", "full_pipeline_from_speed_map", "speed_map"}
+_CLI_PARAMS = {
+    "mat_path": "--mat-path",
+    "mat_key": "--mat-key",
+    "sample_index": "--sample-index",
+    "array_mode": "--array-mode",
+    "object_scale": "--object-scale",
+    "object_pose": "--object-pose",
+    "object_rotation_deg": "--object-rotation-deg",
+    "background_speed": "--background-speed",
+    "ncalc": "--ncalc",
+    "xmax_mm": "--xmax-mm",
+    "circle_radius_mm": "--circle-radius-mm",
+    "atten_bkgnd": "--atten-bkgnd",
+    "sos2atten": "--sos2atten",
+    "y_atten": "--y-atten",
+    "f_tx_mhz": "--f-tx-mhz",
+    "downsample_factor": "--downsample-factor",
+    "backend": "--backend",
+    "binary_path": "--binary-path",
+    "generation_mode": "--generation-mode",
+    "direct_num_workers": "--direct-num-workers",
+    "kwave_data_path": "--kwave-data-path",
+    "kwave_data_name_prefix": "--kwave-data-name-prefix",
+    "output_dir": "--output-dir",
+    "siminfo_path": "--siminfo-path",
+    "scratch_dir": "--scratch-dir",
+    "tx_downsample": "--tx-downsample",
+    "recon_dxi_mm": "--recon-dxi-mm",
+    "c_geom": "--c-geom",
+    "c_init": "--c-init",
+    "sign_conv": "--sign-conv",
+    "a0": "--a0",
+    "l_pml": "--l-pml",
+    "exclude_neighbor_fraction": "--exclude-neighbor-fraction",
+    "perc_outliers": "--perc-outliers",
+    "warm_start_result": "--warm-start-result",
+    "step_damping": "--step-damping",
+    "tof_pre_frac": "--tof-pre-frac",
+    "tof_post_frac": "--tof-post-frac",
+    "filter_cutoff": "--filter-cutoff",
+    "filter_order": "--filter-order",
+    "save_raw_grad_iters": "--save-raw-grad-iters",
+    "max_update_mps": "--max-update-mps",
+    "shared_engine_name": "--shared-engine-name",
+}
+_CLI_SEQUENCE_PARAMS = {
+    "cuda_devices": "--cuda-devices",
+    "sos_freqs_mhz": "--sos-freqs-mhz",
+    "sos_atten_freqs_mhz": "--sos-atten-freqs-mhz",
+    "sos_iters": "--sos-iters",
+    "atten_iters": "--atten-iters",
+    "crange": "--crange",
+    "attenrange": "--attenrange",
+    "velocity_bounds": "--velocity-bounds",
+}
+_CLI_BOOL_FLAGS = {
+    "overwrite": "--overwrite",
+    "keep_kwave_h5": "--keep-kwave-h5",
+    "start_matlab": "--start-matlab",
+    "no_connect_existing": "--no-connect-existing",
+    "skip_inversion": "--skip-inversion",
+    "data_sanity_only": "--data-sanity-only",
+}
+
+
 class KWaveFWIAdapterAlgorithm:
     """Load or launch an external k-Wave frequency-domain FWI run.
 
@@ -62,10 +129,14 @@ class KWaveFWIAdapterAlgorithm:
         sound_speed = _resize_to_shape(external["sound_speed_mps"], case.grid.shape)
         attenuation = _resize_to_shape(external["attenuation_np_per_m"], case.grid.shape) if external.get("attenuation_np_per_m") is not None else None
         c0 = float(config.parameters.get("baseline_sound_speed_mps", case.metadata.get("reference_sound_speed_mps", 1500.0)))
+        log_path = _configured_path(config, "external_log_path")
+        configured_dataset_path = _configured_path(config, "dataset_path")
         metrics: dict[str, Any] = {
             "external_result_loaded": True,
             "external_result_path": str(result_path),
-            "external_dataset_path": external.get("dataset_path") or "",
+            "external_dataset_path": external.get("dataset_path") or (str(configured_dataset_path) if configured_dataset_path else ""),
+            "external_execution_mode": _external_execution_mode(config),
+            "external_log_path": str(log_path) if log_path else "",
             "iterations": int(external.get("iterations", 0)),
             "initial_loss": external.get("initial_loss"),
             "final_loss": external.get("final_loss"),
@@ -94,7 +165,8 @@ class KWaveFWIAdapterAlgorithm:
             metrics=metrics,
             artifacts={
                 "external_result_path": str(result_path),
-                "external_dataset_path": external.get("dataset_path") or "",
+                "external_dataset_path": external.get("dataset_path") or (str(configured_dataset_path) if configured_dataset_path else ""),
+                "external_log_path": str(log_path) if log_path else "",
             },
         )
 
@@ -121,37 +193,19 @@ def read_kwave_fwi_result(path: str | Path) -> dict[str, Any]:
 
 
 def _run_external_pipeline(case: USCTCase, config: AlgorithmConfig, result_path: Path) -> ReconstructionResult:
-    dataset_path = _configured_path(config, "dataset_path")
-    if dataset_path is None:
-        dataset_from_case = case.metadata.get("source_path")
-        dataset_path = Path(str(dataset_from_case)).expanduser() if dataset_from_case else None
-    if dataset_path is None:
+    build = _build_external_pipeline_command(case, config, result_path)
+    if build["error"]:
         return ReconstructionResult(
             algorithm=KWaveFWIAdapterAlgorithm.name,
             case_id=case.case_id,
             status=ResultStatus.SKIPPED,
-            failure_reason="run_external requires parameters.dataset_path or case.metadata.source_path",
+            failure_reason=str(build["error"]),
         )
 
     usct_kwave_root = Path(
-        os.path.expandvars(str(config.parameters.get("usct_kwave_root", os.environ.get("USCT_KWAVE_ROOT", "/home/wudalong/USCT_kwave"))))
+        _expand_text(config.parameters.get("usct_kwave_root", os.environ.get("USCT_KWAVE_ROOT", "/home/wudalong/USCT_kwave")))
     ).expanduser()
-    python_bin = str(config.parameters.get("python_bin", sys.executable))
-    module = str(config.parameters.get("pipeline_module", "openbreastus_diffusion.kwave_dps.run_full_pipeline"))
-    extra_args = [str(value) for value in config.parameters.get("pipeline_args", [])]
-    command = [
-        python_bin,
-        "-m",
-        module,
-        "--skip-siminfo",
-        "--skip-rf",
-        "--skip-assemble",
-        "--dataset-path",
-        str(dataset_path),
-        "--result-path",
-        str(result_path),
-        *extra_args,
-    ]
+    command = list(build["command"])
     env = os.environ.copy()
     env["PYTHONPATH"] = str(usct_kwave_root) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     log_path = _configured_path(config, "external_log_path")
@@ -204,11 +258,80 @@ def _run_external_pipeline(case: USCTCase, config: AlgorithmConfig, result_path:
     return ReconstructionResult(algorithm=KWaveFWIAdapterAlgorithm.name, case_id=case.case_id)
 
 
+def _build_external_pipeline_command(case: USCTCase, config: AlgorithmConfig, result_path: Path) -> dict[str, Any]:
+    mode = _external_execution_mode(config)
+    dataset_path = _configured_path(config, "dataset_path")
+    if mode in _INVERT_EXISTING_DATASET_MODES and dataset_path is None:
+        dataset_from_case = case.metadata.get("source_path")
+        dataset_path = Path(_expand_text(dataset_from_case)).expanduser() if dataset_from_case else None
+    if mode in _INVERT_EXISTING_DATASET_MODES and dataset_path is None:
+        return {
+            "command": [],
+            "dataset_path": None,
+            "mode": mode,
+            "error": "run_external in invert_existing_dataset mode requires parameters.dataset_path or case.metadata.source_path",
+        }
+    if mode not in _INVERT_EXISTING_DATASET_MODES and mode not in _FULL_PIPELINE_MODES:
+        return {
+            "command": [],
+            "dataset_path": dataset_path,
+            "mode": mode,
+            "error": f"unsupported k-Wave external execution_mode: {mode}",
+        }
+
+    python_bin = _expand_text(config.parameters.get("python_bin", sys.executable))
+    module = _expand_text(config.parameters.get("pipeline_module", "openbreastus_diffusion.kwave_dps.run_full_pipeline"))
+    command = [python_bin, "-m", module]
+    if mode in _INVERT_EXISTING_DATASET_MODES:
+        command.extend(["--skip-siminfo", "--skip-rf", "--skip-assemble"])
+
+    if dataset_path is not None:
+        command.extend(["--dataset-path", str(dataset_path)])
+    command.extend(["--result-path", str(result_path)])
+
+    for key, flag in _CLI_PARAMS.items():
+        if key in config.parameters and config.parameters[key] not in (None, ""):
+            command.extend([flag, _expand_text(config.parameters[key])])
+    for key, flag in _CLI_SEQUENCE_PARAMS.items():
+        if key in config.parameters and config.parameters[key] not in (None, ""):
+            values = config.parameters[key]
+            if isinstance(values, (list, tuple)):
+                sequence = values
+            else:
+                sequence = [values]
+            command.append(flag)
+            command.extend(_expand_text(value) for value in sequence)
+    for key, flag in _CLI_BOOL_FLAGS.items():
+        if _as_bool(config.parameters.get(key, False)):
+            command.append(flag)
+
+    command.extend(_expand_text(value) for value in config.parameters.get("pipeline_args", []))
+    return {"command": command, "dataset_path": dataset_path, "mode": mode, "error": None}
+
+
 def _configured_path(config: AlgorithmConfig, key: str) -> Path | None:
     value = config.parameters.get(key)
     if not value:
         return None
-    return Path(os.path.expandvars(str(value))).expanduser()
+    return Path(_expand_text(value)).expanduser()
+
+
+def _external_execution_mode(config: AlgorithmConfig) -> str:
+    return _expand_text(config.parameters.get("execution_mode", "invert_existing_dataset")).strip().lower()
+
+
+def _expand_text(value: Any) -> str:
+    return os.path.expanduser(os.path.expandvars(str(value)))
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _resize_to_shape(image: np.ndarray, shape: tuple[int, int]) -> np.ndarray:

@@ -1,0 +1,27 @@
+name: fwi_kwave_full_pipeline_smoke
+description: One-case A100 k-Wave full-array simulation plus Helmholtz/FWI smoke test.
+case_glob: ${USCT_KWAVE_FWI_SAMPLE_ROOT}/*.h5
+outputs:
+  root: ${USCT_RUN_ROOT}
+run_id: fwi_kwave_full_pipeline_smoke
+algorithms:
+  - name: fwi_kwave_adapter
+    config: configs/algorithms/fwi_kwave_full_pipeline.yaml
+expected_algorithms:
+  - fwi_kwave_adapter
+expected_statuses:
+  - success
+min_cases: 1
+min_records: 1
+require_algorithm_case_matrix: true
+required_metrics:
+  fwi_kwave_adapter:
+    - external_result_loaded
+    - iterations
+    - initial_loss
+    - final_loss
+    - rmse
+    - ssim
+minimums:
+  fwi_kwave_adapter:
+    iterations: 1

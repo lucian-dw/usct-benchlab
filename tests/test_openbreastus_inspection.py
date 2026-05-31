@@ -4,8 +4,10 @@ import json
 
 import h5py
 import numpy as np
+import pytest
 
 from usctbench.data.openbreastus import inspect_openbreastus
+from usctbench.data.conversion import convert_speed_mat_volume, speed_mat_metadata
 from usctbench.data.smoke_subset import make_smoke_subset
 from usctbench.io.hdf5 import read_case_hdf5
 
@@ -106,6 +108,35 @@ def test_make_smoke_subset_converts_speed_mat_volume(tmp_path):
     assert manifest["converted_cases"][0]["has_measured_attenuation"] is False
     assert manifest["converted_cases"][0]["attenuation_evidence"] == "surrogate_zero_log_amp"
     assert manifest["case_capability_summary"]["conversion_mode_counts"]["speed_map_to_straight_ray_surrogate"] == 1
+
+
+def test_convert_speed_mat_volume_accepts_matlab_v5_case_first_volume(tmp_path):
+    scipy_io = pytest.importorskip("scipy.io")
+    mat_path = tmp_path / "breast_test_speed.mat"
+    data = np.zeros((2, 8, 8), dtype=np.float32)
+    data[0] = 1500.0
+    data[1] = 1500.0
+    data[1, 2:6, 2:6] = 1460.0
+    scipy_io.savemat(mat_path, {"breast_test": data})
+
+    metadata = speed_mat_metadata(mat_path)
+    records = convert_speed_mat_volume(
+        mat_path,
+        tmp_path / "cases",
+        indices=[1],
+        dataset_name="breast_test",
+        case_id_prefix="openbreast_test",
+        output_shape=(4, 4),
+        n_transducers=8,
+    )
+
+    assert metadata["mat_format"] == "matlab-v5"
+    assert metadata["sample_axis"] == 0
+    assert records[0]["case_id"] == "openbreast_test_000001"
+    loaded = read_case_hdf5(records[0]["path"])
+    assert loaded.grid.shape == (4, 4)
+    assert loaded.metadata["source_index"] == 1
+    assert float(np.min(loaded.ground_truth.sound_speed_mps)) < 1500.0
 
 
 def test_make_smoke_subset_prefers_and_converts_kwave_channel_mat(tmp_path):
