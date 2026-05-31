@@ -177,6 +177,32 @@ def test_make_quality_subset_marks_quality_role(tmp_path):
     assert len(manifest["converted_cases"]) == 1
 
 
+def test_make_quality_subset_uses_four_class_openbreastus_speed_volume(tmp_path):
+    root = tmp_path / "openbreastus"
+    root.mkdir()
+    mat_path = root / "breast_train_speed.mat"
+    with h5py.File(mat_path, "w") as handle:
+        data = np.zeros((8, 8, 16), dtype=np.float32)
+        for class_idx, value in enumerate((1460.0, 1480.0, 1520.0, 1540.0)):
+            data[:, :, class_idx * 4 : (class_idx + 1) * 4] = value
+        handle.create_dataset("breast_train", data=data)
+    _write_kwave_channel_mat(root / "a_kwave_train_0001.mat")
+
+    out = tmp_path / "quality"
+    manifest = make_quality_subset(root, out, cases_per_density=1, converted_shape=(4, 4), n_transducers=6)
+
+    converted = manifest["converted_cases"]
+    assert len(converted) == 4
+    assert [record["source_index"] for record in converted] == [0, 4, 8, 12]
+    assert [record["openbreastus_class_id"] for record in converted] == [1, 2, 3, 4]
+    assert all(record["density_class"].startswith("openbreastus_class_") for record in converted)
+    assert [case["case_id"] for case in manifest["cases"]] == ["breast_train_speed"]
+    loaded = read_case_hdf5(out / "cases" / "breast_train_speed_class_3_000008.h5")
+    assert loaded.metadata["openbreastus_class_id"] == 3
+    assert loaded.metadata["density_class"] == "openbreastus_class_3"
+    assert loaded.metadata["openbreastus_class_source"] == "canonical_train_speed_volume_ranges"
+
+
 def test_make_smoke_subset_prefers_and_converts_kwave_channel_mat(tmp_path):
     root = tmp_path / "openbreastus"
     root.mkdir()

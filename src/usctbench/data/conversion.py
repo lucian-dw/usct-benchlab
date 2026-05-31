@@ -32,6 +32,7 @@ def convert_speed_mat_volume(
     out_dir: str | Path,
     *,
     indices: list[int] | None = None,
+    index_metadata: dict[int, dict[str, Any]] | None = None,
     dataset_name: str | None = None,
     case_id_prefix: str | None = None,
     output_shape: tuple[int, int] = (64, 64),
@@ -66,9 +67,12 @@ def convert_speed_mat_volume(
         for index in selected_indices:
             if index < 0 or index >= case_count:
                 raise IndexError(f"case index {index} outside dataset shape {shape}")
+            extra_metadata = dict((index_metadata or {}).get(index, {}))
             sound_speed = np.asarray(_read_speed_volume_slice(dataset, index, sample_axis), dtype=float)
             sound_speed = _downsample_mean(sound_speed, output_shape)
-            case_id = f"{case_id_prefix or source.stem}_{index:06d}"
+            case_id_suffix = extra_metadata.pop("case_id_suffix", None)
+            prefix = case_id_prefix or source.stem
+            case_id = f"{prefix}_{case_id_suffix}" if case_id_suffix else f"{prefix}_{index:06d}"
             case = _speed_array_to_case(
                 sound_speed,
                 case_id=case_id,
@@ -80,25 +84,28 @@ def convert_speed_mat_volume(
                 n_transducers=n_transducers,
                 reference_sound_speed_mps=reference_sound_speed_mps,
             )
+            if extra_metadata:
+                case = case.model_copy(update={"metadata": {**case.metadata, **extra_metadata}})
             case_path = out_path / f"{case_id}.h5"
             write_case_hdf5(case, case_path)
-            records.append(
-                {
-                    "case_id": case_id,
-                    "path": str(case_path),
-                    "source_path": str(source),
-                    "source_dataset": name,
-                    "source_index": index,
-                    "shape": list(sound_speed.shape),
-                    "conversion": case.metadata["conversion"],
-                    "case_type": case.metadata["case_type"],
-                    "benchmark_type": case.metadata["benchmark_type"],
-                    "feature_provenance": case.metadata["feature_provenance"],
-                    "measurement_limitations": case.metadata["measurement_limitations"],
-                    "has_measured_attenuation": False,
-                    "attenuation_evidence": "surrogate_zero_log_amp",
-                }
-            )
+            record = {
+                "case_id": case_id,
+                "path": str(case_path),
+                "source_path": str(source),
+                "source_dataset": name,
+                "source_index": index,
+                "shape": list(sound_speed.shape),
+                "conversion": case.metadata["conversion"],
+                "case_type": case.metadata["case_type"],
+                "benchmark_type": case.metadata["benchmark_type"],
+                "feature_provenance": case.metadata["feature_provenance"],
+                "measurement_limitations": case.metadata["measurement_limitations"],
+                "has_measured_attenuation": False,
+                "attenuation_evidence": "surrogate_zero_log_amp",
+            }
+            if extra_metadata:
+                record.update(extra_metadata)
+            records.append(record)
     return records
 
 

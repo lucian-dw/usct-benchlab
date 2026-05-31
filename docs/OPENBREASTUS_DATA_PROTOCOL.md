@@ -99,6 +99,15 @@ rather than center-cropping 480x480 maps down to 256x256. The benchmark remains
 `openbreastus_speedmap_surrogate` unless the case metadata explicitly says
 `openbreastus_wavefield`; it should not be described as measured RF inversion.
 
+For canonical OpenBreastUS speed-map volumes such as `breast_train_speed.mat`,
+the quality converter treats the 3-D volume as four contiguous class blocks
+when no explicit per-sample labels are present. With the current A100
+`breast_train: shape=(480, 480, 7200)` mirror, `--cases-per-density 1` selects
+source indices `0`, `1800`, `3600`, and `5400`, and records
+`openbreastus_class_id` plus `density_class=openbreastus_class_<id>` in each
+converted case. This keeps quality panels class-balanced while preserving the
+speed-map-surrogate limitation.
+
 Converted k-Wave cases must include provenance metadata:
 
 - `conversion: kwave_channel_mat_to_feature_case`
