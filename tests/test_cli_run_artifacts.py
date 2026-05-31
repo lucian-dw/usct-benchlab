@@ -38,6 +38,24 @@ def test_cli_run_writes_standard_artifacts(tmp_path):
     assert "ring_artifact_index" in metrics
 
 
+def test_cli_run_success_removes_stale_failure_report(tmp_path):
+    case_path = write_case_hdf5(make_sound_speed_case(shape=(12, 12), n_transducers=16), tmp_path / "case.h5")
+    config_path = tmp_path / "straight_cgls.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"parameters": {"iterations": 8, "reference_sound_speed_mps": 1500.0}}),
+        encoding="utf-8",
+    )
+    out = tmp_path / "runs"
+    case_dir = out / "synthetic_circular_sos"
+    case_dir.mkdir(parents=True)
+    (case_dir / "failure_report.md").write_text("# stale failure\n", encoding="utf-8")
+
+    exit_code = main(["run", "straight_cgls", "--case", str(case_path), "--config", str(config_path), "--out", str(out)])
+
+    assert exit_code == 0
+    assert not (case_dir / "failure_report.md").exists()
+
+
 def test_cli_run_failure_writes_failure_report(tmp_path):
     case_path = write_case_hdf5(make_attenuation_case(shape=(8, 8), n_transducers=10), tmp_path / "case.h5")
     config_path = tmp_path / "straight_cgls.yaml"

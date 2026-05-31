@@ -225,6 +225,10 @@ def _write_result_artifacts(
             likely_causes=["schema mismatch", "data/geometry mismatch", "numerical instability"],
             actions=["inspect case metadata", "inspect sinogram/features", "lower relaxation or iterations"],
         )
+    else:
+        stale_failure_report = out_dir / "failure_report.md"
+        if stale_failure_report.exists():
+            stale_failure_report.unlink()
 
 
 def _write_straight_ray_diagnostics(result: ReconstructionResult, case: USCTCase | None, out_dir: Path) -> None:
