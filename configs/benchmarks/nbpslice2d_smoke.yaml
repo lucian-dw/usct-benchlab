@@ -7,12 +7,16 @@ algorithms:
     config: configs/algorithms/straight_sirt.yaml
   - name: straight_cgls
     config: configs/algorithms/straight_cgls.yaml
+  - name: bent_ray_gn
+    config: configs/algorithms/bent_ray_gn.yaml
+  - name: rwave_adapter
+    config: configs/algorithms/rwave_adapter.yaml
   - name: attenuation_sirt
     config: configs/algorithms/attenuation_sirt.yaml
 outputs:
   root: ${USCT_NBP_RUN_ROOT}
 min_cases: 1
-min_records: 4
+min_records: 6
 expected_statuses:
   - success
 require_algorithm_case_matrix: true
@@ -35,6 +39,18 @@ required_metrics:
     - data_residual_reduction
     - rmse
     - water_relative_rmse_improvement
+  bent_ray_gn:
+    - data_residual_norm
+    - data_relative_residual
+    - data_residual_reduction
+    - rmse
+    - water_relative_rmse_improvement
+  rwave_adapter:
+    - data_residual_norm
+    - data_relative_residual
+    - data_residual_reduction
+    - rmse
+    - water_relative_rmse_improvement
   attenuation_sirt:
     - data_residual_norm
     - data_relative_residual
@@ -50,6 +66,12 @@ thresholds:
   straight_cgls:
     rmse: 150.0
     data_relative_residual: 0.8
+  bent_ray_gn:
+    rmse: 170.0
+    data_relative_residual: 0.9
+  rwave_adapter:
+    rmse: 170.0
+    data_relative_residual: 0.9
   attenuation_sirt:
     data_relative_residual: 0.9
 minimums:
@@ -59,6 +81,10 @@ minimums:
     data_residual_reduction: 0.2
   straight_cgls:
     data_residual_reduction: 0.2
+  bent_ray_gn:
+    data_residual_reduction: 0.1
+  rwave_adapter:
+    data_residual_reduction: 0.1
   attenuation_sirt:
     attenuation_input_signal_norm: 1.0e-12
     data_residual_reduction: 0.1

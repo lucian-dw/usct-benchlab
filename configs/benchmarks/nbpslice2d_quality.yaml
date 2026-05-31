@@ -7,10 +7,14 @@ algorithms:
     config: configs/algorithms/straight_sirt.yaml
   - name: straight_sart
     config: configs/algorithms/straight_sart.yaml
+  - name: bent_ray_gn
+    config: configs/algorithms/bent_ray_gn.yaml
+  - name: rwave_adapter
+    config: configs/algorithms/rwave_adapter.yaml
 outputs:
   root: ${USCT_NBP_QUALITY_RUN_ROOT}
 min_cases: 1
-min_records: 3
+min_records: 5
 expected_statuses:
   - success
 require_algorithm_case_matrix: true

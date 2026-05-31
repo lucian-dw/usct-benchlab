@@ -12,18 +12,17 @@ def register_adapter_algorithms(*, replace: bool = False) -> None:
     register_algorithm(
         "bent_ray_gn",
         BentRayGNAdapter,
-        description="Optional MATLAB refraction-corrected Gauss-Newton adapter.",
-        tags=("adapter", "matlab", "refraction"),
+        description="Refraction-corrected travel-time GN adapter with native smoke backend and optional MATLAB path.",
+        tags=("adapter", "travel-time", "refraction"),
         replace=replace,
     )
     register_algorithm(
         "rwave_adapter",
         RWaveAdapter,
-        description="Optional MATLAB ray-Born/r-Wave adapter.",
-        tags=("adapter", "matlab", "ray-born"),
+        description="Ray-Born/r-Wave adapter with native smoke backend and optional MATLAB path.",
+        tags=("adapter", "ray-born", "rwave"),
         replace=replace,
     )
 
 
 __all__ = ["BentRayGNAdapter", "RWaveAdapter", "register_adapter_algorithms"]
-

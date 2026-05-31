@@ -14,7 +14,7 @@ import numpy as np
 from usctbench.io.hdf5 import read_case_hdf5, read_result_hdf5
 
 
-DEFAULT_SOUND_SPEED_ALGORITHMS = ["straight_cgls", "straight_sirt", "straight_sart"]
+DEFAULT_SOUND_SPEED_ALGORITHMS = ["straight_cgls", "straight_sirt", "straight_sart", "bent_ray_gn", "rwave_adapter"]
 
 
 def main() -> int:

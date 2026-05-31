@@ -2,37 +2,44 @@
 
 ## Physical Assumption
 
-This optional adapter targets weak-scattering ray-Born or Rytov-style reconstruction through an external MATLAB implementation. It is a bridge between ray methods and full-wave inversion, not a generative model.
+This adapter targets weak-scattering ray-Born or r-Wave style reconstruction. In v0.1 the default backend is a project-native regularized ray-Born surrogate over the benchmark travel-time features. It is a bridge between ray methods and full-wave inversion, not a generative model. The optional MATLAB path remains available for external r-Wave/ray-Born code, but third-party code is not vendored.
 
 ## Input Requirements
 
-- Standard `USCTCase`
-- MATLAB available through `MATLAB_BIN` or `parameters.matlab_bin`
-- External r-Wave/ray-Born source installed outside Git
-- Configured `parameters.external_root` and `parameters.entrypoint`
+- Standard `USCTCase` with `measurement.delta_tof_s`
+- Ring geometry and grid metadata compatible with the straight-ray projector
+- Optional MATLAB path: MATLAB available through `MATLAB_BIN` or `parameters.matlab_bin`, external r-Wave/ray-Born source installed outside Git, and configured `parameters.external_root` plus `parameters.entrypoint`
 
 ## Default Settings
 
-The default config is intentionally non-executing. It returns `skipped` until MATLAB and the external entrypoint are explicitly configured.
+- `backend: python`
+- Outer ray-Born-style residual iterations: `3`
+- Inner CGLS iterations: `20`
+- Regularization: Laplacian, `regularization_lambda=1.0e-5`
+- Smoothing: `smooth_sigma=0.35`
+- Bounds: `[1300, 1700] m/s`
+- Set `backend: matlab` or provide MATLAB-specific parameters to run the external dependency-checking path.
 
 ## Expected Failure Modes
 
-- MATLAB unavailable.
+- MATLAB unavailable when the MATLAB backend is requested.
 - External code missing or incompatible with the local case geometry.
 - Phase convention or reference-field alignment mismatch.
 - Low-SNR receivers corrupting weak-scattering assumptions.
+- Native smoke backend inherits the straight-ray feature approximation and does not model full complex RF scattering.
 
 ## What To Adjust First
 
-1. Use lower frequency and a better background model.
-2. Reject low-SNR receivers.
-3. Check complex phase convention and reference alignment.
+1. Verify the travel-time sign and background speed.
+2. Increase `regularization_lambda` if high-frequency ring artifacts dominate.
+3. Reduce `smooth_sigma` if small inclusions disappear.
 4. Validate the external package license before vendoring anything.
 
 ## Acceptance Tests
 
 - Adapter is registered by `usct list-algorithms`.
-- Missing MATLAB or missing entrypoint returns `skipped`, not a crash.
+- Native backend returns `success` with standard `sound_speed_mps`, image metrics, residual metrics, coverage metrics, and preview artifacts.
+- Missing MATLAB or missing entrypoint returns `skipped`, not a crash, when the MATLAB backend is explicitly requested.
 - CLI writes the standard failure report for skipped adapter runs.
 
 ## References and Related Code
@@ -41,3 +48,4 @@ The default config is intentionally non-executing. It returns `skipped` until MA
 - MATLAB wrapper utilities: `src/usctbench/adapters/matlab.py`
 - Tests: `tests/test_matlab_adapters.py`
 - External source policy and candidate code: `docs/EXTERNAL_SOURCES_AND_LICENSES.md`
+- Public reference: `https://github.com/Ash1362/ray-based-quantitative-ultrasound-tomography`

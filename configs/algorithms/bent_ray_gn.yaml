@@ -1,7 +1,20 @@
 name: bent_ray_gn
 parameters:
+  backend: python
+  outer_iterations: 4
+  inner_iterations: 16
+  step_length: 1.0
+  regularization: laplacian
+  regularization_lambda: 3.0e-5
+  smooth_sigma: 0.6
+  roi_update_only: false
+  reference_sound_speed_mps: 1500.0
+  sound_speed_bounds_mps: [1300.0, 1700.0]
   matlab_bin: null
   external_root: null
   entrypoint: null
   timeout_s: 300
-
+metadata:
+  default_backend: project-native regularized travel-time GN surrogate.
+  external_reference: rehmanali1994/refractionCorrectedUSCT.github.io
+  v0_1_scope: smoke/quality benchmark path; full MATLAB marshaling remains optional.

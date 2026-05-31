@@ -232,7 +232,8 @@ def _write_result_artifacts(
 
 
 def _write_straight_ray_diagnostics(result: ReconstructionResult, case: USCTCase | None, out_dir: Path) -> None:
-    if case is None or not str(result.algorithm).startswith("straight_"):
+    ray_diagnostic_algorithms = {"bent_ray_gn", "rwave_adapter"}
+    if case is None or (not str(result.algorithm).startswith("straight_") and str(result.algorithm) not in ray_diagnostic_algorithms):
         return
     try:
         from usctbench.algorithms.ray._common import valid_ray_mask

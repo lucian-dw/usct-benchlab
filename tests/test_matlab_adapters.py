@@ -10,6 +10,28 @@ from usctbench.io.hdf5 import write_case_hdf5
 from usctbench.schema import AlgorithmConfig
 
 
+def test_adapter_native_backends_reconstruct_sound_speed():
+    case = make_sound_speed_case(shape=(12, 12), n_transducers=16)
+    config = AlgorithmConfig(
+        parameters={
+            "backend": "python",
+            "outer_iterations": 2,
+            "inner_iterations": 6,
+            "regularization": "laplacian",
+            "regularization_lambda": 1.0e-5,
+            "smooth_sigma": 0.0,
+        }
+    )
+
+    for adapter in (BentRayGNAdapter(), RWaveAdapter()):
+        result = adapter.run(case, config)
+        assert result.status == "success"
+        assert result.sound_speed_mps.shape == case.grid.shape
+        assert result.metrics["data_residual_reduction"] > 0.0
+        assert result.metrics["rmse"] < 100.0
+        assert result.metrics["method_family"]
+
+
 def test_matlab_adapters_skip_without_matlab():
     case = make_sound_speed_case(shape=(8, 8), n_transducers=10)
     config = AlgorithmConfig(parameters={"matlab_bin": "/definitely/missing/matlab"})
