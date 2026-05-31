@@ -157,6 +157,11 @@ def test_v01_audit_accepts_quality_evidence_bundle(tmp_path):
             ["straight_cgls", "straight_sirt", "straight_sart", "bent_ray_gn", "rwave_adapter"] * 4,
             True,
         ),
+        "external_matlab_adapter_quality_20260531T221421Z": (
+            "comparison_artifacts/external_matlab_quality_256_4class_gray",
+            ["bent_ray_gn", "rwave_adapter"] * 4,
+            True,
+        ),
         "fwi_kwave_success201_reingest_63ec1e5": (
             "fwi_kwave_adapter/openbreast_test201_kwave_full_000200/kwave_smoke_outputs/contact_sheet",
             [],

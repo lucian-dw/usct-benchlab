@@ -171,6 +171,21 @@ QUALITY_EVIDENCE_SPECS = [
         "min_summary_rows": 20,
     },
     {
+        "name": "external_matlab_adapter_quality_256",
+        "run_dir": "external_matlab_adapter_quality_20260531T221421Z",
+        "run_checks": "benchmark_run_checks.json",
+        "summary_csv": "comparison_artifacts/external_matlab_quality_256_4class_gray.summary.csv",
+        "files": [
+            "benchmark_summary.csv",
+            "benchmark_report.md",
+            "benchmark_run_checks.json",
+            "comparison_artifacts/external_matlab_quality_256_4class_gray.png",
+            "comparison_artifacts/external_matlab_quality_256_4class_gray.summary.csv",
+        ],
+        "expected_algorithms": ["bent_ray_gn", "rwave_adapter"],
+        "min_summary_rows": 8,
+    },
+    {
         "name": "fwi_kwave_reingest",
         "run_dir": "fwi_kwave_success201_reingest_63ec1e5",
         "run_checks": "benchmark_run_checks.json",
