@@ -325,9 +325,13 @@ def _external_datasets_to_case(
     water_data = _read_external_kwave_dataset(water_dataset)
     time_axis = np.asarray(object_data["time_axis_s"], dtype=float)
     time_data = np.asarray(object_data["time_data"], dtype=float)
-    water_reference = np.asarray(water_data["time_data"], dtype=float)
+    water_reference = _resample_time_data_to_axis(
+        np.asarray(water_data["time_data"], dtype=float),
+        np.asarray(water_data["time_axis_s"], dtype=float),
+        time_axis,
+    )
     if time_data.shape != water_reference.shape:
-        raise ValueError(f"object/water k-Wave dataset shape mismatch: {time_data.shape} vs {water_reference.shape}")
+        raise ValueError(f"object/water k-Wave dataset shape mismatch after resampling: {time_data.shape} vs {water_reference.shape}")
     frequencies_hz = np.asarray(simulation.get("frequencies_hz", [150_000.0, 250_000.0, 350_000.0, 450_000.0]), dtype=float)
     freq_data = frequency_response_from_time(time_data, time_axis, frequencies_hz)
     source_wavelet = _read_source_wavelet(object_siminfo)
@@ -365,6 +369,8 @@ def _external_datasets_to_case(
         "frequencies_hz": [float(value) for value in frequencies_hz.tolist()],
         "external_paths": {key: str(path) for key, path in paths.items()},
         "dataset_metadata": object_data["metadata"],
+        "water_time_axis_original_length": int(np.asarray(water_data["time_axis_s"]).size),
+        "object_time_axis_length": int(time_axis.size),
     }
     metadata = stamp_measurement_metadata(
         property_case.metadata,
@@ -558,6 +564,32 @@ def _as_tx_rx_time(data: np.ndarray, n_time: int, n_rx: int, n_tx: int) -> np.nd
     if array.shape == (n_rx, n_tx, n_time):
         return np.transpose(array, (1, 0, 2))
     raise ValueError(f"full_dataset shape {array.shape} does not match n_time={n_time}, n_rx={n_rx}, n_tx={n_tx}")
+
+
+def _resample_time_data_to_axis(data: np.ndarray, source_axis: np.ndarray, target_axis: np.ndarray) -> np.ndarray:
+    source = np.asarray(source_axis, dtype=float).reshape(-1)
+    target = np.asarray(target_axis, dtype=float).reshape(-1)
+    values = np.asarray(data, dtype=np.float32)
+    if source.size == target.size and np.allclose(source, target, rtol=1.0e-6, atol=1.0e-12):
+        return values
+    if source.size < 2 or target.size < 2:
+        raise ValueError("cannot resample k-Wave reference with fewer than two time samples")
+    source_dt = float(np.median(np.diff(source)))
+    target_dt = float(np.median(np.diff(target)))
+    if np.isclose(source_dt, target_dt, rtol=1.0e-4, atol=1.0e-12) and target[0] >= source[0] - 1.0e-12:
+        out = np.zeros(values.shape[:2] + (target.size,), dtype=np.float32)
+        offset = int(round((source[0] - target[0]) / target_dt))
+        start_target = max(0, offset)
+        start_source = max(0, -offset)
+        count = min(values.shape[-1] - start_source, target.size - start_target)
+        if count > 0:
+            out[..., start_target : start_target + count] = values[..., start_source : start_source + count]
+        return out
+    flat = values.reshape((-1, values.shape[-1]))
+    out_flat = np.zeros((flat.shape[0], target.size), dtype=np.float32)
+    for row, trace in enumerate(flat):
+        out_flat[row] = np.interp(target, source, trace, left=0.0, right=0.0).astype(np.float32)
+    return out_flat.reshape(values.shape[:2] + (target.size,))
 
 
 def _read_indices(dataset: Any, default_count: int) -> np.ndarray:
