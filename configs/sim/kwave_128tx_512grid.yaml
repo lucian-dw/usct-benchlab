@@ -33,6 +33,8 @@ simulation:
   generation_mode: direct
   direct_num_workers: 1
   kwave_data_path: auto
+  kwave_data_name_prefix: ${USCT_KWAVE_DATA_NAME_PREFIX:-real_4class}
+  cuda_devices: [2]
   overwrite: false
   start_matlab: true
   no_connect_existing: true
