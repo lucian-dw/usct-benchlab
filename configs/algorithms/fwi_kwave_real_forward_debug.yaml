@@ -63,7 +63,7 @@ parameters:
     - --update-scale
     - "-1"
     - --compare-gt
-  reconstruction_iteration: ${USCT_KWAVE_RECONSTRUCTION_ITERATION:-best}
+  reconstruction_iteration: ${USCT_KWAVE_RECONSTRUCTION_ITERATION:-final}
   overwrite: true
   start_matlab: true
   no_connect_existing: true
