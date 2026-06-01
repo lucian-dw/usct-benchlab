@@ -9,7 +9,8 @@ parameters:
   pipeline_module: openbreastus_diffusion.kwave_dps.run_full_pipeline
   dataset_path: ${USCT_KWAVE_DATASET_PATH}
   external_log_path: ${USCT_KWAVE_EXTERNAL_LOG_PATH}
-  warm_start_builder: traveltime
+  warm_start_builder: ${USCT_KWAVE_WARM_START_BUILDER:-}
+  warm_start_result: ${USCT_KWAVE_WARM_START_PATH}
   warm_start_path: ${USCT_KWAVE_WARM_START_PATH}
   warm_start_summary_path: ${USCT_KWAVE_WARM_START_SUMMARY_PATH}
   warm_start_diagnostic_prefix: ${USCT_KWAVE_WARM_START_DIAGNOSTIC_PREFIX}
@@ -94,4 +95,5 @@ metadata:
   purpose: one-case real k-Wave debug inversion from an existing forward-only dataset.
   data_sanity_only: false
   input_contract: uses the same external object_dataset.mat standardized into the wavefield case.
+  default_warm_start: smoothed bent_ray_gn result exported as an external warm_start_result MAT.
   v0_1_scope: low-frequency sound-speed debug only; no diffusion or generative priors.
