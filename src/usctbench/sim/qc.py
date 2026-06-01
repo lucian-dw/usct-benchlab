@@ -62,15 +62,22 @@ def simulation_qc_metrics(case: USCTCase) -> dict[str, Any]:
     wavelength_min = c_min / effective_max_frequency if effective_max_frequency > 0 else float("inf")
     points_per_wavelength = wavelength_min / spacing_min if spacing_min > 0 else 0.0
     cfl = c_max * dt / spacing_min / np.sqrt(2.0) if spacing_min > 0 else float("inf")
+    valid_trace_mask = _valid_trace_mask(case)
     energy = np.nansum(time_data**2, axis=-1)
-    finite_energy = energy[np.isfinite(energy) & (energy > 0.0)]
+    finite_energy = energy[valid_trace_mask & np.isfinite(energy) & (energy > 0.0)]
     median_energy = float(np.median(finite_energy)) if finite_energy.size else 0.0
-    bad_receiver = ~np.isfinite(energy) | (energy <= max(1.0e-18, median_energy * 1.0e-8))
+    bad_receiver = (~np.isfinite(energy) | (energy <= max(1.0e-18, median_energy * 1.0e-8))) & valid_trace_mask
+    valid_trace_count = int(np.sum(valid_trace_mask))
+    bad_receiver_fraction = float(np.sum(bad_receiver) / valid_trace_count) if valid_trace_count else 1.0
     water_tof, water_valid = peak_tof(water, time_axis)
+    water_valid = water_valid & valid_trace_mask
     water_geometry_tof = _pairwise_distance(case) / float(simulation.get("reference_sound_speed_mps", case.metadata.get("reference_sound_speed_mps", 1500.0)))
-    water_tof_rmse = _rmse(water_tof, water_geometry_tof, water_valid)
-    reciprocity = _reciprocity_error(time_data)
-    boundary_fraction = _boundary_energy_fraction(time_data)
+    water_tof_raw_rmse = _rmse(water_tof, water_geometry_tof, water_valid)
+    water_tof_bias = _median_error(water_tof, water_geometry_tof, water_valid)
+    water_tof_aligned = water_tof - (water_tof_bias if np.isfinite(water_tof_bias) else 0.0)
+    water_tof_rmse = _rmse(water_tof_aligned, water_geometry_tof, water_valid)
+    reciprocity = _reciprocity_error(time_data, valid_trace_mask)
+    boundary_fraction = _boundary_energy_fraction(time_data, valid_trace_mask)
     feature_payload = extract_wavefield_features(case, method="all")[1]
     source_bandwidth = _source_bandwidth(case)
     nan_inf = int(np.sum(~np.isfinite(time_data)) + np.sum(~np.isfinite(water)))
@@ -85,9 +92,12 @@ def simulation_qc_metrics(case: USCTCase) -> dict[str, Any]:
         "receiver_signal_energy_min": float(np.min(finite_energy)) if finite_energy.size else 0.0,
         "receiver_signal_energy_median": float(median_energy),
         "receiver_signal_energy_max": float(np.max(finite_energy)) if finite_energy.size else 0.0,
-        "bad_receiver_fraction": float(np.mean(bad_receiver)) if bad_receiver.size else 1.0,
+        "bad_receiver_fraction": bad_receiver_fraction,
+        "excluded_receiver_fraction": float(1.0 - np.mean(valid_trace_mask)) if valid_trace_mask.size else 1.0,
         "reciprocity_error": float(reciprocity),
         "water_tof_rmse_vs_geometry": float(water_tof_rmse),
+        "water_tof_raw_rmse_vs_geometry": float(water_tof_raw_rmse),
+        "water_tof_bias_s": float(water_tof_bias),
         "phase_unwrap_failure_fraction": float(feature_payload.get("phase_unwrap_failure_fraction", 1.0)),
         "tof_valid_fraction": float(feature_payload.get("tof_valid_fraction", 0.0)),
         "amplitude_dynamic_range_db": float(dynamic_range_db),
@@ -139,13 +149,14 @@ def _qc_pass_fail(metrics: dict[str, Any], case: USCTCase) -> tuple[bool, list[s
 
 def _write_qc_artifacts(case: USCTCase, out_dir: Path, metrics: dict[str, Any]) -> None:
     time_data = np.asarray(case.measurement.time_data, dtype=float)
+    valid_trace_mask = _valid_trace_mask(case)
     source = np.asarray(case.measurement.source_wavelet, dtype=float) if case.measurement.source_wavelet is not None else np.zeros(time_data.shape[-1])
     write_preview_png(np.nanmax(np.abs(time_data), axis=-1), out_dir / "wavefield_preview.png")
     write_preview_png(_spectrum_image(source, case.measurement.time_axis_s), out_dir / "source_spectrum.png")
-    write_preview_png(_hist_image(np.nansum(time_data**2, axis=-1).reshape(-1)), out_dir / "receiver_energy_hist.png")
+    write_preview_png(_hist_image(np.nansum(time_data**2, axis=-1)[valid_trace_mask].reshape(-1)), out_dir / "receiver_energy_hist.png")
     write_preview_png(np.asarray([[metrics["water_tof_rmse_vs_geometry"]]], dtype=float), out_dir / "water_tof_error.png")
-    write_preview_png(_reciprocity_image(time_data), out_dir / "reciprocity_error.png")
-    write_preview_png(_boundary_energy_map(time_data), out_dir / "boundary_energy.png")
+    write_preview_png(_reciprocity_image(time_data, valid_trace_mask), out_dir / "reciprocity_error.png")
+    write_preview_png(_boundary_energy_map(time_data, valid_trace_mask), out_dir / "boundary_energy.png")
     try:
         feature_case, _ = extract_wavefield_features(case)
         if feature_case.measurement.feature_quality is not None:
@@ -240,34 +251,76 @@ def _rmse(a: np.ndarray, b: np.ndarray, mask: np.ndarray) -> float:
     return float(np.sqrt(np.mean(diff**2)))
 
 
-def _reciprocity_error(time_data: np.ndarray) -> float:
+def _median_error(a: np.ndarray, b: np.ndarray, mask: np.ndarray) -> float:
+    finite = np.asarray(mask, dtype=bool) & np.isfinite(a) & np.isfinite(b)
+    if not np.any(finite):
+        return float("nan")
+    diff = np.asarray(a, dtype=float)[finite] - np.asarray(b, dtype=float)[finite]
+    return float(np.median(diff))
+
+
+def _valid_trace_mask(case: USCTCase) -> np.ndarray:
+    if case.measurement.time_data is None:
+        shape = (case.geometry.tx_pos_m.shape[0], case.geometry.rx_pos_m.shape[0])
+    else:
+        shape = tuple(np.asarray(case.measurement.time_data).shape[:2])
+    mask = np.ones(shape, dtype=bool)
+    if case.measurement.valid_mask is not None:
+        configured = np.asarray(case.measurement.valid_mask, dtype=bool)
+        if configured.shape == shape:
+            mask &= configured
+    if shape[0] == shape[1]:
+        mask &= ~np.eye(shape[0], dtype=bool)
+    return mask
+
+
+def _reciprocity_error(time_data: np.ndarray, trace_mask: np.ndarray | None = None) -> float:
     if time_data.shape[0] != time_data.shape[1]:
         return 0.0
-    diff = time_data - np.swapaxes(time_data, 0, 1)
-    denom = float(np.linalg.norm(time_data))
+    if trace_mask is not None:
+        mask = np.asarray(trace_mask, dtype=bool)
+        pair_mask = mask & mask.T
+        if not np.any(pair_mask):
+            return 1.0
+        diff = (time_data - np.swapaxes(time_data, 0, 1))[pair_mask]
+        denom_values = time_data[pair_mask]
+    else:
+        diff = time_data - np.swapaxes(time_data, 0, 1)
+        denom_values = time_data
+    denom = float(np.linalg.norm(denom_values))
     return float(np.linalg.norm(diff) / denom) if denom > 0.0 else 0.0
 
 
-def _reciprocity_image(time_data: np.ndarray) -> np.ndarray:
+def _reciprocity_image(time_data: np.ndarray, trace_mask: np.ndarray | None = None) -> np.ndarray:
     if time_data.shape[0] != time_data.shape[1]:
         return np.zeros(time_data.shape[:2], dtype=float)
-    return np.sqrt(np.nanmean((time_data - np.swapaxes(time_data, 0, 1)) ** 2, axis=-1))
+    image = np.sqrt(np.nanmean((time_data - np.swapaxes(time_data, 0, 1)) ** 2, axis=-1))
+    if trace_mask is not None:
+        image = np.where(np.asarray(trace_mask, dtype=bool), image, 0.0)
+    return image
 
 
-def _boundary_energy_fraction(time_data: np.ndarray) -> float:
+def _boundary_energy_fraction(time_data: np.ndarray, trace_mask: np.ndarray | None = None) -> float:
     n = time_data.shape[-1]
     width = max(1, n // 10)
-    boundary = np.nansum(time_data[..., :width] ** 2) + np.nansum(time_data[..., -width:] ** 2)
-    total = np.nansum(time_data**2)
+    traces = np.asarray(time_data, dtype=float)
+    if trace_mask is not None:
+        mask = np.asarray(trace_mask, dtype=bool)
+        traces = traces[mask]
+    boundary = np.nansum(traces[..., :width] ** 2) + np.nansum(traces[..., -width:] ** 2)
+    total = np.nansum(traces**2)
     return float(boundary / total) if total > 0.0 else 1.0
 
 
-def _boundary_energy_map(time_data: np.ndarray) -> np.ndarray:
+def _boundary_energy_map(time_data: np.ndarray, trace_mask: np.ndarray | None = None) -> np.ndarray:
     n = time_data.shape[-1]
     width = max(1, n // 10)
     boundary = np.nansum(time_data[..., :width] ** 2, axis=-1) + np.nansum(time_data[..., -width:] ** 2, axis=-1)
     total = np.nansum(time_data**2, axis=-1)
-    return np.divide(boundary, total, out=np.zeros_like(boundary), where=total > 0.0)
+    image = np.divide(boundary, total, out=np.zeros_like(boundary), where=total > 0.0)
+    if trace_mask is not None:
+        image = np.where(np.asarray(trace_mask, dtype=bool), image, 0.0)
+    return image
 
 
 def _dynamic_range_db(energy: np.ndarray) -> float:

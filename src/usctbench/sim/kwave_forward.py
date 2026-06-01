@@ -239,6 +239,7 @@ def _load_or_make_property_case(config: dict[str, Any]) -> USCTCase:
         n_transducers=n_transducers,
         background_mps=float(case_config.get("background_mps", 1500.0)),
         inclusion_mps=float(case_config.get("inclusion_mps", 1450.0)),
+        inclusion_radius_m=float(case_config.get("inclusion_radius_m", 0.006)),
     )
     attenuation = circular_attenuation(
         case.grid,

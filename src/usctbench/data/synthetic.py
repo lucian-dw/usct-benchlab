@@ -86,12 +86,20 @@ def make_sound_speed_case(
     n_transducers: int = 32,
     background_mps: float = 1500.0,
     inclusion_mps: float = 1450.0,
+    inclusion_radius_m: float = 0.006,
+    inclusion_center_m: tuple[float, float] = (0.0, 0.0),
 ) -> USCTCase:
     """Create a feature-domain case with straight-ray travel-time differences."""
 
     grid = make_grid(shape=shape)
     geometry = make_ring_geometry(n_transducers=n_transducers)
-    sound_speed = circular_sound_speed(grid, background_mps=background_mps, inclusion_mps=inclusion_mps)
+    sound_speed = circular_sound_speed(
+        grid,
+        background_mps=background_mps,
+        inclusion_mps=inclusion_mps,
+        radius_m=inclusion_radius_m,
+        center_m=inclusion_center_m,
+    )
     projector = StraightRayProjector.from_grid_geometry(grid, geometry)
     delta_slowness = (1.0 / sound_speed) - (1.0 / background_mps)
     delta_tof_s = projector.forward(delta_slowness).reshape((n_transducers, n_transducers))
@@ -108,6 +116,8 @@ def make_sound_speed_case(
                 "synthetic": True,
                 "feature_provenance": "oracle_straight_ray_forward_from_ground_truth_sound_speed",
                 "reference_sound_speed_mps": background_mps,
+                "synthetic_inclusion_radius_m": float(inclusion_radius_m),
+                "synthetic_inclusion_center_m": [float(value) for value in inclusion_center_m],
             },
             measurement_provenance=MeasurementProvenance.ORACLE_TRAVEL_TIME,
             benchmark_type="oracle_travel_time",

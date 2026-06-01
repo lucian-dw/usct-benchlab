@@ -22,11 +22,24 @@ Required QC metrics:
 - `bad_receiver_fraction`
 - `reciprocity_error`
 - `water_tof_rmse_vs_geometry`
+- `water_tof_raw_rmse_vs_geometry`
+- `water_tof_bias_s`
 - `phase_unwrap_failure_fraction`
 - `tof_valid_fraction`
 - `amplitude_dynamic_range_db`
 - `nan_inf_count`
 - `boundary_energy_fraction`
+
+QC metrics are computed only on traces allowed by `measurement.valid_mask`; square
+ring cases also exclude diagonal self-pairs. This prevents transmitter/receiver
+self-coupling traces from dominating receiver energy, reciprocity, and boundary
+energy checks.
+
+For real k-Wave runs, `water_tof_rmse_vs_geometry` removes the median water
+peak-time bias before comparing against ring geometry. The raw value is still
+reported as `water_tof_raw_rmse_vs_geometry`, and `water_tof_bias_s` records the
+global source/group-delay offset that was removed. Differential ToF features use
+the water/reference pair, so this global offset should cancel.
 
 If QC fails, the case metadata is stamped with `simulation_failed_qc: true`. The benchmark runner skips algorithm execution for that case and writes `failure_reason=simulation_failed_qc`, so downstream reports cannot treat the reconstruction as a valid conclusion.
 
