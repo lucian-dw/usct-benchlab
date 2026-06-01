@@ -1,0 +1,22 @@
+name: kwave_smoke
+backend: native_smoke
+case:
+  case_id: kwave_smoke_property
+  shape: [48, 48]
+  n_transducers: 16
+  background_mps: 1500.0
+  inclusion_mps: 1450.0
+  inclusion_attenuation_np_per_m: 3.0
+  density_kg_per_m3: 1000.0
+simulation:
+  backend: native_smoke
+  reference_sound_speed_mps: 1500.0
+  source_wavelet: ricker
+  source_peak_frequency_hz: 250000.0
+  source_bandwidth_hz: 250000.0
+  dt_s: 8.0e-8
+  n_time: 768
+  pml_thickness_pixels: 8
+  frequencies_hz: [150000.0, 250000.0, 350000.0, 450000.0]
+outputs:
+  wavefield_case: ${USCT_KWAVE_WAVE_CASE:-runs/usctbench_runs/kwave_unified_smoke/wavefield_cases/kwave_smoke_wavefield.h5}

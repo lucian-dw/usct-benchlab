@@ -21,6 +21,7 @@ import yaml
 
 from usctbench.benchmark.report import write_failure_report
 from usctbench.io.hdf5 import read_case_hdf5, write_result_hdf5
+from usctbench.provenance import case_measurement_metadata
 from usctbench.registry import get_algorithm
 from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
 from usctbench.viz.preview import write_preview_png
@@ -65,8 +66,18 @@ def run_algorithm_case(
         case_id = case.case_id
         config = load_algorithm_config(config_path)
         config.parameters.setdefault("_run_output_dir", str(out_root / case_id))
-        algorithm = get_algorithm(algorithm_name)
-        result = algorithm.run(case, config)
+        if bool(case.metadata.get("simulation_failed_qc", False)):
+            result = ReconstructionResult(
+                algorithm=algorithm_name,
+                case_id=case.case_id,
+                runtime_s=0.0,
+                status=ResultStatus.SKIPPED,
+                failure_reason="simulation_failed_qc",
+                metrics={"simulation_failed_qc": True},
+            )
+        else:
+            algorithm = get_algorithm(algorithm_name)
+            result = algorithm.run(case, config)
     except Exception as exc:
         result = ReconstructionResult(
             algorithm=algorithm_for_report,
@@ -203,6 +214,7 @@ def _write_result_artifacts(
 
     result_path = write_result_hdf5(result, out_dir / "result.h5")
     (out_dir / "metrics.json").write_text(json.dumps(result.metrics, indent=2, sort_keys=True), encoding="utf-8")
+    measurement_metadata = case_measurement_metadata(case.metadata) if case is not None else {}
     (out_dir / "metadata.yaml").write_text(
         yaml.safe_dump(
             {
@@ -210,6 +222,7 @@ def _write_result_artifacts(
                 "case_id": result.case_id,
                 "case_type": (case.metadata.get("case_type") if case is not None else None),
                 "benchmark_type": (case.metadata.get("benchmark_type") if case is not None else None),
+                **measurement_metadata,
                 "config": config,
                 "error_type": _classify_failure(result.failure_reason),
                 "runtime_s": result.runtime_s,

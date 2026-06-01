@@ -1,0 +1,7 @@
+name: fwi_kwave_adapter
+parameters:
+  data_sanity_only: true
+  baseline_sound_speed_mps: 1500.0
+metadata:
+  mode: unified_kwave_wavefield_data_sanity
+  note: Validates that the FWI adapter ingests the same raw time/frequency wavefield case; it is not a claimed FWI inversion result.

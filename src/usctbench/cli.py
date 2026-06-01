@@ -12,7 +12,9 @@ from usctbench.data.nbpslice2d import inspect_nbp_slice2d_zip, make_nbp_slice2d_
 from usctbench.data.openbreastus import inspect_openbreastus, write_schema_report
 from usctbench.data.smoke_subset import make_quality_subset, make_smoke_subset
 from usctbench.data.synthetic import make_synthetic_smoke_subset
+from usctbench.features import extract_wavefield_features
 from usctbench.registry import list_algorithms
+from usctbench.sim import run_kwave_simulation_from_config, run_simulation_qc
 
 
 def register_builtin_algorithms() -> None:
@@ -94,6 +96,21 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser = subparsers.add_parser("eval", help="Evaluate one run directory.")
     eval_parser.add_argument("--run", required=True, help="Run directory.")
     eval_parser.add_argument("--protocol", required=True, help="Benchmark protocol YAML path.")
+
+    sim_parser = subparsers.add_parser("sim", help="Simulation commands.")
+    sim_subparsers = sim_parser.add_subparsers(dest="sim_command")
+    kwave_parser = sim_subparsers.add_parser("kwave", help="Generate or reuse a k-Wave-compatible wavefield case.")
+    kwave_parser.add_argument("--config", required=True, help="Simulation YAML config path.")
+    qc_parser = sim_subparsers.add_parser("qc", help="Run simulation QC for a wavefield case.")
+    qc_parser.add_argument("--case", required=True, help="Wavefield case HDF5 path.")
+    qc_parser.add_argument("--out", default=None, help="QC artifact directory; defaults to the case directory.")
+
+    features_parser = subparsers.add_parser("features", help="Wavefield feature extraction commands.")
+    features_subparsers = features_parser.add_subparsers(dest="features_command")
+    extract_parser = features_subparsers.add_parser("extract", help="Extract algorithm-ready features from a wavefield case.")
+    extract_parser.add_argument("--case", required=True, help="Wavefield case HDF5 path.")
+    extract_parser.add_argument("--method", default="all", choices=["all", "xcorr", "phase-slope"], help="Selected ToF feature for solver input.")
+    extract_parser.add_argument("--out", default=None, help="Feature case HDF5 output path.")
 
     bench_parser = subparsers.add_parser("bench", help="Run a benchmark suite.")
     bench_parser.add_argument("--suite", required=True, help="Benchmark suite YAML path.")
@@ -201,6 +218,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(result["report_md"])
         return 0 if _benchmark_passed(result) else 1
 
+    if args.command == "sim":
+        if args.sim_command is None:
+            parser.parse_args(["sim", "--help"])
+            return 0
+        if args.sim_command == "kwave":
+            wave_case = run_kwave_simulation_from_config(args.config)
+            run_simulation_qc(wave_case)
+            print(wave_case)
+            return 0
+        if args.sim_command == "qc":
+            result = run_simulation_qc(args.case, args.out)
+            print(Path(args.out or args.case).parent / "simulation_qc.json" if args.out is None else Path(args.out) / "simulation_qc.json")
+            return 0 if result.get("passed") else 1
+
+    if args.command == "features":
+        if args.features_command is None:
+            parser.parse_args(["features", "--help"])
+            return 0
+        if args.features_command == "extract":
+            out = Path(args.out) if args.out else _default_feature_case_path(Path(args.case))
+            extract_wavefield_features(args.case, out=out, method=args.method)
+            print(out)
+            return 0
+
     if args.command == "bench":
         result = run_benchmark_suite(args.suite)
         print(result["run_root"])
@@ -212,6 +253,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _benchmark_passed(result: dict) -> bool:
     return bool(result["records"]) and all(record.get("pass") for record in result["records"]) and bool(result.get("run_checks", {}).get("passed"))
+
+
+def _default_feature_case_path(case_path: Path) -> Path:
+    if case_path.parent.name == "wavefield_cases":
+        return case_path.parent.parent / "feature_cases" / f"{case_path.stem}_features.h5"
+    return case_path.with_name(f"{case_path.stem}_features.h5")
 
 
 if __name__ == "__main__":

@@ -106,18 +106,32 @@ class MeasurementSpec(_ArrayModel):
     frequencies_hz: np.ndarray | None = None
     freq_data: np.ndarray | None = None
     time_data: np.ndarray | None = None
+    water_reference: np.ndarray | None = None
+    source_wavelet: np.ndarray | None = None
+    time_axis_s: np.ndarray | None = None
     tof_s: np.ndarray | None = None
     delta_tof_s: np.ndarray | None = None
+    tof_first_arrival_s: np.ndarray | None = None
+    tof_xcorr_s: np.ndarray | None = None
+    phase_slope_delay_s: np.ndarray | None = None
     log_amp: np.ndarray | None = None
     valid_mask: np.ndarray | None = None
+    feature_quality: np.ndarray | None = None
 
     @field_validator(
         "frequencies_hz",
         "freq_data",
         "time_data",
+        "water_reference",
+        "source_wavelet",
+        "time_axis_s",
         "tof_s",
         "delta_tof_s",
+        "tof_first_arrival_s",
+        "tof_xcorr_s",
+        "phase_slope_delay_s",
         "log_amp",
+        "feature_quality",
         mode="before",
     )
     @classmethod
@@ -144,7 +158,17 @@ class MeasurementSpec(_ArrayModel):
         if self.domain == MeasurementDomain.TIME and self.time_data is None:
             raise ValueError("time-domain measurements require time_data")
         if self.domain == MeasurementDomain.FEATURES:
-            has_feature = any(value is not None for value in (self.tof_s, self.delta_tof_s, self.log_amp))
+            has_feature = any(
+                value is not None
+                for value in (
+                    self.tof_s,
+                    self.delta_tof_s,
+                    self.tof_first_arrival_s,
+                    self.tof_xcorr_s,
+                    self.phase_slope_delay_s,
+                    self.log_amp,
+                )
+            )
             if not has_feature:
                 raise ValueError("feature-domain measurements require tof_s, delta_tof_s, or log_amp")
         return self
@@ -155,8 +179,9 @@ class GroundTruthSpec(_ArrayModel):
 
     sound_speed_mps: np.ndarray | None = None
     attenuation_np_per_m: np.ndarray | None = None
+    density_kg_per_m3: np.ndarray | None = None
 
-    @field_validator("sound_speed_mps", "attenuation_np_per_m", mode="before")
+    @field_validator("sound_speed_mps", "attenuation_np_per_m", "density_kg_per_m3", mode="before")
     @classmethod
     def _coerce_ground_truth_arrays(cls, value: Any) -> np.ndarray | None:
         return _optional_array(value)
@@ -178,6 +203,7 @@ class USCTCase(_ArrayModel):
         arrays = {
             "ground_truth.sound_speed_mps": self.ground_truth.sound_speed_mps,
             "ground_truth.attenuation_np_per_m": self.ground_truth.attenuation_np_per_m,
+            "ground_truth.density_kg_per_m3": self.ground_truth.density_kg_per_m3,
         }
         for name, value in arrays.items():
             if value is not None and value.shape != expected_shape:
@@ -226,4 +252,3 @@ class ReconstructionResult(_ArrayModel):
         if self.status != ResultStatus.SUCCESS and not self.failure_reason:
             raise ValueError("failed or skipped results must include failure_reason")
         return self
-

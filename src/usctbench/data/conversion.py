@@ -13,6 +13,7 @@ import numpy as np
 from usctbench.algorithms.ray.straight_projector import StraightRayProjector
 from usctbench.data.synthetic import make_grid, make_ring_geometry
 from usctbench.io.hdf5 import write_case_hdf5
+from usctbench.provenance import MeasurementProvenance, stamp_measurement_metadata
 from usctbench.schema import GeometrySpec, GridSpec, GroundTruthSpec, MeasurementSpec, USCTCase
 
 
@@ -336,10 +337,10 @@ def _speed_array_to_case(
             valid_mask=valid_mask,
         ),
         ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed_mps),
-        metadata={
+        metadata=stamp_measurement_metadata(
+            {
             "source_dataset": "OpenBreastUS",
             "case_type": "openbreastus_speedmap_surrogate",
-            "benchmark_type": "openbreastus_speedmap_surrogate",
             "source_path": str(source),
             "source_mat_dataset": dataset_name,
             "source_index": source_index,
@@ -356,7 +357,12 @@ def _speed_array_to_case(
             "reference_sound_speed_mps": reference_sound_speed_mps,
             "spacing_m_assumption": list(spacing_m),
             "attenuation_note": "log_amp is a zero surrogate because this source file contains speed maps only.",
-        },
+            },
+            measurement_provenance=MeasurementProvenance.SPEEDMAP_TRAVEL_TIME_SURROGATE,
+            benchmark_type="speedmap_travel_time_surrogate",
+            forward_model="straight_ray_speedmap_surrogate",
+            feature_source="surrogate_delta_tof_from_ground_truth_sound_speed",
+        ),
     )
 
 
@@ -384,10 +390,10 @@ def _kwave_arrays_to_case(
     delta_tof_s = projector.forward(delta_slowness).reshape(projector.ray_shape)
     attenuation_integral = projector.forward(attenuation_np_per_m).reshape(projector.ray_shape)
     valid_mask = ~np.eye(projector.ray_shape[0], projector.ray_shape[1], dtype=bool)
-    metadata = {
+    metadata = stamp_measurement_metadata(
+        {
         "source_dataset": "kWave_USCT_simulation",
         "case_type": "openbreastus_wavefield",
-        "benchmark_type": "openbreastus_wavefield",
         "source_path": str(source),
         "source_label": source_label,
         "source_npy_path": source_npy_path,
@@ -407,7 +413,12 @@ def _kwave_arrays_to_case(
         "has_simulated_attenuation": True,
         "time_range_s": [float(np.nanmin(time_s)), float(np.nanmax(time_s))] if time_s.size else None,
         "frequency_hz": frequency_hz,
-    }
+        },
+        measurement_provenance=MeasurementProvenance.SPEEDMAP_TRAVEL_TIME_SURROGATE,
+        benchmark_type="speedmap_travel_time_surrogate",
+        forward_model="straight_ray_feature_surrogate_from_kwave_property_maps",
+        feature_source="surrogate_delta_tof_and_log_amp_from_ground_truth_property_maps",
+    )
     return USCTCase(
         case_id=_safe_case_id(source_label),
         grid=grid,
@@ -494,10 +505,10 @@ def _nbp_handle_to_case_record(
             valid_mask=valid_mask,
         ),
         ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed_mps, attenuation_np_per_m=attenuation_np_per_m),
-        metadata={
+        metadata=stamp_measurement_metadata(
+            {
             "source_dataset": "NBPslices2D",
-            "case_type": "openbreastus_speedmap_surrogate",
-            "benchmark_type": "openbreastus_speedmap_surrogate",
+            "case_type": "nbpslice2d_property_map_surrogate",
             "source_path": source_path,
             "source_member": source_member,
             "source_ref": source_ref,
@@ -529,7 +540,12 @@ def _nbp_handle_to_case_record(
             "effective_spacing_m": list(spacing_m),
             "has_simulated_attenuation": True,
             "attenuation_evidence": "nbp_numerical_phantom_ground_truth_line_integral",
-        },
+            },
+            measurement_provenance=MeasurementProvenance.SPEEDMAP_TRAVEL_TIME_SURROGATE,
+            benchmark_type="speedmap_travel_time_surrogate",
+            forward_model="straight_ray_speedmap_surrogate",
+            feature_source="surrogate_delta_tof_and_log_amp_from_nbp_property_maps",
+        ),
     )
     record = {
         "case_id": case_id,

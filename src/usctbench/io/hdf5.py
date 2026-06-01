@@ -106,16 +106,24 @@ def write_case_hdf5(case: USCTCase, path: str | Path) -> Path:
             "frequencies_hz",
             "freq_data",
             "time_data",
+            "water_reference",
+            "source_wavelet",
+            "time_axis_s",
             "tof_s",
             "delta_tof_s",
+            "tof_first_arrival_s",
+            "tof_xcorr_s",
+            "phase_slope_delay_s",
             "log_amp",
             "valid_mask",
+            "feature_quality",
         ):
             _write_dataset(measurement, name, getattr(case.measurement, name))
 
         ground_truth = handle.create_group("ground_truth")
         _write_dataset(ground_truth, "sound_speed_mps", case.ground_truth.sound_speed_mps)
         _write_dataset(ground_truth, "attenuation_np_per_m", case.ground_truth.attenuation_np_per_m)
+        _write_dataset(ground_truth, "density_kg_per_m3", case.ground_truth.density_kg_per_m3)
     return out
 
 
@@ -149,16 +157,24 @@ def read_case_hdf5(path: str | Path) -> USCTCase:
             frequencies_hz=_read_dataset(measurement_group, "frequencies_hz"),
             freq_data=_read_dataset(measurement_group, "freq_data"),
             time_data=_read_dataset(measurement_group, "time_data"),
+            water_reference=_read_dataset(measurement_group, "water_reference"),
+            source_wavelet=_read_dataset(measurement_group, "source_wavelet"),
+            time_axis_s=_read_dataset(measurement_group, "time_axis_s"),
             tof_s=_read_dataset(measurement_group, "tof_s"),
             delta_tof_s=_read_dataset(measurement_group, "delta_tof_s"),
+            tof_first_arrival_s=_read_dataset(measurement_group, "tof_first_arrival_s"),
+            tof_xcorr_s=_read_dataset(measurement_group, "tof_xcorr_s"),
+            phase_slope_delay_s=_read_dataset(measurement_group, "phase_slope_delay_s"),
             log_amp=_read_dataset(measurement_group, "log_amp"),
             valid_mask=_read_dataset(measurement_group, "valid_mask"),
+            feature_quality=_read_dataset(measurement_group, "feature_quality"),
         )
 
         ground_truth_group = handle["ground_truth"]
         ground_truth = GroundTruthSpec(
             sound_speed_mps=_read_dataset(ground_truth_group, "sound_speed_mps"),
             attenuation_np_per_m=_read_dataset(ground_truth_group, "attenuation_np_per_m"),
+            density_kg_per_m3=_read_dataset(ground_truth_group, "density_kg_per_m3"),
         )
     return USCTCase(
         case_id=case_id,

@@ -9,6 +9,7 @@ import numpy as np
 
 from usctbench.algorithms.ray.straight_projector import StraightRayProjector
 from usctbench.io.hdf5 import write_case_hdf5
+from usctbench.provenance import MeasurementProvenance, stamp_measurement_metadata
 from usctbench.schema import GeometrySpec, GridSpec, GroundTruthSpec, MeasurementSpec, USCTCase
 
 
@@ -101,13 +102,25 @@ def make_sound_speed_case(
         geometry=geometry,
         measurement=MeasurementSpec(domain="features", delta_tof_s=delta_tof_s, valid_mask=valid_mask),
         ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed),
-        metadata={
-            "case_type": "synthetic_oracle",
-            "benchmark_type": "synthetic_oracle",
-            "reference_sound_speed_mps": background_mps,
-            "synthetic": True,
-            "feature_provenance": "oracle_straight_ray_forward_from_ground_truth_sound_speed",
-        },
+        metadata=stamp_measurement_metadata(
+            {
+                "case_type": "synthetic_oracle",
+                "synthetic": True,
+                "feature_provenance": "oracle_straight_ray_forward_from_ground_truth_sound_speed",
+                "reference_sound_speed_mps": background_mps,
+            },
+            measurement_provenance=MeasurementProvenance.ORACLE_TRAVEL_TIME,
+            benchmark_type="oracle_travel_time",
+            forward_model="straight_ray_oracle_from_ground_truth",
+            feature_source="oracle_straight_ray_delta_tof",
+            extra={
+                "measurement_limitations": [
+                    "fast debug / solver sanity benchmark",
+                    "travel-time data are generated directly from ground truth",
+                    "not a formal wavefield inversion benchmark",
+                ],
+            },
+        ),
     )
 
 
@@ -131,13 +144,25 @@ def make_attenuation_case(
         geometry=geometry,
         measurement=MeasurementSpec(domain="features", log_amp=-line_integral, valid_mask=valid_mask),
         ground_truth=GroundTruthSpec(attenuation_np_per_m=attenuation),
-        metadata={
-            "case_type": "synthetic_oracle",
-            "benchmark_type": "synthetic_oracle",
-            "synthetic": True,
-            "feature_provenance": "oracle_straight_ray_forward_from_ground_truth_attenuation",
-            "log_amp_convention": "log(case/reference) = -integral(alpha ds)",
-        },
+        metadata=stamp_measurement_metadata(
+            {
+                "case_type": "synthetic_oracle",
+                "synthetic": True,
+                "feature_provenance": "oracle_straight_ray_forward_from_ground_truth_attenuation",
+                "log_amp_convention": "log(case/reference) = -integral(alpha ds)",
+            },
+            measurement_provenance=MeasurementProvenance.ORACLE_TRAVEL_TIME,
+            benchmark_type="oracle_travel_time",
+            forward_model="straight_ray_oracle_from_ground_truth",
+            feature_source="oracle_straight_ray_log_amp",
+            extra={
+                "measurement_limitations": [
+                    "fast debug / solver sanity benchmark",
+                    "attenuation line integral is generated directly from ground truth",
+                    "not a formal wavefield inversion benchmark",
+                ],
+            },
+        ),
     )
 
 

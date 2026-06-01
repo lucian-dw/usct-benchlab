@@ -117,3 +117,8 @@ Sound-speed comparison panels should use a grayscale colormap and include GT
 plus traditional sound-speed algorithms only. Use
 `scripts/render_class_comparison_panels.py` for reproducible class-comparison
 figures.
+# NBPslice2D measurement status
+
+The 2025 `NBPslices2D.zip` integration currently treats the dataset as property-map-only: `sos`, `den`, `att`, `y`, and `label`. The converter stores GT sound speed/attenuation and creates solver-sanity features from the property maps, but those features are `speedmap_travel_time_surrogate`.
+
+If no built-in wavefield is present, NBPslice2D should be used as a property-map library for `self_simulated_kwave_wavefield` benchmarks. The related 2021 measurement dataset needs separate inspection before any `external_measurement` or precomputed-wavefield support is claimed.

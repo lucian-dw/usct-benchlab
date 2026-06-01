@@ -98,6 +98,8 @@ class KWaveFWIAdapterAlgorithm:
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
         result_path = _configured_path(config, "result_path")
         if result_path is None:
+            if bool(config.parameters.get("data_sanity_only", False)):
+                return _run_wavefield_data_sanity(self.name, case, config)
             return ReconstructionResult(
                 algorithm=self.name,
                 case_id=case.case_id,
@@ -162,6 +164,51 @@ class KWaveFWIAdapterAlgorithm:
             metrics=metrics,
             artifacts=artifacts,
         )
+
+
+def _run_wavefield_data_sanity(algorithm: str, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
+    """Validate that the FWI adapter can ingest the unified raw wavefield case."""
+
+    has_time = case.measurement.time_data is not None
+    has_freq = case.measurement.freq_data is not None
+    if not (has_time or has_freq):
+        return ReconstructionResult(
+            algorithm=algorithm,
+            case_id=case.case_id,
+            status=ResultStatus.SKIPPED,
+            failure_reason="fwi_kwave_adapter data_sanity_only requires time_data or freq_data",
+        )
+    c0 = float(config.parameters.get("baseline_sound_speed_mps", case.metadata.get("reference_sound_speed_mps", 1500.0)))
+    sound_speed = np.full(case.grid.shape, c0, dtype=float)
+    metrics: dict[str, Any] = {
+        "fwi_data_sanity_only": True,
+        "fwi_raw_time_data_available": bool(has_time),
+        "fwi_freq_data_available": bool(has_freq),
+        "fwi_water_reference_available": bool(case.measurement.water_reference is not None),
+        "fwi_uses_same_kwave_case": bool(case.metadata.get("uses_kwave_wavefield") or case.metadata.get("measurement_provenance") == "self_simulated_kwave_wavefield"),
+        "external_result_loaded": False,
+        "loss_decreased": None,
+        "iterations": 0,
+    }
+    if has_time:
+        time_data = np.asarray(case.measurement.time_data, dtype=float)
+        metrics["fwi_time_data_shape"] = [int(v) for v in time_data.shape]
+        metrics["fwi_time_data_energy"] = float(np.nansum(time_data**2))
+    if has_freq:
+        freq_data = np.asarray(case.measurement.freq_data)
+        metrics["fwi_freq_data_shape"] = [int(v) for v in freq_data.shape]
+        metrics["fwi_freq_data_energy"] = float(np.nansum(np.abs(freq_data) ** 2))
+    if case.ground_truth.sound_speed_mps is not None:
+        truth = np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
+        metrics.update(compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask))
+        metrics.update(compute_baseline_improvement_metrics(sound_speed, truth, c0, mask=case.grid.roi_mask))
+    return ReconstructionResult(
+        algorithm=algorithm,
+        case_id=case.case_id,
+        sound_speed_mps=sound_speed,
+        metrics=metrics,
+        artifacts={"mode": "data_sanity_only"},
+    )
 
 
 def _selected_result_images(external: dict[str, Any], selected_iteration: int | None, shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray | None]:

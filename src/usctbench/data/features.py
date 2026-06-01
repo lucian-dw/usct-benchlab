@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
 
@@ -40,7 +42,13 @@ def phase_delay_seconds(
     if frequencies.size < int(min_frequencies):
         raise ValueError("phase-slope travel-time estimation requires at least three frequencies")
 
-    ratio = np.asarray(signal) / np.asarray(reference)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = np.divide(
+            np.asarray(signal),
+            np.asarray(reference),
+            out=np.full_like(np.asarray(signal), np.nan + 0.0j, dtype=np.complex128),
+            where=np.abs(np.asarray(reference)) > 0.0,
+        )
     if ratio.shape[0] != frequencies.size:
         raise ValueError("signal/reference first dimension must match frequencies_hz")
     phase = np.unwrap(np.angle(ratio), axis=0)
@@ -93,12 +101,20 @@ def extract_frequency_features(
     frequencies = np.asarray(frequencies_hz, dtype=float)
     if frequencies.size < int(min_phase_frequencies) and not allow_low_frequency_count:
         raise ValueError("phase-slope travel-time features require at least three frequencies")
-    ratio = signal_array / reference_array
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = np.divide(
+            signal_array,
+            reference_array,
+            out=np.full(signal_array.shape, np.nan + 0.0j, dtype=np.complex128),
+            where=np.abs(reference_array) > 0.0,
+        )
     phase = np.unwrap(np.angle(ratio), axis=0)
     if frequencies.size >= 2:
         slope, fit_residual = _fit_phase_slope(frequencies, phase)
         delta_tof = -slope / (2.0 * np.pi)
-        phase_fit_rms = np.sqrt(np.nanmean(fit_residual**2, axis=0))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            phase_fit_rms = np.sqrt(np.nanmean(fit_residual**2, axis=0))
     else:
         delta_tof = np.full(signal_array.shape[1:], np.nan, dtype=float)
         phase_fit_rms = np.full(signal_array.shape[1:], np.inf, dtype=float)
