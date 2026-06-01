@@ -70,7 +70,7 @@ parameters:
   sos_freqs_mhz:
     - 0.3
   sos_iters:
-    - 1
+    - 2
   sos_atten_freqs_mhz: []
   atten_iters:
     - 0
