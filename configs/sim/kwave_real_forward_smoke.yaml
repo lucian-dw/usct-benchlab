@@ -3,7 +3,7 @@ backend: kwave_a100
 case:
   case_id: kwave_real_forward_property
   shape: [512, 512]
-  n_transducers: 64
+  n_transducers: 128
   background_mps: 1500.0
   inclusion_mps: 1450.0
   inclusion_attenuation_np_per_m: 3.0
@@ -12,7 +12,7 @@ simulation:
   backend: kwave_a100
   python_bin: ${USCT_KWAVE_PYTHON_BIN:-/home/wudalong/miniconda3/envs/usct-kwave/bin/python}
   usct_kwave_root: ${USCT_KWAVE_ROOT:-/home/wudalong/USCT_kwave}
-  array_mode: partial64
+  array_mode: full128
   external_backend: cuda-binary
   reference_sound_speed_mps: 1500.0
   source_wavelet: gauspuls
