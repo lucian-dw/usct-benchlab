@@ -23,7 +23,7 @@ def run_simulation_qc(case: USCTCase | str | Path, out_dir: str | Path | None = 
     output_dir = Path(out_dir) if out_dir is not None else (case_path.parent if case_path is not None else Path.cwd())
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics = simulation_qc_metrics(wave_case)
-    passed, reasons = _qc_pass_fail(metrics)
+    passed, reasons = _qc_pass_fail(metrics, wave_case)
     payload = {"passed": passed, "fail_reasons": reasons, "metrics": metrics}
     (output_dir / "simulation_qc.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     _write_qc_artifacts(wave_case, output_dir, metrics)
@@ -56,8 +56,10 @@ def simulation_qc_metrics(case: USCTCase) -> dict[str, Any]:
     dt = float(np.median(np.diff(time_axis))) if time_axis.size > 1 else float(simulation.get("dt_s", 0.0))
     c_min, c_max = _sound_speed_range(case)
     peak_frequency = float(simulation.get("source_peak_frequency_hz", _source_peak_frequency(case)))
+    frequencies = np.asarray(case.measurement.frequencies_hz, dtype=float).reshape(-1) if case.measurement.frequencies_hz is not None else np.asarray([], dtype=float)
+    effective_max_frequency = max([peak_frequency, *(float(value) for value in frequencies if np.isfinite(value))])
     spacing_min = min(float(value) for value in case.grid.spacing_m)
-    wavelength_min = c_min / peak_frequency if peak_frequency > 0 else float("inf")
+    wavelength_min = c_min / effective_max_frequency if effective_max_frequency > 0 else float("inf")
     points_per_wavelength = wavelength_min / spacing_min if spacing_min > 0 else 0.0
     cfl = c_max * dt / spacing_min / np.sqrt(2.0) if spacing_min > 0 else float("inf")
     energy = np.nansum(time_data**2, axis=-1)
@@ -78,6 +80,7 @@ def simulation_qc_metrics(case: USCTCase) -> dict[str, Any]:
         "cfl_number": float(cfl),
         "pml_thickness_pixels": int(simulation.get("pml_thickness_pixels", 0)),
         "source_peak_frequency_hz": float(peak_frequency),
+        "effective_max_frequency_hz": float(effective_max_frequency),
         "source_bandwidth_hz": float(source_bandwidth),
         "receiver_signal_energy_min": float(np.min(finite_energy)) if finite_energy.size else 0.0,
         "receiver_signal_energy_median": float(median_energy),
@@ -90,16 +93,43 @@ def simulation_qc_metrics(case: USCTCase) -> dict[str, Any]:
         "amplitude_dynamic_range_db": float(dynamic_range_db),
         "nan_inf_count": nan_inf,
         "boundary_energy_fraction": float(boundary_fraction),
+        "dt_s": float(dt),
+        "simulation_backend": str(simulation.get("backend", case.metadata.get("simulation_backend", ""))),
     }
 
 
-def _qc_pass_fail(metrics: dict[str, Any]) -> tuple[bool, list[str]]:
+def _qc_pass_fail(metrics: dict[str, Any], case: USCTCase) -> tuple[bool, list[str]]:
+    backend = str(metrics.get("simulation_backend", case.metadata.get("simulation_backend", ""))).lower()
+    is_real_kwave = backend not in {"native_smoke", "smoke", "analytic_smoke", ""}
+    if not is_real_kwave:
+        checks = {
+            "grid_points_per_wavelength_min": float(metrics.get("grid_points_per_wavelength_min", 0.0)) >= 3.0,
+            "cfl_number": float(metrics.get("cfl_number", float("inf"))) <= 0.5,
+            "bad_receiver_fraction": float(metrics.get("bad_receiver_fraction", 1.0)) <= 0.2,
+            "reciprocity_error": float(metrics.get("reciprocity_error", 1.0)) <= 0.35,
+            "tof_valid_fraction": float(metrics.get("tof_valid_fraction", 0.0)) >= 0.5,
+            "nan_inf_count": int(metrics.get("nan_inf_count", 1)) == 0,
+            "boundary_energy_fraction": float(metrics.get("boundary_energy_fraction", 1.0)) <= 0.4,
+        }
+        reasons = [f"{name} failed" for name, ok in checks.items() if not ok]
+        return not reasons, reasons
+
+    config_name = str(case.metadata.get("simulation_metadata", {}).get("config_name", "")).lower()
+    ppw_min = 8.0 if "quality" in config_name else 6.0
+    dt = float(metrics.get("dt_s", float("nan")))
+    water_limit = 0.5 * dt if np.isfinite(dt) and dt > 0.0 else 0.0
+    n_tx = max(1, int(case.geometry.tx_pos_m.shape[0]))
+    expected_self_pair_fraction = 1.0 / float(n_tx) if n_tx == int(case.geometry.rx_pos_m.shape[0]) else 0.0
+    bad_receiver_limit = max(0.15, expected_self_pair_fraction + 0.05)
     checks = {
-        "grid_points_per_wavelength_min": float(metrics.get("grid_points_per_wavelength_min", 0.0)) >= 3.0,
-        "cfl_number": float(metrics.get("cfl_number", float("inf"))) <= 0.5,
-        "bad_receiver_fraction": float(metrics.get("bad_receiver_fraction", 1.0)) <= 0.2,
-        "reciprocity_error": float(metrics.get("reciprocity_error", 1.0)) <= 0.35,
-        "tof_valid_fraction": float(metrics.get("tof_valid_fraction", 0.0)) >= 0.5,
+        f"grid_points_per_wavelength_min >= {ppw_min:g}": float(metrics.get("grid_points_per_wavelength_min", 0.0)) >= ppw_min,
+        "cfl_number <= 0.3": float(metrics.get("cfl_number", float("inf"))) <= 0.3,
+        "pml_thickness_pixels >= 20": int(metrics.get("pml_thickness_pixels", 0)) >= 20,
+        f"bad_receiver_fraction <= {bad_receiver_limit:g}": float(metrics.get("bad_receiver_fraction", 1.0)) <= bad_receiver_limit,
+        "reciprocity_error <= 0.1": float(metrics.get("reciprocity_error", 1.0)) <= 0.1,
+        f"water_tof_rmse_vs_geometry <= 0.5*dt ({water_limit:.3g}s)": bool(water_limit > 0.0)
+        and float(metrics.get("water_tof_rmse_vs_geometry", float("inf"))) <= water_limit,
+        "tof_valid_fraction >= 0.75": float(metrics.get("tof_valid_fraction", 0.0)) >= 0.75,
         "nan_inf_count": int(metrics.get("nan_inf_count", 1)) == 0,
         "boundary_energy_fraction": float(metrics.get("boundary_energy_fraction", 1.0)) <= 0.4,
     }

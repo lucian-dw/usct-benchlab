@@ -1,10 +1,9 @@
-name: kwave_128tx_512grid
+name: kwave_real_forward_smoke
 backend: kwave_a100
 case:
-  path: ${USCT_KWAVE_PROPERTY_CASE:-}
-  case_id: kwave_128tx_512grid_property
+  case_id: kwave_real_forward_property
   shape: [512, 512]
-  n_transducers: 128
+  n_transducers: 64
   background_mps: 1500.0
   inclusion_mps: 1450.0
   inclusion_attenuation_np_per_m: 3.0
@@ -13,7 +12,7 @@ simulation:
   backend: kwave_a100
   python_bin: ${USCT_KWAVE_PYTHON_BIN:-/home/wudalong/miniconda3/envs/usct-kwave/bin/python}
   usct_kwave_root: ${USCT_KWAVE_ROOT:-/home/wudalong/USCT_kwave}
-  array_mode: full128
+  array_mode: partial64
   external_backend: cuda-binary
   reference_sound_speed_mps: 1500.0
   source_wavelet: gauspuls
@@ -32,11 +31,13 @@ simulation:
   generation_mode: direct
   direct_num_workers: 1
   kwave_data_path: auto
+  kwave_data_name_prefix: real_forward_smoke
+  cuda_devices: [2]
   overwrite: false
   start_matlab: true
   no_connect_existing: true
   timeout_s: 14400
   frequencies_hz: [150000.0, 250000.0, 350000.0, 450000.0]
 outputs:
-  wavefield_case: ${USCT_KWAVE_WAVE_CASE:-runs/usctbench_runs/kwave_unified_quality/wavefield_cases/kwave_128tx_512grid_wavefield.h5}
-  external_root: ${USCT_KWAVE_FORWARD_ROOT:-runs/usctbench_runs/kwave_unified_quality/external_kwave_forward}
+  wavefield_case: ${USCT_KWAVE_WAVE_CASE:-runs/usctbench_runs/kwave_real_forward_smoke/wavefield_cases/kwave_real_forward_wavefield.h5}
+  external_root: ${USCT_KWAVE_FORWARD_ROOT:-runs/usctbench_runs/kwave_real_forward_smoke/external_kwave_forward}
