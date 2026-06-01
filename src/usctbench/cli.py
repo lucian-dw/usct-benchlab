@@ -109,7 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
     features_subparsers = features_parser.add_subparsers(dest="features_command")
     extract_parser = features_subparsers.add_parser("extract", help="Extract algorithm-ready features from a wavefield case.")
     extract_parser.add_argument("--case", required=True, help="Wavefield case HDF5 path.")
-    extract_parser.add_argument("--method", default="all", choices=["all", "xcorr", "phase-slope"], help="Selected ToF feature for solver input.")
+    extract_parser.add_argument(
+        "--method",
+        default="robust_fusion",
+        choices=["all", "xcorr", "phase-slope", "xcorr_bounded", "first_arrival_aic", "phase_slope_gated", "robust_fusion"],
+        help="Selected ToF feature for solver input.",
+    )
     extract_parser.add_argument("--out", default=None, help="Feature case HDF5 output path.")
 
     bench_parser = subparsers.add_parser("bench", help="Run a benchmark suite.")

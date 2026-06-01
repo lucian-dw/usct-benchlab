@@ -8,6 +8,7 @@ from usctbench.algorithms.ray._common import (
     masked_norm,
     reference_sound_speed,
     residual_metrics,
+    ray_weights,
     run_with_failure_capture,
     sirt_solve,
     slowness_to_sound_speed,
@@ -26,13 +27,14 @@ class StraightRaySIRTAlgorithm:
         def _run() -> ReconstructionResult:
             projector = StraightRayProjector.from_case(case)
             target, mask = target_delta_tof(case, projector)
+            weights = ray_weights(case, projector, mask)
             iterations = int(config.parameters.get("iterations", 50))
             relaxation = float(config.parameters.get("relaxation", 0.3))
             smooth_sigma = float(config.parameters.get("smooth_sigma", 0.0))
             smooth_every = int(config.parameters.get("smooth_every", 0))
             roi_update_only = bool(config.parameters.get("roi_update_only", False))
             c0 = reference_sound_speed(case, config)
-            initial_norm = masked_norm(target, mask)
+            initial_norm = masked_norm(target, mask, weights)
             delta_slowness, residual_norms = sirt_solve(
                 projector,
                 target,
@@ -42,6 +44,7 @@ class StraightRaySIRTAlgorithm:
                 smooth_sigma=smooth_sigma,
                 smooth_every=smooth_every,
                 roi_mask=case.grid.roi_mask if roi_update_only else None,
+                weights=weights,
             )
             sound_speed = slowness_to_sound_speed(delta_slowness, c0, speed_bounds(config))
             final_norm = residual_norms[-1] if residual_norms else initial_norm
@@ -53,6 +56,8 @@ class StraightRaySIRTAlgorithm:
                 "smooth_every": smooth_every,
                 "roi_update_only": roi_update_only,
                 "residual_curve": residual_norms,
+                "ray_weight_mean": float(np.mean(weights[mask])) if np.any(mask) else 0.0,
+                "ray_weight_nonzero_fraction": float(np.mean(weights[mask] > 0.0)) if np.any(mask) else 0.0,
             }
             if case.ground_truth.sound_speed_mps is not None:
                 metrics.update(

@@ -9,6 +9,7 @@ from usctbench.algorithms.ray._common import (
     masked_norm,
     reference_sound_speed,
     residual_metrics,
+    ray_weights,
     run_with_failure_capture,
     slowness_to_sound_speed,
     speed_bounds,
@@ -26,12 +27,13 @@ class StraightRayCGLSAlgorithm:
         def _run() -> ReconstructionResult:
             projector = StraightRayProjector.from_case(case)
             target, mask = target_delta_tof(case, projector)
+            weights = ray_weights(case, projector, mask)
             iterations = int(config.parameters.get("iterations", 30))
             regularization = str(config.parameters.get("regularization", "identity"))
             lambda_value = float(config.parameters.get("lambda", config.parameters.get("regularization_lambda", 0.0)))
             damping = float(config.parameters.get("damping", lambda_value**2))
             c0 = reference_sound_speed(case, config)
-            initial_norm = masked_norm(target, mask)
+            initial_norm = masked_norm(target, mask, weights)
             delta_slowness, residual_norms = cgls_solve(
                 projector,
                 target,
@@ -39,6 +41,7 @@ class StraightRayCGLSAlgorithm:
                 iterations=iterations,
                 damping=damping,
                 regularization=regularization,
+                weights=weights,
             )
             sound_speed = slowness_to_sound_speed(delta_slowness, c0, speed_bounds(config))
             final_norm = residual_norms[-1] if residual_norms else initial_norm
@@ -49,6 +52,8 @@ class StraightRayCGLSAlgorithm:
                 "regularization_lambda": lambda_value,
                 "regularization_lambda_squared": damping,
                 "residual_curve": residual_norms,
+                "ray_weight_mean": float(np.mean(weights[mask])) if np.any(mask) else 0.0,
+                "ray_weight_nonzero_fraction": float(np.mean(weights[mask] > 0.0)) if np.any(mask) else 0.0,
             }
             if case.ground_truth.sound_speed_mps is not None:
                 metrics.update(

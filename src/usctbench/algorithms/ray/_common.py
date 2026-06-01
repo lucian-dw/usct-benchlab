@@ -40,13 +40,34 @@ def valid_ray_mask(case: USCTCase, projector: StraightRayProjector) -> np.ndarra
     return mask
 
 
+def ray_weights(case: USCTCase, projector: StraightRayProjector, mask: np.ndarray | None = None) -> np.ndarray:
+    """Return per-ray confidence weights clipped to [0, 1]."""
+
+    source = case.measurement.ray_weights
+    if source is None:
+        source = case.measurement.feature_quality
+    if source is None:
+        weights = np.ones(projector.n_rays, dtype=float)
+    else:
+        weights = np.asarray(source, dtype=float).reshape(-1)
+        if weights.size != projector.n_rays:
+            raise ValueError("measurement.ray_weights/feature_quality shape must match transmitter/receiver ray shape")
+        weights = np.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0)
+        weights = np.clip(weights, 0.0, 1.0)
+    if mask is not None:
+        weights = np.where(np.asarray(mask, dtype=bool), weights, 0.0)
+    return weights
+
+
 def target_delta_tof(case: USCTCase, projector: StraightRayProjector) -> tuple[np.ndarray, np.ndarray]:
     if case.measurement.delta_tof_s is None:
         raise ValueError("straight-ray sound-speed reconstruction requires measurement.delta_tof_s")
     target = np.asarray(case.measurement.delta_tof_s, dtype=float).reshape(-1)
     if target.size != projector.n_rays:
         raise ValueError("measurement.delta_tof_s shape must match transmitter/receiver ray shape")
-    return target, valid_ray_mask(case, projector)
+    mask = valid_ray_mask(case, projector) & np.isfinite(target)
+    target = np.where(mask, target, 0.0)
+    return target, mask
 
 
 def target_attenuation_integral(case: USCTCase, projector: StraightRayProjector) -> tuple[np.ndarray, np.ndarray]:
@@ -58,18 +79,31 @@ def target_attenuation_integral(case: USCTCase, projector: StraightRayProjector)
     target = -log_amp.reshape(-1)
     if target.size != projector.n_rays:
         raise ValueError("measurement.log_amp shape must match transmitter/receiver ray shape")
-    return target, valid_ray_mask(case, projector)
+    mask = valid_ray_mask(case, projector) & np.isfinite(target)
+    target = np.where(mask, target, 0.0)
+    return target, mask
 
 
-def apply_mask(values: np.ndarray, mask: np.ndarray) -> np.ndarray:
+def apply_mask(values: np.ndarray, mask: np.ndarray, weights: np.ndarray | None = None, *, sqrt_weights: bool = True) -> np.ndarray:
     out = np.asarray(values, dtype=float).reshape(-1).copy()
     out[~mask] = 0.0
+    if weights is not None:
+        weight_values = np.asarray(weights, dtype=float).reshape(-1)
+        if weight_values.size != out.size:
+            raise ValueError("weights shape must match values")
+        multiplier = np.sqrt(np.clip(weight_values, 0.0, 1.0)) if sqrt_weights else np.clip(weight_values, 0.0, 1.0)
+        out *= multiplier
     return out
 
 
-def masked_norm(values: np.ndarray, mask: np.ndarray) -> float:
+def masked_norm(values: np.ndarray, mask: np.ndarray, weights: np.ndarray | None = None) -> float:
     values = np.asarray(values, dtype=float).reshape(-1)
-    return float(np.linalg.norm(values[mask]))
+    finite_mask = np.asarray(mask, dtype=bool) & np.isfinite(values)
+    if weights is None:
+        return float(np.linalg.norm(values[finite_mask]))
+    weight_values = np.asarray(weights, dtype=float).reshape(-1)
+    weighted = values[finite_mask] * np.sqrt(np.clip(weight_values[finite_mask], 0.0, 1.0))
+    return float(np.linalg.norm(weighted))
 
 
 def residual_metrics(initial_norm: float, final_norm: float) -> dict[str, float]:
@@ -103,12 +137,13 @@ def cgls_solve(
     iterations: int,
     damping: float = 0.0,
     regularization: str = "identity",
+    weights: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[float]]:
     """Solve a masked least-squares system with CGLS."""
 
     x = np.zeros(projector.grid.shape, dtype=float)
-    residual = apply_mask(target - projector.forward(x), mask)
-    s = projector.adjoint(residual)
+    residual = apply_mask(target - projector.forward(x), mask, weights)
+    s = projector.adjoint(apply_mask(residual, mask, weights))
     if damping > 0:
         s = s - damping * _regularization_normal(x, regularization)
     p = s.copy()
@@ -118,7 +153,7 @@ def cgls_solve(
     for _ in range(max(0, int(iterations))):
         if gamma <= 0:
             break
-        q = apply_mask(projector.forward(p), mask)
+        q = apply_mask(projector.forward(p), mask, weights)
         denom = float(np.vdot(q, q))
         if damping > 0:
             reg_p = _regularization_forward(p, regularization)
@@ -128,7 +163,7 @@ def cgls_solve(
         alpha = gamma / denom
         x = x + alpha * p
         residual = residual - alpha * q
-        s_next = projector.adjoint(residual)
+        s_next = projector.adjoint(apply_mask(residual, mask, weights))
         if damping > 0:
             s_next = s_next - damping * _regularization_normal(x, regularization)
         gamma_next = float(np.vdot(s_next, s_next))
@@ -183,6 +218,7 @@ def sirt_solve(
     smooth_sigma: float = 0.0,
     smooth_every: int = 0,
     roi_mask: np.ndarray | None = None,
+    weights: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[float]]:
     """Run a normalized simultaneous iterative reconstruction update."""
 
@@ -190,15 +226,19 @@ def sirt_solve(
     row_norm = projector.row_norms(power=1)
     row_norm[row_norm <= 0.0] = 1.0
     col_norm = projector.col_norms(power=1)
+    if weights is not None:
+        col_norm = projector.adjoint(np.clip(np.asarray(weights, dtype=float).reshape(-1), 0.0, 1.0) * np.asarray(mask, dtype=float).reshape(-1))
     col_norm[col_norm <= 0.0] = 1.0
     residual_norms: list[float] = []
     for _ in range(max(0, int(iterations))):
-        residual = apply_mask(target - projector.forward(x), mask)
+        residual_raw = np.asarray(target, dtype=float).reshape(-1) - projector.forward(x)
+        residual = apply_mask(residual_raw, mask, weights)
         residual_norms.append(float(np.linalg.norm(residual[mask])))
-        update = projector.adjoint(residual / row_norm) / col_norm
+        update_values = apply_mask(residual_raw / row_norm, mask, weights, sqrt_weights=False)
+        update = projector.adjoint(update_values) / col_norm
         x = x + float(relaxation) * update
         x = _post_update(x, iteration_index=_ + 1, nonnegative=nonnegative, smooth_sigma=smooth_sigma, smooth_every=smooth_every, roi_mask=roi_mask)
-    residual = apply_mask(target - projector.forward(x), mask)
+    residual = apply_mask(target - projector.forward(x), mask, weights)
     residual_norms.append(float(np.linalg.norm(residual[mask])))
     return x, residual_norms
 
@@ -214,11 +254,13 @@ def sart_solve(
     smooth_sigma: float = 0.0,
     smooth_every: int = 0,
     roi_mask: np.ndarray | None = None,
+    weights: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[float]]:
     """Run subset-normalized SART updates over masked rays."""
 
     x = np.zeros(projector.grid.shape, dtype=float)
     target = np.asarray(target, dtype=float).reshape(-1)
+    weight_values = np.ones(projector.n_rays, dtype=float) if weights is None else np.clip(np.asarray(weights, dtype=float).reshape(-1), 0.0, 1.0)
     row_norm = projector.row_norms(power=1)
     row_norm[row_norm <= 0.0] = 1.0
     ray_ids = np.flatnonzero(np.asarray(mask, dtype=bool))
@@ -231,13 +273,15 @@ def sart_solve(
                 continue
             subset_mask = np.zeros(projector.n_rays, dtype=bool)
             subset_mask[subset] = True
-            residual = apply_mask(target - projector.forward(x), subset_mask)
-            col_norm = projector.adjoint(subset_mask.astype(float))
+            residual_raw = target - projector.forward(x)
+            residual = apply_mask(residual_raw, subset_mask, weight_values)
+            col_norm = projector.adjoint(subset_mask.astype(float) * weight_values)
             col_norm[col_norm <= 0.0] = 1.0
-            update = projector.adjoint(residual / row_norm) / col_norm
+            update_values = apply_mask(residual_raw / row_norm, subset_mask, weight_values, sqrt_weights=False)
+            update = projector.adjoint(update_values) / col_norm
             x = x + float(relaxation) * update
             x = _post_update(x, iteration_index=_ + 1, nonnegative=False, smooth_sigma=smooth_sigma, smooth_every=smooth_every, roi_mask=roi_mask)
-        residual = apply_mask(target - projector.forward(x), mask)
+        residual = apply_mask(target - projector.forward(x), mask, weight_values)
         residual_norms.append(float(np.linalg.norm(residual[mask])))
     return x, residual_norms
 

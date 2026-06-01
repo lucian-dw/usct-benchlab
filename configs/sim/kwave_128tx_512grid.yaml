@@ -43,3 +43,9 @@ simulation:
 outputs:
   wavefield_case: ${USCT_KWAVE_WAVE_CASE:-runs/usctbench_runs/kwave_unified_quality/wavefield_cases/kwave_128tx_512grid_wavefield.h5}
   external_root: ${USCT_KWAVE_FORWARD_ROOT:-runs/usctbench_runs/kwave_unified_quality/external_kwave_forward}
+feature_extraction:
+  default_method: robust_fusion
+  formal_xcorr: bounded_normalized
+  unbounded_xcorr_allowed_for_solver: false
+  speed_bounds_mps: [1300.0, 1700.0]
+  min_phase_frequencies: 3

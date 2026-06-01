@@ -75,6 +75,15 @@ def run_algorithm_case(
                 failure_reason="simulation_failed_qc",
                 metrics={"simulation_failed_qc": True},
             )
+        elif bool(case.metadata.get("feature_failed_qc", False)):
+            result = ReconstructionResult(
+                algorithm=algorithm_name,
+                case_id=case.case_id,
+                runtime_s=0.0,
+                status=ResultStatus.SKIPPED,
+                failure_reason="feature_qc_failed",
+                metrics={"feature_qc_failed": True, **_feature_qc_metrics(case)},
+            )
         else:
             algorithm = get_algorithm(algorithm_name)
             result = algorithm.run(case, config)
@@ -87,6 +96,9 @@ def run_algorithm_case(
             failure_reason=f"{type(exc).__name__}: {exc}",
         )
     memory_after_mb = _peak_memory_mb()
+    if case is not None:
+        for key, value in _feature_qc_metrics(case).items():
+            result.metrics.setdefault(key, value)
 
     out_dir = out_root / case_id
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -139,6 +151,8 @@ def evaluate_run(run_dir: str | Path, protocol_path: str | Path | None = None) -
             "runtime_s": metadata.get("runtime_s", ""),
             "peak_memory_mb": metadata.get("peak_memory_mb", ""),
             "failure_reason": metadata.get("failure_reason") or "",
+            "feature_qc_passed": metadata.get("feature_qc_passed", ""),
+            "feature_failed_qc": metadata.get("feature_failed_qc", ""),
             "failure_report_present": (case_dir / "failure_report.md").exists(),
         }
         record.update(metrics)
@@ -222,6 +236,8 @@ def _write_result_artifacts(
                 "case_id": result.case_id,
                 "case_type": (case.metadata.get("case_type") if case is not None else None),
                 "benchmark_type": (case.metadata.get("benchmark_type") if case is not None else None),
+                "feature_qc_passed": (case.metadata.get("feature_qc_passed") if case is not None else None),
+                "feature_failed_qc": (case.metadata.get("feature_failed_qc") if case is not None else None),
                 **measurement_metadata,
                 "config": config,
                 "error_type": _classify_failure(result.failure_reason),
@@ -257,13 +273,14 @@ def _write_straight_ray_diagnostics(result: ReconstructionResult, case: USCTCase
     if case is None or (not str(result.algorithm).startswith("straight_") and str(result.algorithm) not in ray_diagnostic_algorithms):
         return
     try:
-        from usctbench.algorithms.ray._common import valid_ray_mask
+        from usctbench.algorithms.ray._common import ray_weights, valid_ray_mask
         from usctbench.algorithms.ray.straight_projector import StraightRayProjector
     except Exception:
         return
 
     projector = StraightRayProjector.from_case(case)
     mask = valid_ray_mask(case, projector)
+    weights = ray_weights(case, projector, mask)
     coverage = projector.adjoint(mask.astype(float))
     row_norm_l1 = projector.row_norms(power=1)
     row_norm_l2 = projector.row_norms(power=2)
@@ -275,6 +292,8 @@ def _write_straight_ray_diagnostics(result: ReconstructionResult, case: USCTCase
         "valid_ray_count": int(np.sum(mask)),
         "total_ray_count": int(mask.size),
         "valid_ray_fraction": float(np.mean(mask)) if mask.size else 0.0,
+        "ray_weight_mean": float(np.mean(weights[mask])) if np.any(mask) else 0.0,
+        "ray_weight_nonzero_fraction": float(np.mean(weights[mask] > 0.0)) if np.any(mask) else 0.0,
         "coverage": _array_stats(coverage),
         "coverage_nonzero_fraction": float(np.mean(coverage > 0.0)),
         "row_norm_l1": _array_stats(row_norm_l1[mask] if np.any(mask) else row_norm_l1),
@@ -289,6 +308,8 @@ def _write_straight_ray_diagnostics(result: ReconstructionResult, case: USCTCase
         result.metrics["ring_artifact_index"] = stats["ring_artifact_index"]
     result.metrics["coverage_nonzero_fraction"] = stats["coverage_nonzero_fraction"]
     result.metrics["valid_ray_fraction"] = stats["valid_ray_fraction"]
+    result.metrics.setdefault("ray_weight_mean", stats["ray_weight_mean"])
+    result.metrics.setdefault("ray_weight_nonzero_fraction", stats["ray_weight_nonzero_fraction"])
     result.metrics["row_norm_l1_min"] = stats["row_norm_l1"]["min"]
     result.metrics["row_norm_l1_max"] = stats["row_norm_l1"]["max"]
     result.metrics["col_norm_l1_min"] = stats["col_norm_l1"]["min"]
@@ -314,6 +335,17 @@ def _array_stats(values: np.ndarray) -> dict[str, float]:
         "mean": float(np.mean(finite)),
         "std": float(np.std(finite)),
     }
+
+
+def _feature_qc_metrics(case: USCTCase) -> dict[str, Any]:
+    qc = case.metadata.get("feature_qc", {})
+    if not isinstance(qc, dict):
+        return {}
+    metrics: dict[str, Any] = {}
+    for key, value in qc.items():
+        if isinstance(value, (int, float, bool, str)) or value is None:
+            metrics[key] = value
+    return metrics
 
 
 def _finite_corr(a: np.ndarray, b: np.ndarray) -> float:

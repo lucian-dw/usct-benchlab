@@ -117,6 +117,7 @@ def write_case_hdf5(case: USCTCase, path: str | Path) -> Path:
             "log_amp",
             "valid_mask",
             "feature_quality",
+            "ray_weights",
         ):
             _write_dataset(measurement, name, getattr(case.measurement, name))
 
@@ -168,6 +169,7 @@ def read_case_hdf5(path: str | Path) -> USCTCase:
             log_amp=_read_dataset(measurement_group, "log_amp"),
             valid_mask=_read_dataset(measurement_group, "valid_mask"),
             feature_quality=_read_dataset(measurement_group, "feature_quality"),
+            ray_weights=_read_dataset(measurement_group, "ray_weights"),
         )
 
         ground_truth_group = handle["ground_truth"]

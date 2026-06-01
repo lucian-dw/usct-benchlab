@@ -25,16 +25,27 @@ require_algorithm_case_matrix: true
 required_metrics:
   straight_cgls:
     - rmse
+    - selected_valid_fraction
+    - ray_weight_mean
   straight_sirt:
     - rmse
+    - selected_valid_fraction
+    - ray_weight_mean
   straight_sart:
     - rmse
+    - selected_valid_fraction
+    - ray_weight_mean
   bent_ray_gn:
     - rmse
+    - selected_valid_fraction
+    - ray_weight_mean
   rwave_adapter:
     - rmse
+    - selected_valid_fraction
+    - ray_weight_mean
   attenuation_sirt:
     - attenuation_rmse
+    - selected_valid_fraction
   fwi_kwave_adapter:
     - fwi_data_sanity_only
     - fwi_raw_time_data_available
@@ -53,13 +64,18 @@ thresholds:
 minimums:
   straight_cgls:
     valid_ray_fraction: 0.5
+    selected_valid_fraction: 0.45
   straight_sirt:
     valid_ray_fraction: 0.5
+    selected_valid_fraction: 0.45
   straight_sart:
     valid_ray_fraction: 0.5
+    selected_valid_fraction: 0.45
   bent_ray_gn:
     valid_ray_fraction: 0.5
+    selected_valid_fraction: 0.45
   rwave_adapter:
     valid_ray_fraction: 0.5
+    selected_valid_fraction: 0.45
   fwi_kwave_adapter:
     fwi_time_data_energy: 1.0e-12

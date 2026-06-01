@@ -117,6 +117,7 @@ class MeasurementSpec(_ArrayModel):
     log_amp: np.ndarray | None = None
     valid_mask: np.ndarray | None = None
     feature_quality: np.ndarray | None = None
+    ray_weights: np.ndarray | None = None
 
     @field_validator(
         "frequencies_hz",
@@ -132,6 +133,7 @@ class MeasurementSpec(_ArrayModel):
         "phase_slope_delay_s",
         "log_amp",
         "feature_quality",
+        "ray_weights",
         mode="before",
     )
     @classmethod
@@ -167,6 +169,7 @@ class MeasurementSpec(_ArrayModel):
                     self.tof_xcorr_s,
                     self.phase_slope_delay_s,
                     self.log_amp,
+                    self.ray_weights,
                 )
             )
             if not has_feature:
