@@ -55,8 +55,9 @@ def main() -> int:
     args = parse_args()
     root = Path(args.usct_kwave_root).expanduser().resolve()
     sys.path.insert(0, str(root))
-    from openbreastus_diffusion.kwave_dps.matlab_bridge import connect_matlab, matlab_row, matlab_struct_to_python
+    from openbreastus_diffusion.kwave_dps.matlab_bridge import connect_matlab
     from openbreastus_diffusion.kwave_dps.run_full_pipeline import matlab_vector
+    from openbreastus_diffusion.kwave_dps.utils import matlab_struct_to_python
 
     eng = connect_matlab(
         shared_engine_name=args.shared_engine_name,
