@@ -527,8 +527,10 @@ def _read_external_kwave_dataset(path: Path) -> dict[str, Any]:
         tx_indices = _read_indices(handle.get("tx_indices_saved"), positions_xy.shape[0])
         rx_indices = _read_indices(handle.get("rx_indices_saved"), positions_xy.shape[0])
         full_dataset = _as_tx_rx_time(handle["full_dataset"][()], time_axis.size, rx_indices.size, tx_indices.size)
-        sound_speed = np.asarray(handle["C"][()], dtype=float)
-        attenuation = np.asarray(handle["atten"][()], dtype=float)
+        sound_speed_raw = np.asarray(handle["C"][()], dtype=float)
+        attenuation_raw = np.asarray(handle["atten"][()], dtype=float)
+        sound_speed = _external_xy_image_to_internal_yx(sound_speed_raw)
+        attenuation = _external_xy_image_to_internal_yx(attenuation_raw)
         xi = np.asarray(handle["xi_orig"][()], dtype=float).reshape(-1) if "xi_orig" in handle else None
         yi = np.asarray(handle["yi_orig"][()], dtype=float).reshape(-1) if "yi_orig" in handle else None
         metadata = _read_hdf5_group(handle["sim_metadata"]) if "sim_metadata" in handle else {}
@@ -541,7 +543,14 @@ def _read_external_kwave_dataset(path: Path) -> dict[str, Any]:
         "attenuation_np_per_m": attenuation,
         "grid": grid,
         "geometry": geometry,
-        "metadata": metadata,
+        "metadata": {
+            **metadata,
+            "array_axis_convention_raw": "[x,y]",
+            "array_axis_convention_internal": "[row=y,col=x]",
+            "array_axis_conversion": "transpose_external_xy_to_internal_yx",
+            "raw_sound_speed_shape_xy": [int(value) for value in sound_speed_raw.shape],
+            "internal_sound_speed_shape_yx": [int(value) for value in sound_speed.shape],
+        },
     }
 
 
@@ -565,6 +574,19 @@ def _as_tx_rx_time(data: np.ndarray, n_time: int, n_rx: int, n_tx: int) -> np.nd
     if array.shape == (n_rx, n_tx, n_time):
         return np.transpose(array, (1, 0, 2))
     raise ValueError(f"full_dataset shape {array.shape} does not match n_time={n_time}, n_rx={n_rx}, n_tx={n_tx}")
+
+
+def _external_xy_image_to_internal_yx(image: np.ndarray) -> np.ndarray:
+    """Convert external k-Wave/MATLAB image arrays from [x,y] to [row=y,col=x].
+
+    MATLAB/k-Wave stores the image plane in x-major order for these external
+    datasets. USCTCase image-domain arrays are always row-major [y,x].
+    """
+
+    array = np.asarray(image, dtype=float).squeeze()
+    if array.ndim != 2:
+        raise ValueError(f"external k-Wave image arrays must be 2-D [x,y], got {array.shape}")
+    return np.ascontiguousarray(array.T)
 
 
 def _resample_time_data_to_axis(data: np.ndarray, source_axis: np.ndarray, target_axis: np.ndarray) -> np.ndarray:

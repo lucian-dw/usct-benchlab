@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import h5py
 import numpy as np
 import yaml
 
 from usctbench.features import extract_wavefield_features
 from usctbench.io.hdf5 import read_case_hdf5, write_case_hdf5
 from usctbench.provenance import MeasurementProvenance, case_measurement_metadata
-from usctbench.sim.kwave_forward import run_kwave_simulation_from_config
+from usctbench.sim.kwave_forward import _read_external_kwave_dataset, run_kwave_simulation_from_config
 from usctbench.sim.qc import run_simulation_qc
 
 
@@ -56,6 +57,29 @@ def test_kwave_smoke_sim_qc_and_features(tmp_path):
     assert loaded.measurement.freq_data is not None
     assert feature_qc["tof_valid_fraction"] > 0.5
     assert feature_case.measurement.feature_quality.shape == (8, 8)
+
+
+def test_external_kwave_reader_transposes_xy_images_to_yx(tmp_path):
+    path = tmp_path / "external_dataset.mat"
+    c_xy = np.array([[1500.0, 1510.0], [1520.0, 1530.0], [1540.0, 1550.0]], dtype=np.float32)
+    attenuation_xy = np.array([[0.0, 0.1], [0.2, 0.3], [0.4, 0.5]], dtype=np.float32)
+    with h5py.File(path, "w") as handle:
+        handle.create_dataset("time", data=np.linspace(0.0, 4.0e-7, 5))
+        handle.create_dataset("transducerPositionsXY", data=np.array([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]], dtype=float))
+        handle.create_dataset("full_dataset", data=np.ones((4, 4, 5), dtype=np.float32))
+        handle.create_dataset("C", data=c_xy)
+        handle.create_dataset("atten", data=attenuation_xy)
+        handle.create_dataset("xi_orig", data=np.array([-0.02, 0.0, 0.02], dtype=float))
+        handle.create_dataset("yi_orig", data=np.array([-0.01, 0.01], dtype=float))
+
+    data = _read_external_kwave_dataset(path)
+
+    assert data["grid"].shape == (2, 3)
+    np.testing.assert_allclose(data["sound_speed_mps"], c_xy.T)
+    np.testing.assert_allclose(data["attenuation_np_per_m"], attenuation_xy.T)
+    assert data["metadata"]["array_axis_convention_raw"] == "[x,y]"
+    assert data["metadata"]["array_axis_convention_internal"] == "[row=y,col=x]"
+    assert data["metadata"]["array_axis_conversion"] == "transpose_external_xy_to_internal_yx"
 
 
 def test_simulation_qc_excludes_self_pairs_from_boundary_energy(tmp_path):

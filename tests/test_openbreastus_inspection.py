@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from usctbench.data.openbreastus import inspect_openbreastus
-from usctbench.data.conversion import convert_speed_mat_volume, speed_mat_metadata
+from usctbench.data.conversion import convert_kwave_channel_mat, convert_speed_mat_volume, speed_mat_metadata
 from usctbench.data.smoke_subset import make_quality_subset, make_smoke_subset
 from usctbench.io.hdf5 import read_case_hdf5
 
@@ -226,6 +226,33 @@ def test_make_smoke_subset_prefers_and_converts_kwave_channel_mat(tmp_path):
     assert loaded.ground_truth.attenuation_np_per_m.shape == (4, 4)
     assert float(np.linalg.norm(loaded.measurement.log_amp)) > 0.0
     assert loaded.metadata["conversion"] == "kwave_channel_mat_to_feature_case"
+
+
+def test_convert_kwave_channel_mat_transposes_external_xy_property_maps(tmp_path):
+    mat_path = tmp_path / "kwave_xy.mat"
+    c_xy = np.array([[1500.0, 1510.0], [1520.0, 1530.0], [1540.0, 1550.0]], dtype=np.float64)
+    attenuation_xy = np.array([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]], dtype=np.float64)
+    with h5py.File(mat_path, "w") as handle:
+        handle.create_dataset("C", data=c_xy)
+        handle.create_dataset("atten", data=attenuation_xy)
+        handle.create_dataset("full_dataset", data=np.ones((4, 4, 8), dtype=np.float32))
+        handle.create_dataset("time", data=np.linspace(0.0, 1.0e-4, 8)[:, None])
+        handle.create_dataset(
+            "transducerPositionsXY",
+            data=np.array([[0.11, 0.0], [0.0, 0.11], [-0.11, 0.0], [0.0, -0.11]], dtype=float),
+        )
+        handle.create_dataset("xi_orig", data=np.array([-0.02, 0.0, 0.02])[:, None])
+        handle.create_dataset("yi_orig", data=np.array([-0.01, 0.01])[:, None])
+
+    records = convert_kwave_channel_mat(mat_path, tmp_path / "out", output_shape=(2, 3), n_transducers=4)
+    loaded = read_case_hdf5(records[0]["path"])
+
+    assert loaded.grid.shape == (2, 3)
+    np.testing.assert_allclose(loaded.ground_truth.sound_speed_mps, c_xy.T)
+    np.testing.assert_allclose(loaded.ground_truth.attenuation_np_per_m, attenuation_xy.T)
+    assert loaded.metadata["array_axis_convention_raw"] == "[x,y]"
+    assert loaded.metadata["array_axis_convention_internal"] == "[row=y,col=x]"
+    assert loaded.metadata["array_axis_conversion"] == "transpose_external_xy_to_internal_yx"
 
 
 def test_make_smoke_subset_removes_stale_converted_cases(tmp_path):

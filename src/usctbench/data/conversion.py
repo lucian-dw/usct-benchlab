@@ -155,8 +155,10 @@ def convert_kwave_channel_mat(
         metadata = _kwave_channel_metadata_from_handle(handle)
         if metadata is None:
             raise ValueError(f"not a supported k-Wave channel MAT file: {source}")
-        sound_speed = np.asarray(handle["C"][()], dtype=float)
-        attenuation = np.asarray(handle["atten"][()], dtype=float)
+        sound_speed_raw = np.asarray(handle["C"][()], dtype=float)
+        attenuation_raw = np.asarray(handle["atten"][()], dtype=float)
+        sound_speed = _external_xy_image_to_internal_yx(sound_speed_raw)
+        attenuation = _external_xy_image_to_internal_yx(attenuation_raw)
         positions_xy = np.asarray(handle["transducerPositionsXY"][()], dtype=float)
         time_s = np.asarray(handle["time"][()], dtype=float).reshape(-1)
         full_shape = tuple(int(v) for v in handle["full_dataset"].shape)
@@ -176,7 +178,7 @@ def convert_kwave_channel_mat(
         time_s=time_s,
         source=source,
         source_label=source_label,
-        source_shape=tuple(int(v) for v in sound_speed.shape),
+        source_shape=tuple(int(v) for v in sound_speed_raw.shape),
         full_dataset_shape=full_shape,
         source_npy_path=source_npy_path,
         frequency_hz=frequency_hz,
@@ -194,6 +196,10 @@ def convert_kwave_channel_mat(
             "source_path": str(source),
             "source_dataset": "kWave_channel_mat",
             "shape": list(sound_speed_small.shape),
+            "source_shape": list(sound_speed_raw.shape),
+            "array_axis_convention_raw": "[x,y]",
+            "array_axis_convention_internal": "[row=y,col=x]",
+            "array_axis_conversion": "transpose_external_xy_to_internal_yx",
             "conversion": case.metadata["conversion"],
             "case_type": case.metadata["case_type"],
             "benchmark_type": case.metadata["benchmark_type"],
@@ -398,6 +404,10 @@ def _kwave_arrays_to_case(
         "source_label": source_label,
         "source_npy_path": source_npy_path,
         "source_shape": list(source_shape),
+        "internal_shape": list(sound_speed_mps.shape),
+        "array_axis_convention_raw": "[x,y]",
+        "array_axis_convention_internal": "[row=y,col=x]",
+        "array_axis_conversion": "transpose_external_xy_to_internal_yx",
         "full_dataset_shape": list(full_dataset_shape),
         "conversion": "kwave_channel_mat_to_feature_case",
         "feature_provenance": "surrogate_delta_tof_from_sound_speed_and_attenuation_line_integral_from_simulated_ground_truth",
@@ -598,6 +608,15 @@ def _downsample_mean(image: np.ndarray, output_shape: tuple[int, int]) -> np.nda
     top = (1.0 - wx) * array[np.ix_(y0, x0)] + wx * array[np.ix_(y0, x1)]
     bottom = (1.0 - wx) * array[np.ix_(y1, x0)] + wx * array[np.ix_(y1, x1)]
     return ((1.0 - wy) * top + wy * bottom).astype(float, copy=False)
+
+
+def _external_xy_image_to_internal_yx(image: np.ndarray) -> np.ndarray:
+    """Convert external k-Wave/MATLAB image arrays from [x,y] to [row=y,col=x]."""
+
+    array = np.asarray(image, dtype=float).squeeze()
+    if array.ndim != 2:
+        raise ValueError(f"external k-Wave image arrays must be 2-D [x,y], got {array.shape}")
+    return np.ascontiguousarray(array.T)
 
 
 def _fit_nbp_field_of_view(
