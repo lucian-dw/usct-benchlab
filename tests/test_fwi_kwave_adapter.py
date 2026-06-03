@@ -37,54 +37,42 @@ DENSE_SUCCESS_FREQS = [
     0.8,
 ]
 
-RF_INIT_SUCCESS_ARGS = [
+BULK_SUPPORT_INIT_ARGS = [
+    "--init-mode",
+    "bulk_support",
     "--background-speed",
     "1500",
-    "--recon-dxi-mm",
-    "0.3",
-    "--coarse-dxi-mm",
-    "3.0",
-    "--fov-radius-mm",
-    "85.0",
-    "--calibration-impact-radius-mm",
-    "78.0",
-    "--exclude-neighbor-fraction",
-    "0.123046875",
     "--arrival-picker",
-    "abs",
+    "hilbert",
     "--min-confidence",
-    "2.0",
-    "--residual-clip-us",
-    "8.0",
-    "--residual-percentile",
-    "99.0",
-    "--max-rays",
-    "5000",
-    "--ray-step-mm",
     "1.5",
-    "--min-path-mm",
-    "6.0",
-    "--lsqr-damp",
-    "0.03",
-    "--lsqr-iter-lim",
-    "250",
+    "--residual-clip-us",
+    "5",
+    "--residual-percentile",
+    "95",
+    "--max-rays",
+    "8000",
     "--smooth-sigma-mm",
-    "6.0",
+    "10",
     "--support-mode",
     "backprojection",
     "--support-percentile",
-    "45.0",
+    "45",
     "--support-sigma-mm",
-    "5.0",
+    "8",
     "--support-alpha-sigma-mm",
-    "2.5",
+    "8",
     "--support-dilate-mm",
-    "4.0",
+    "4",
+    "--bulk-update-scale",
+    "1.0",
+    "--bulk-min-path-mm",
+    "20",
+    "--bulk-stat",
+    "median",
     "--velocity-bounds",
-    "1408.7",
-    "1595.1",
-    "--update-scale",
-    "-1",
+    "1408.692",
+    "1595.1279",
     "--compare-gt",
 ]
 
@@ -315,7 +303,7 @@ def test_kwave_adapter_external_dataset_mode_keeps_skip_flags(tmp_path, monkeypa
     assert command[command.index("--dataset-path") + 1] == str(dataset_path)
 
 
-def test_kwave_adapter_traveltime_warm_start_runs_three_external_steps(tmp_path, monkeypatch):
+def test_kwave_adapter_bulk_support_warm_start_runs_three_external_steps(tmp_path, monkeypatch):
     result_path = tmp_path / "result.mat"
     dataset_path = tmp_path / "dataset.mat"
     warm_start_path = tmp_path / "warm_start.mat"
@@ -337,9 +325,9 @@ def test_kwave_adapter_traveltime_warm_start_runs_three_external_steps(tmp_path,
                 "run_external": True,
                 "execution_mode": "full_pipeline_from_speed_map",
                 "dataset_path": str(dataset_path),
-                "warm_start_builder": "traveltime",
+                "warm_start_builder": "bulk_support",
                 "warm_start_path": str(warm_start_path),
-                "warm_start_args": RF_INIT_SUCCESS_ARGS,
+                "warm_start_args": BULK_SUPPORT_INIT_ARGS,
                 "no_connect_existing": True,
                 "sos_freqs_mhz": DENSE_SUCCESS_FREQS,
                 "usct_kwave_root": str(tmp_path),
@@ -355,10 +343,12 @@ def test_kwave_adapter_traveltime_warm_start_runs_three_external_steps(tmp_path,
     assert commands[0][commands[0].index("--sos-freqs-mhz") + 1 : commands[0].index("--sos-freqs-mhz") + 22] == [
         str(freq) for freq in DENSE_SUCCESS_FREQS
     ]
-    assert "openbreastus_diffusion.kwave_dps.make_traveltime_init" in commands[1]
+    assert "openbreastus_diffusion.kwave_dps.make_bulk_support_init" in commands[1]
     assert commands[1][commands[1].index("--output-path") + 1] == str(warm_start_path)
-    assert commands[1][-len(RF_INIT_SUCCESS_ARGS) :] == RF_INIT_SUCCESS_ARGS
-    assert commands[1][commands[1].index("--update-scale") + 1] == "-1"
+    assert commands[1][-len(BULK_SUPPORT_INIT_ARGS) :] == BULK_SUPPORT_INIT_ARGS
+    assert "--update-scale" not in commands[1]
+    assert commands[1][commands[1].index("--bulk-update-scale") + 1] == "1.0"
+    assert commands[1][commands[1].index("--arrival-picker") + 1] == "hilbert"
     assert "--compare-gt" in commands[1]
     assert "--skip-siminfo" in commands[2]
     assert "--skip-rf" in commands[2]
@@ -368,6 +358,8 @@ def test_kwave_adapter_traveltime_warm_start_runs_three_external_steps(tmp_path,
         str(freq) for freq in DENSE_SUCCESS_FREQS
     ]
     assert commands[2][commands[2].index("--warm-start-result") + 1] == str(warm_start_path)
+    assert result.metrics["warm_start_builder"] == "bulk_support"
+    assert result.metrics["warm_start_module"] == "openbreastus_diffusion.kwave_dps.make_bulk_support_init"
 
 
 def _write_result(path):

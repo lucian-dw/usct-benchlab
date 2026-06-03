@@ -2,14 +2,15 @@ name: fwi_kwave_adapter
 parameters:
   result_path: ${USCT_KWAVE_FWI_RESULT_PATH}
   run_external: true
-  execution_mode: full_pipeline_from_speed_map
+  execution_mode: ${USCT_KWAVE_EXECUTION_MODE:-invert_existing_dataset}
   baseline_sound_speed_mps: 1500.0
-  usct_kwave_root: ${USCT_KWAVE_ROOT}
-  python_bin: ${USCT_KWAVE_PYTHON_BIN}
+  usct_kwave_root: ${USCT_KWAVE_ROOT:-/home/wudalong/USCT_kwave}
+  python_bin: ${USCT_KWAVE_PYTHON_BIN:-/home/wudalong/miniconda3/envs/usct-kwave/bin/python}
   pipeline_module: openbreastus_diffusion.kwave_dps.run_full_pipeline
   mat_path: ${USCT_KWAVE_SOURCE_MAT}
   mat_key: ${USCT_KWAVE_MAT_KEY}
   sample_index: ${USCT_KWAVE_SAMPLE_INDEX}
+  use_preprocessed_field: true
   array_mode: full128
   object_scale: 1.0
   object_pose: native
@@ -25,60 +26,49 @@ parameters:
   output_dir: ${USCT_KWAVE_OUTPUT_DIR}
   siminfo_path: ${USCT_KWAVE_SIMINFO_PATH}
   scratch_dir: ${USCT_KWAVE_SCRATCH_DIR}
-  dataset_path: ${USCT_KWAVE_DATASET_PATH}
+  dataset_path: ${USCT_KWAVE_DATASET_PATH:-/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/outputs/dps_preproc_test201_latestckpt/datasets/kWave_openbreast_test201_full128_scale1p000_preproc_crop300_tla250_ab0_s2a0_cuda_binary.mat}
   external_log_path: ${USCT_KWAVE_EXTERNAL_LOG_PATH}
-  warm_start_builder: traveltime
+  warm_start_builder: bulk_support
+  warm_start_module: openbreastus_diffusion.kwave_dps.make_bulk_support_init
   warm_start_path: ${USCT_KWAVE_WARM_START_PATH}
   warm_start_summary_path: ${USCT_KWAVE_WARM_START_SUMMARY_PATH}
   warm_start_diagnostic_prefix: ${USCT_KWAVE_WARM_START_DIAGNOSTIC_PREFIX}
   warm_start_args:
+    - --init-mode
+    - bulk_support
     - --background-speed
     - "1500"
-    - --recon-dxi-mm
-    - "0.3"
-    - --coarse-dxi-mm
-    - "3.0"
-    - --fov-radius-mm
-    - "85.0"
-    - --calibration-impact-radius-mm
-    - "78.0"
-    - --exclude-neighbor-fraction
-    - "0.123046875"
     - --arrival-picker
-    - abs
+    - hilbert
     - --min-confidence
-    - "2.0"
-    - --residual-clip-us
-    - "8.0"
-    - --residual-percentile
-    - "99.0"
-    - --max-rays
-    - "5000"
-    - --ray-step-mm
     - "1.5"
-    - --min-path-mm
-    - "6.0"
-    - --lsqr-damp
-    - "0.03"
-    - --lsqr-iter-lim
-    - "250"
+    - --residual-clip-us
+    - "5"
+    - --residual-percentile
+    - "95"
+    - --max-rays
+    - "8000"
     - --smooth-sigma-mm
-    - "6.0"
+    - "10"
     - --support-mode
     - backprojection
     - --support-percentile
-    - "45.0"
+    - "45"
     - --support-sigma-mm
-    - "5.0"
+    - "8"
     - --support-alpha-sigma-mm
-    - "2.5"
+    - "8"
     - --support-dilate-mm
-    - "4.0"
+    - "4"
+    - --bulk-update-scale
+    - "1.0"
+    - --bulk-min-path-mm
+    - "20"
+    - --bulk-stat
+    - median
     - --velocity-bounds
-    - "1408.7"
-    - "1595.1"
-    - --update-scale
-    - "-1"
+    - "1408.692"
+    - "1595.1279"
     - --compare-gt
   reconstruction_iteration: ${USCT_KWAVE_RECONSTRUCTION_ITERATION:-best}
   overwrite: true
@@ -128,12 +118,13 @@ parameters:
   timeout_s: 21600
 metadata:
   external_source: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/run_full_pipeline.py
-  default_mode: full_pipeline_from_speed_map
-  default_initialization: RF travel-time warm start with sign-corrected slowness update.
+  default_mode: invert_existing_dataset
+  default_dataset_alignment: preproc_crop300_tla250 existing k-Wave MAT, full128 cuda-binary, attenuation disabled.
+  default_initialization: bulk-support warm start from openbreastus_diffusion.kwave_dps.make_bulk_support_init.
   frequency_schedule_mhz: "0.3:0.025:0.8 with 3 sound-speed iterations per frequency"
-  reference_success_config: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/configs/rfinit_densefreq_test201_success.json
-  reference_success_result: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/outputs/rfinit_densefreq_test201_20260531_215043/results/test201_rfinit_sos0p3to0p8_step0p025_iter3.mat
-  reference_success_metrics: "test201 final_inside_psnr=22.7387 final_inside_corr=0.8933 final_inside_hp_corr=0.8295"
+  reference_bulk_support_doc: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/docs/experiments/2026-06-02_bulk_support_dps_mainline.md
+  reference_bulk_support_config: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/configs/bulk_support_dps_notebook30_mainline.json
+  reference_pure_fwi_metrics: "test201 pure FWI inside_psnr=26.4539 inside_ssim=0.8315 inside_corr=0.9520 inside_hp_corr=0.9240"
   default_selection: best RMSE iteration against external C_INTERP, with final iteration retained as a diagnostic artifact.
   fallback_initialization: unset warm_start_builder to use constant background/debug mode.
   v0_1_scope: k-Wave simulation plus Helmholtz/FWI only; no diffusion or generative priors.

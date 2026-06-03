@@ -1,7 +1,10 @@
 name: fwi_kwave_adapter
 parameters:
+  required_feature_channel: raw_wavefield
   data_sanity_only: true
   baseline_sound_speed_mps: 1500.0
 metadata:
   mode: unified_kwave_wavefield_data_sanity
+  required_feature_channel: raw_wavefield
+  observable_definition: raw k-Wave time_data/freq_data, not a derived ToF feature case
   note: Validates that the FWI adapter ingests the same raw time/frequency wavefield case; it is not a claimed FWI inversion result.

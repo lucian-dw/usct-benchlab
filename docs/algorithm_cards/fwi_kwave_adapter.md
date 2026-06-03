@@ -11,19 +11,19 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - For active external execution, an A100 environment with the `USCT_kwave` project, k-Wave, MATLAB engine support, CUDA k-Wave backend, and OpenBreastUS speed-map MAT files.
 - `execution_mode: invert_existing_dataset` requires a generated k-Wave channel dataset.
 - `execution_mode: full_pipeline_from_speed_map` starts from a 2-D OpenBreastUS speed map and calls the A100 `run_full_pipeline.py` path: sim info, RF generation, channel assembly, Helmholtz preparation inside MATLAB, and multi-frequency FWI.
-- `warm_start_builder: traveltime` runs the A100 RF travel-time initializer after channel assembly and passes the generated `VEL_ESTIM` MAT file into FWI as `warm_start_path`.
+- `warm_start_builder: bulk_support` runs the A100 bulk-support initializer after channel assembly or on an existing k-Wave dataset, then passes the generated `VEL_ESTIM` MAT file into FWI as `warm_start_path`.
 
 ## Default Settings
 
 - Default mode is result ingestion only: `run_external: false`.
 - `result_path` must point to an existing k-Wave FWI result `.mat`.
 - `run_external: true` calls `openbreastus_diffusion.kwave_dps.run_full_pipeline` with explicit pipeline arguments from the config.
-- `configs/algorithms/fwi_kwave_full_pipeline.yaml` is the A100 smoke config for `full128`, 0.3:0.025:0.8 MHz, 3 sound-speed iterations per frequency, no attenuation inversion, RF travel-time warm start, `0.3 mm` reconstruction grid, `c_geom=1500`, update damping `0.25`, velocity clamp `[1408.692, 1595.1279]` m/s, per-step update clamp `12 m/s`, zero background attenuation, and `save_raw_grad_iters: 0`.
-- The RF travel-time initializer pins the successful test201 parameters from `rfinit_densefreq_test201_success.json`, including `--background-speed 1500`, `--recon-dxi-mm 0.3`, support backprojection settings, `--velocity-bounds 1408.7 1595.1`, `--update-scale -1`, and `--compare-gt`.
+- `configs/algorithms/fwi_kwave_full_pipeline.yaml` is the A100 pure-FWI smoke config for `full128`, existing `preproc_crop300_tla250` k-Wave datasets by default, 0.3:0.025:0.8 MHz, 3 sound-speed iterations per frequency, no attenuation inversion, bulk-support warm start, `0.3 mm` reconstruction grid, `c_geom=1500`, update damping `0.25`, velocity clamp `[1408.692, 1595.1279]` m/s, per-step update clamp `12 m/s`, zero background attenuation, `sign_conv=-1`, and `save_raw_grad_iters: 0`.
+- The bulk-support initializer calls `openbreastus_diffusion.kwave_dps.make_bulk_support_init` with `--init-mode bulk_support`, Hilbert arrival picking, support backprojection, `--bulk-update-scale 1.0`, `--bulk-stat median`, `--velocity-bounds 1408.692 1595.1279`, and `--compare-gt`. The old RF texture initializer and `--update-scale -1` are retained only for ablation/debug, not the mainline config.
 - The smoke config selects the best RMSE iteration against the external k-Wave `C_INTERP` grid for benchmark output. The renderer still writes both best and final reconstruction artifacts so final-iteration behavior remains visible.
 - The default benchmark wrapper case is generated at 256x256 so image metrics are comparable with the traditional quality runs. The external k-Wave/FWI result remains authoritative; judge FWI quality first against the external MAT `C_INTERP` grid and the k-Wave-native metrics, not only against surrogate wrapper metrics.
 - Acceptance requires the selected external iteration to improve over the external initial model using `kwave_gt_selected_relative_rmse_improvement`, plus k-Wave-native `kwave_native_psnr` and `kwave_native_ssim`. Final-iteration improvement is still recorded for diagnostics, but no longer gates the pass/fail result. Water/background improvement is also recorded for diagnostics, but is not a pass/fail gate for FWI.
-- Current success reference: OpenBreastUS test201, result `/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/outputs/rfinit_densefreq_test201_20260531_215043/results/test201_rfinit_sos0p3to0p8_step0p025_iter3.mat`, with `final_inside_psnr=22.7387`, `final_inside_corr=0.8933`, and `final_inside_hp_corr=0.8295` in `/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/configs/rfinit_densefreq_test201_success.json`.
+- Current reference: `/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/docs/experiments/2026-06-02_bulk_support_dps_mainline.md`. Pure bulk-support FWI reference inside metrics are: sample001 PSNR/SSIM/corr/HP-corr `26.1998/0.7887/0.9368/0.8869`; sample201 `26.4539/0.8315/0.9520/0.9240`; sample501 `26.1279/0.7936/0.9327/0.8941`; sample701 `29.3894/0.8216/0.8414/0.8092`.
 
 ## Expected Failure Modes
 
@@ -38,7 +38,7 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - Verify `result_path`, `dataset_path`, `mat_path`, `mat_key`, and `sample_index` refer to the same case.
 - Start with an existing validated result before enabling `run_external`, then move to `invert_existing_dataset`, then `full_pipeline_from_speed_map`.
 - Use the configured low-to-high frequency schedule first; if image RMSE worsens while waveform loss decreases, inspect both final and best artifacts before changing the schedule.
-- Validate RF warm-start sign, scale, and support before tuning FWI iterations; wrong sign can produce plausible-looking outlines with negative object correlation.
+- Validate bulk-support init summary, support mask, and internal bulk speed before tuning FWI iterations. Do not use the old `--update-scale -1` RF texture initializer as the mainline unless a dedicated sign diagnostic justifies it.
 - If image RMSE worsens while waveform loss decreases, reduce iterations, clamp per-step updates, or use a better multi-frequency schedule before claiming reconstruction quality.
 - Check the external stdout/stderr log before changing inversion parameters.
 

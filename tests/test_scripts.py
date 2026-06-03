@@ -152,28 +152,26 @@ def test_fwi_kwave_adapter_smoke_protocol_is_ingestion_only():
     assert "water_relative_rmse_improvement" not in required
 
 
-def test_fwi_kwave_full_pipeline_smoke_script_runs_speed_map_flow():
+def test_fwi_kwave_full_pipeline_smoke_script_runs_precomputed_kwave_mat_flow():
     text = Path("scripts/run_fwi_kwave_full_pipeline_smoke.sh").read_text(encoding="utf-8")
 
-    assert "convert_speed_mat_volume" in text
+    assert "convert_kwave_channel_mat" in text
     assert "fwi_kwave_full_pipeline.yaml" in text
     assert "render_kwave_fwi_smoke_outputs.py" in text
-    assert "render_class_comparison_panels.py" in text
     assert "USCT_KWAVE_SOURCE_MAT" in text
+    assert "USCT_KWAVE_DATASET_PATH" in text
     assert "USCT_KWAVE_PYTHON_BIN" in text
     assert "USCT_KWAVE_WARM_START_PATH" in text
     assert "USCT_KWAVE_RECONSTRUCTION_ITERATION" in text
-    assert "USCT_KWAVE_RENDER_CROSS_ALGORITHM" in text
     assert "USCT_KWAVE_SAMPLE_INDEX:-201" in text
-    assert "USCT_KWAVE_RUN_ID:-fwi_kwave_full_pipeline_success201_dense" in text
+    assert "USCT_KWAVE_RUN_ID:-fwi_kwave_bulk_support_pure201" in text
     assert "USCT_KWAVE_WRAPPER_CONVERTED_SHAPE:-256" in text
     assert "USCT_KWAVE_RECONSTRUCTION_ITERATION:-best" in text
     assert "benchmark wrapper" in text
+    assert "preproc_crop300_tla250" in text
     assert "output_shape=($USCT_KWAVE_WRAPPER_CONVERTED_SHAPE, $USCT_KWAVE_WRAPPER_CONVERTED_SHAPE)" in text
     assert "--render-best-and-final" in text
-    assert "straight_cgls straight_sirt straight_sart bent_ray_gn rwave_adapter fwi_kwave_adapter" in text
-    assert "--transpose" in text
-    assert "fwi_case_${case_id}_cross_algorithm_horizontal_gray.png" in text
+    assert "straight_cgls straight_sirt straight_sart bent_ray_gn rwave_adapter" not in text
 
 
 def test_fwi_kwave_render_script_writes_contact_sheet():
@@ -185,7 +183,7 @@ def test_fwi_kwave_render_script_writes_contact_sheet():
     assert "Ground truth" in text
 
 
-def test_fwi_kwave_full_pipeline_config_uses_multifrequency_rf_warm_start():
+def test_fwi_kwave_full_pipeline_config_uses_bulk_support_warm_start():
     import yaml
 
     config = yaml.safe_load(Path("configs/algorithms/fwi_kwave_full_pipeline.yaml").read_text(encoding="utf-8"))
@@ -222,7 +220,8 @@ def test_fwi_kwave_full_pipeline_config_uses_multifrequency_rf_warm_start():
     assert params["xmax_mm"] == 120.0
     assert params["circle_radius_mm"] == 110.0
     assert params["backend"] == "cuda-binary"
-    assert params["warm_start_builder"] == "traveltime"
+    assert params["warm_start_builder"] == "bulk_support"
+    assert params["warm_start_module"] == "openbreastus_diffusion.kwave_dps.make_bulk_support_init"
     assert params["start_matlab"] is True
     assert params["no_connect_existing"] is True
     assert params["sos_freqs_mhz"] == expected_freqs
@@ -243,14 +242,27 @@ def test_fwi_kwave_full_pipeline_config_uses_multifrequency_rf_warm_start():
     assert params["save_raw_grad_iters"] == 0
     assert params["reconstruction_iteration"] == "${USCT_KWAVE_RECONSTRUCTION_ITERATION:-best}"
     warm_args = params["warm_start_args"]
+    assert warm_args[warm_args.index("--init-mode") + 1] == "bulk_support"
     assert warm_args[warm_args.index("--background-speed") + 1] == "1500"
-    assert warm_args[warm_args.index("--coarse-dxi-mm") + 1] == "3.0"
+    assert warm_args[warm_args.index("--arrival-picker") + 1] == "hilbert"
+    assert warm_args[warm_args.index("--min-confidence") + 1] == "1.5"
+    assert warm_args[warm_args.index("--residual-clip-us") + 1] == "5"
+    assert warm_args[warm_args.index("--residual-percentile") + 1] == "95"
+    assert warm_args[warm_args.index("--max-rays") + 1] == "8000"
+    assert warm_args[warm_args.index("--smooth-sigma-mm") + 1] == "10"
     assert warm_args[warm_args.index("--support-mode") + 1] == "backprojection"
+    assert warm_args[warm_args.index("--support-percentile") + 1] == "45"
+    assert warm_args[warm_args.index("--support-sigma-mm") + 1] == "8"
+    assert warm_args[warm_args.index("--support-alpha-sigma-mm") + 1] == "8"
+    assert warm_args[warm_args.index("--support-dilate-mm") + 1] == "4"
+    assert warm_args[warm_args.index("--bulk-update-scale") + 1] == "1.0"
+    assert warm_args[warm_args.index("--bulk-min-path-mm") + 1] == "20"
+    assert warm_args[warm_args.index("--bulk-stat") + 1] == "median"
     assert warm_args[warm_args.index("--velocity-bounds") + 1 : warm_args.index("--velocity-bounds") + 3] == [
-        "1408.7",
-        "1595.1",
+        "1408.692",
+        "1595.1279",
     ]
-    assert warm_args[warm_args.index("--update-scale") + 1] == "-1"
+    assert "--update-scale" not in warm_args
     assert "--compare-gt" in warm_args
 
 

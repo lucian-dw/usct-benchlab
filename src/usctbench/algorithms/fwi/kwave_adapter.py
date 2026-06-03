@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from usctbench.features.channels import require_raw_wavefield
 from usctbench.metrics.image import compute_baseline_improvement_metrics, compute_image_metrics
 from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
 
@@ -18,10 +19,17 @@ from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus
 _INVERT_EXISTING_DATASET_MODES = {"invert_existing_dataset", "dataset", "skip_simulation"}
 _FULL_PIPELINE_MODES = {"full_pipeline", "full_pipeline_from_speed_map", "speed_map"}
 _TRAVELTIME_WARM_START_BUILDERS = {"traveltime", "rf_traveltime", "travel_time", "rf_travel_time"}
+_BULK_SUPPORT_WARM_START_BUILDERS = {"bulk_support", "bulk-support", "bulk", "support_bulk"}
+_SUPPORTED_WARM_START_BUILDERS = _TRAVELTIME_WARM_START_BUILDERS | _BULK_SUPPORT_WARM_START_BUILDERS
 _CLI_PARAMS = {
     "mat_path": "--mat-path",
     "mat_key": "--mat-key",
     "sample_index": "--sample-index",
+    "preprocessed_data_root": "--preprocessed-data-root",
+    "preprocessed_split": "--preprocessed-split",
+    "preprocessed_mat_path": "--preprocessed-mat-path",
+    "preprocessed_mat_key": "--preprocessed-mat-key",
+    "preprocessed_output_size": "--preprocessed-output-size",
     "array_mode": "--array-mode",
     "object_scale": "--object-scale",
     "object_pose": "--object-pose",
@@ -80,6 +88,7 @@ _CLI_BOOL_FLAGS = {
     "no_connect_existing": "--no-connect-existing",
     "skip_inversion": "--skip-inversion",
     "data_sanity_only": "--data-sanity-only",
+    "use_preprocessed_field": "--use-preprocessed-field",
 }
 _ENV_DEFAULT_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}")
 
@@ -99,6 +108,7 @@ class KWaveFWIAdapterAlgorithm:
         result_path = _configured_path(config, "result_path")
         if result_path is None:
             if bool(config.parameters.get("data_sanity_only", False)):
+                require_raw_wavefield(case, algorithm=self.name)
                 return _run_wavefield_data_sanity(self.name, case, config)
             return ReconstructionResult(
                 algorithm=self.name,
@@ -250,6 +260,7 @@ def _base_result_metrics(
         "matlab_psnr_value": psnr_value,
         "matlab_ssim_value": ssim_value,
         "warm_start_builder": _expand_text(config.parameters.get("warm_start_builder", "")),
+        "warm_start_module": _warm_start_module_for_builder(config),
         "warm_start_path": str(_configured_path(config, "warm_start_path") or _configured_path(config, "warm_start_result") or ""),
     }
 
@@ -505,16 +516,17 @@ def _with_optional_warm_start_steps(
     config: AlgorithmConfig,
 ) -> list[list[str]]:
     builder = _expand_text(config.parameters.get("warm_start_builder", "")).strip().lower()
-    if builder not in _TRAVELTIME_WARM_START_BUILDERS:
+    if builder not in _SUPPORTED_WARM_START_BUILDERS:
         return [inversion_command]
     if dataset_path is None:
         raise ValueError("warm_start_builder requires parameters.dataset_path")
 
-    warm_start_path = _configured_path(config, "warm_start_path") or result_path.with_name(result_path.stem + "_traveltime_init.mat")
+    suffix = "_bulk_support_init.mat" if builder in _BULK_SUPPORT_WARM_START_BUILDERS else "_traveltime_init.mat"
+    warm_start_path = _configured_path(config, "warm_start_path") or result_path.with_name(result_path.stem + suffix)
     warm_start_summary_path = _configured_path(config, "warm_start_summary_path") or warm_start_path.with_suffix(".json")
     diagnostic_prefix = _configured_path(config, "warm_start_diagnostic_prefix") or warm_start_path.with_suffix("")
     python_bin = _expand_text(config.parameters.get("python_bin", sys.executable))
-    warm_module = _expand_text(config.parameters.get("warm_start_module", "openbreastus_diffusion.kwave_dps.make_traveltime_init"))
+    warm_module = _warm_start_module_for_builder(config)
     warm_command = [
         python_bin,
         "-m",
@@ -545,6 +557,16 @@ def _with_optional_warm_start_steps(
     commands.append(warm_command)
     commands.append(final_inversion_command)
     return commands
+
+
+def _warm_start_module_for_builder(config: AlgorithmConfig) -> str:
+    configured = config.parameters.get("warm_start_module")
+    if configured:
+        return _expand_text(configured)
+    builder = _expand_text(config.parameters.get("warm_start_builder", "")).strip().lower()
+    if builder in _BULK_SUPPORT_WARM_START_BUILDERS:
+        return "openbreastus_diffusion.kwave_dps.make_bulk_support_init"
+    return "openbreastus_diffusion.kwave_dps.make_traveltime_init"
 
 
 def _configured_path(config: AlgorithmConfig, key: str) -> Path | None:
