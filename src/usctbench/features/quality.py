@@ -25,6 +25,9 @@ from usctbench.schema import MeasurementSpec, USCTCase
 from usctbench.viz.preview import write_preview_png
 
 
+LOCAL_SINOGRAM_SMOOTH_WEIGHT_FLOOR = 0.65
+
+
 def extract_wavefield_features(
     case: USCTCase | str | Path,
     *,
@@ -76,7 +79,9 @@ def extract_wavefield_features(
     )
     xcorr_delay = np.asarray(bounded["delay_s"], dtype=float)
     xcorr_valid = np.asarray(bounded["valid_mask"], dtype=bool)
-    xcorr_confidence = np.asarray(bounded["confidence"], dtype=float)
+    peak_correlation = np.asarray(bounded["peak_correlation"], dtype=float)
+    peak_corr_quality = np.clip((peak_correlation - 0.65) / max(0.95 - 0.65, 1.0e-12), 0.0, 1.0)
+    xcorr_confidence = np.maximum(np.asarray(bounded["confidence"], dtype=float), 0.75 * peak_corr_quality)
 
     aic_delta, aic_valid, aic_confidence = aic_first_arrival_delta(
         time_data,
@@ -96,10 +101,6 @@ def extract_wavefield_features(
         delta_max_s=delta_max,
         gate_margin_s=gate_margin_s,
     )
-    first_delta = np.where(aic_valid, aic_delta, envelope_delta)
-    first_valid = np.where(aic_valid, True, envelope_valid)
-    first_confidence = np.where(aic_valid, aic_confidence, envelope_confidence)
-
     frequencies = wave_case.measurement.frequencies_hz
     if frequencies is None:
         frequencies = np.asarray(wave_case.metadata.get("simulation_metadata", {}).get("frequencies_hz", []), dtype=float)
@@ -132,9 +133,21 @@ def extract_wavefield_features(
     non_self = _non_self_mask(wave_case)
     amplitude_valid, amplitude_quality = _amplitude_quality(time_data, reference, non_self)
     physical_xcorr = _within_bounds(xcorr_delay, delta_min, delta_max, physical_margin_s)
+    physical_aic = _within_bounds(aic_delta, delta_min, delta_max, physical_margin_s)
+    physical_envelope = _within_bounds(envelope_delta, delta_min, delta_max, physical_margin_s)
+    aic_envelope_agree = (
+        np.isfinite(aic_delta)
+        & np.isfinite(envelope_delta)
+        & (np.abs(aic_delta - envelope_delta) <= agreement_tolerance_s)
+    )
+    use_aic_first = aic_valid & physical_aic & (aic_envelope_agree | ~envelope_valid)
+    use_envelope_first = ~use_aic_first & envelope_valid & physical_envelope
+    first_delta = np.where(use_aic_first, aic_delta, np.where(use_envelope_first, envelope_delta, np.nan))
+    first_valid = use_aic_first | use_envelope_first
+    first_confidence = np.where(use_aic_first, aic_confidence, np.where(use_envelope_first, envelope_confidence, 0.0))
     physical_first = _within_bounds(first_delta, delta_min, delta_max, physical_margin_s)
     physical_phase = _within_bounds(phase_delay, delta_min, delta_max, physical_margin_s)
-    xcorr_quality_valid = xcorr_valid & (xcorr_confidence >= 0.15) & (np.asarray(bounded["peak_correlation"]) >= 0.2)
+    xcorr_quality_valid = xcorr_valid & (xcorr_confidence >= 0.15) & (peak_correlation >= 0.2)
 
     fusion = _robust_fusion(
         candidates=[xcorr_delay, first_delta, phase_delay],
@@ -150,6 +163,10 @@ def extract_wavefield_features(
         fusion["selected_delta"],
         fusion["candidate_agreement"] & non_self,
         tolerance_s=outlier_tolerance_s,
+    )
+    local_smooth_quality, local_smooth_mad = _sinogram_local_smooth_quality(
+        fusion["selected_delta"],
+        fusion["candidate_agreement"] & non_self,
     )
 
     robust_valid = (
@@ -171,6 +188,7 @@ def extract_wavefield_features(
         candidate_agreement=fusion["candidate_agreement"],
         reciprocity_good=reciprocity_good,
         local_good=local_good,
+        local_smooth_quality=local_smooth_quality,
     )
     ray_weights = np.where(robust_valid, feature_quality, 0.0)
 
@@ -214,6 +232,8 @@ def extract_wavefield_features(
         reciprocity_rmse=reciprocity_rmse,
         reciprocity_bad_fraction=reciprocity_bad_fraction,
         local_outlier_fraction=local_outlier_fraction,
+        local_smooth_quality=local_smooth_quality,
+        local_smooth_mad_s=local_smooth_mad,
         log_amp=log_amp_for_solver,
         unbounded_xcorr=unbounded_xcorr,
         unbounded_valid=unbounded_valid,
@@ -238,6 +258,8 @@ def extract_wavefield_features(
                 "water_reference_handling": "required",
                 "bounded_xcorr_required": True,
                 "unbounded_xcorr_formal_feature_allowed": False,
+                "local_sinogram_smooth_quality_used": True,
+                "local_sinogram_smooth_weight_floor": LOCAL_SINOGRAM_SMOOTH_WEIGHT_FLOOR,
                 "speed_bounds_mps": [c_min, c_max],
                 "gate_margin_s": gate_margin_s,
                 "agreement_tolerance_s": agreement_tolerance_s,
@@ -318,9 +340,14 @@ def _feature_quality_map(
     candidate_agreement: np.ndarray,
     reciprocity_good: np.ndarray,
     local_good: np.ndarray,
+    local_smooth_quality: np.ndarray,
 ) -> np.ndarray:
     method_quality = np.nanmax(np.stack([xcorr_confidence, first_confidence, phase_confidence]), axis=0)
     quality = np.clip(0.45 * xcorr_confidence + 0.25 * method_quality + 0.2 * amplitude_quality + 0.1 * candidate_agreement.astype(float), 0.0, 1.0)
+    # Keep coverage intact but softly down-weight rays whose selected delay is
+    # locally inconsistent with neighboring tx/rx entries in the sinogram.
+    local_factor = LOCAL_SINOGRAM_SMOOTH_WEIGHT_FLOOR + (1.0 - LOCAL_SINOGRAM_SMOOTH_WEIGHT_FLOOR) * np.clip(local_smooth_quality, 0.0, 1.0)
+    quality = quality * local_factor
     quality = np.where(reciprocity_good & local_good & valid_mask, quality, 0.0)
     return np.clip(quality, 0.0, 1.0)
 
@@ -344,6 +371,8 @@ def _feature_qc(
     reciprocity_rmse: float,
     reciprocity_bad_fraction: float,
     local_outlier_fraction: float,
+    local_smooth_quality: np.ndarray,
+    local_smooth_mad_s: float,
     log_amp: np.ndarray,
     unbounded_xcorr: np.ndarray,
     unbounded_valid: np.ndarray,
@@ -384,6 +413,9 @@ def _feature_qc(
         "reciprocity_delay_rmse": float(reciprocity_rmse),
         "reciprocity_bad_fraction": float(reciprocity_bad_fraction),
         "sinogram_median_filter_outlier_fraction": float(local_outlier_fraction),
+        "local_sinogram_smooth_quality_mean": _masked_mean(local_smooth_quality, selected_valid & non_self),
+        "local_sinogram_smooth_quality_p10": _masked_percentile(local_smooth_quality, selected_valid & non_self, 10.0),
+        "local_sinogram_smooth_mad_s": float(local_smooth_mad_s),
         "candidate_agreement_fraction": candidate_agreement_fraction,
         "log_amp_dynamic_range": dynamic_range,
         "phase_unwrap_failure_fraction": float(1.0 - phase_valid_fraction),
@@ -480,6 +512,35 @@ def _sinogram_outlier_mask(delta: np.ndarray, valid: np.ndarray, *, tolerance_s:
     return good, float(np.sum(bad) / max(1, int(np.sum(finite))))
 
 
+def _sinogram_local_smooth_quality(delta: np.ndarray, valid: np.ndarray) -> tuple[np.ndarray, float]:
+    """Return continuous local sinogram consistency in [0, 1].
+
+    This is deliberately softer than `_sinogram_outlier_mask`: it preserves the
+    ray in `valid_mask` but lowers solver weights when a delay disagrees with a
+    wrapped local median neighborhood.
+    """
+
+    quality = np.ones_like(valid, dtype=float)
+    finite = np.asarray(valid, dtype=bool) & np.isfinite(delta)
+    if int(np.sum(finite)) < 16:
+        return quality, 0.0
+    values = np.asarray(delta, dtype=float)
+    try:
+        from scipy.ndimage import median_filter
+    except ModuleNotFoundError:
+        return quality, 0.0
+    fill = float(np.nanmedian(values[finite]))
+    filled = np.where(finite, values, fill)
+    median = median_filter(filled, size=(3, 5), mode="wrap")
+    residual = np.abs(values - median)
+    mad = float(np.nanmedian(residual[finite]))
+    scale = max(3.0 * mad, 2.5e-7)
+    local = 1.0 / (1.0 + (residual / scale) ** 2)
+    quality[finite] = np.clip(local[finite], 0.0, 1.0)
+    quality[~finite] = 0.0
+    return quality, mad
+
+
 def _feature_qc_failed(case: USCTCase) -> bool:
     return bool(case.metadata.get("feature_failed_qc", False))
 
@@ -490,6 +551,20 @@ def _rmse(a: np.ndarray, b: np.ndarray, mask: np.ndarray) -> float:
         return float("nan")
     diff = np.asarray(a, dtype=float)[finite] - np.asarray(b, dtype=float)[finite]
     return float(np.sqrt(np.mean(diff**2)))
+
+
+def _masked_mean(values: np.ndarray, mask: np.ndarray) -> float:
+    finite = np.asarray(mask, dtype=bool) & np.isfinite(values)
+    if not np.any(finite):
+        return float("nan")
+    return float(np.mean(np.asarray(values, dtype=float)[finite]))
+
+
+def _masked_percentile(values: np.ndarray, mask: np.ndarray, percentile: float) -> float:
+    finite = np.asarray(mask, dtype=bool) & np.isfinite(values)
+    if not np.any(finite):
+        return float("nan")
+    return float(np.percentile(np.asarray(values, dtype=float)[finite], float(percentile)))
 
 
 def _write_feature_artifacts(

@@ -16,6 +16,9 @@ parameters:
   timeout_s: 300
 metadata:
   default_backend: project-native regularized travel-time GN surrogate.
+  benchmark_role: travel-time surrogate mainline for traditional methods; not a k-Wave wavefield inversion result.
+  measurement_provenance: speedmap_travel_time_surrogate
+  uses_kwave_wavefield: false
   external_reference: rehmanali1994/refractionCorrectedUSCT.github.io
   external_entrypoint_template: scripts/matlab_adapters/refraction_corrected_usct_entrypoint.m
   v0_1_scope: smoke/quality benchmark path; optional MATLAB entrypoints use standard input/output MAT artifacts.

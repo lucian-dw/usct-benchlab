@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import yaml
 
 from usctbench.adapters.matlab import (
@@ -10,13 +11,17 @@ from usctbench.adapters.matlab import (
     write_matlab_adapter_result,
     write_usct_case_mat,
 )
-from usctbench.algorithms.adapters._matlab_optional import _entrypoint_path, requests_matlab_backend
+from usctbench.algorithms.adapters._matlab_optional import (
+    _entrypoint_path,
+    _parse_matlab_log_diagnostics,
+    requests_matlab_backend,
+)
 from usctbench.algorithms.adapters.refraction_gn import BentRayGNAdapter
 from usctbench.algorithms.adapters.rwave import RWaveAdapter
 from usctbench.cli import main
 from usctbench.data.synthetic import make_sound_speed_case
 from usctbench.io.hdf5 import write_case_hdf5
-from usctbench.schema import AlgorithmConfig, ReconstructionResult
+from usctbench.schema import AlgorithmConfig, MeasurementSpec, ReconstructionResult
 
 
 def test_adapter_native_backends_reconstruct_sound_speed():
@@ -72,6 +77,41 @@ def test_matlab_adapters_skip_without_matlab():
         assert result.artifacts["skip_reason"] == result.failure_reason
 
 
+def test_matlab_log_diagnostics_classify_full_greens_sign_jacobian_failure():
+    log_text = """
+    The number of bad linkings:0
+    The number of the rays for which the sign of the Jacobian is changed are:2
+    The number of the rays for which the sign of the Jacobian is changed are:9
+    The frequency level (linearised subproblem) is:1
+    The objective function is:0.0079
+    The relative error is:99.87%
+    The frequency level (linearised subproblem) is:2
+    The objective function is:0.0181
+    """
+
+    metrics = _parse_matlab_log_diagnostics(log_text)
+
+    assert metrics["matlab_log_bad_linkings_total"] == 0.0
+    assert metrics["matlab_log_sign_jacobian_changed_total"] == 11.0
+    assert metrics["matlab_log_sign_jacobian_changed_max"] == 9.0
+    assert metrics["matlab_log_objective_increased"] is True
+    assert metrics["matlab_log_frequency_level_max"] == 2.0
+    assert metrics["matlab_log_relative_error_percent_last"] == 99.87
+    assert metrics["matlab_log_likely_failure_mode"] == "sign_jacobian_or_update_direction"
+
+
+def test_matlab_log_diagnostics_prioritize_nonfinite_gradient():
+    metrics = _parse_matlab_log_diagnostics(
+        "The objective function is:1.0\n"
+        "Warning: NaN gradient detected\n"
+        "The number of bad linkings:3\n"
+    )
+
+    assert metrics["matlab_log_nan_token_count"] == 1
+    assert metrics["matlab_log_bad_linkings_total"] == 3.0
+    assert metrics["matlab_log_likely_failure_mode"] == "nan_or_nonfinite_gradient"
+
+
 def test_write_usct_case_mat_exports_standard_adapter_input(tmp_path):
     import h5py
 
@@ -97,7 +137,18 @@ def test_write_matlab_adapter_contract_writes_helper_functions(tmp_path):
     assert read_helper.exists()
     assert write_helper.exists()
     assert "h5read(input_mat, '/measurement/delta_tof_s')" in read_helper.read_text(encoding="utf-8")
+    assert "case_data.geometry.radius_m" in read_helper.read_text(encoding="utf-8")
     assert "h5create(output_mat, '/sound_speed_mps'" in write_helper.read_text(encoding="utf-8")
+
+
+def test_rwave_matlab_entrypoint_is_complex_contract_aware():
+    entrypoint = Path("scripts/matlab_adapters/rwave_tof_greens_entrypoint.m")
+    text = entrypoint.read_text(encoding="utf-8")
+
+    assert "case_data.rwave.phase_slope_delay_s" in text
+    assert "case_data.rwave.complex_quality" in text
+    assert "complex_contract_used" in text
+    assert "external_greens_full_wavefield" in text
 
 
 def test_matlab_adapter_exports_input_before_external_execution_skip(tmp_path, monkeypatch):
@@ -206,6 +257,63 @@ def test_matlab_adapter_ingests_standard_external_output(tmp_path, monkeypatch):
     assert result.artifacts["adapter_contract_dir"] == str(tmp_path / "case_run")
 
 
+def test_matlab_adapter_augments_output_with_log_diagnostics(tmp_path, monkeypatch):
+    output_path = tmp_path / "case_run" / "adapter_output.mat"
+
+    class FakeMatlabAdapter:
+        def __init__(self, work_dir):
+            self.work_dir = work_dir
+
+        def run_batch(self, code, *, log_name="matlab.log", timeout_s=None):
+            log_path = self.work_dir / log_name
+            log_path.write_text(
+                "The number of bad linkings:0\n"
+                "The number of the rays for which the sign of the Jacobian is changed are:5\n"
+                "The objective function is:0.01\n"
+                "The objective function is:0.02\n",
+                encoding="utf-8",
+            )
+            write_matlab_adapter_result(
+                ReconstructionResult(
+                    algorithm="rwave_adapter",
+                    case_id="synthetic_circular_sos",
+                    sound_speed_mps=make_sound_speed_case(shape=(8, 8), n_transducers=10).ground_truth.sound_speed_mps,
+                    metrics={"external_metric": 1.25},
+                ),
+                output_path,
+            )
+            return log_path
+
+    def fake_from_config(*, matlab_bin=None, work_dir=None):
+        work_dir = tmp_path / "work" if work_dir is None else Path(work_dir)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        return FakeMatlabAdapter(work_dir)
+
+    external_root = tmp_path / "external"
+    external_root.mkdir()
+    (external_root / "run_rwave.m").write_text("% placeholder", encoding="utf-8")
+    monkeypatch.setattr("usctbench.algorithms.adapters._matlab_optional.MatlabAdapter.from_config", fake_from_config)
+
+    result = RWaveAdapter().run(
+        make_sound_speed_case(shape=(8, 8), n_transducers=10),
+        AlgorithmConfig(
+            parameters={
+                "backend": "matlab",
+                "external_root": str(external_root),
+                "entrypoint": "run_rwave.m",
+                "_run_output_dir": str(tmp_path / "case_run"),
+                "adapter_output_path": str(output_path),
+            }
+        ),
+    )
+
+    assert result.status == "success"
+    assert result.metrics["external_metric"] == 1.25
+    assert result.metrics["matlab_log_sign_jacobian_changed_total"] == 5.0
+    assert result.metrics["matlab_log_objective_increased"] is True
+    assert result.metrics["matlab_log_likely_failure_mode"] == "sign_jacobian_or_update_direction"
+
+
 def test_matlab_adapter_augments_external_output_metrics(tmp_path, monkeypatch):
     output_path = tmp_path / "case_run" / "adapter_output.mat"
 
@@ -293,3 +401,7 @@ def test_cli_adapter_skip_writes_failure_report(tmp_path):
     assert "- Error type: external-dependency" in report
     metadata = yaml.safe_load((case_dir / "metadata.yaml").read_text(encoding="utf-8"))
     assert metadata["error_type"] == "external-dependency"
+
+
+def _with_feature_channel(case, channel: str):
+    return case.model_copy(update={"metadata": {**case.metadata, "feature_channel": channel}})

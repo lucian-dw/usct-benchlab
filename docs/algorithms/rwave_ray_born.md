@@ -1,10 +1,30 @@
-# rWave / Ray-Born Unified Input
+# rWave / Ray-Born Adapter
 
-The v0.1 native `rwave_adapter` is a ray-Born-style surrogate over travel-time features. It should be marked as surrogate when `measurement_provenance` is `oracle_travel_time` or `speedmap_travel_time_surrogate`.
+The current v0.1 `rwave_adapter` is a travel-time surrogate baseline. It uses
+the same `USCTCase` travel-time feature contract as the straight-ray and
+regularized bent-ray surrogate algorithms.
 
-For a true ray-Born benchmark, the adapter should consume complex `freq_data`, water/reference data, and a scattered-field convention from a wavefield case. Until that external path is connected, the unified suite uses the same feature case as the ray solvers and reports provenance explicitly.
+## Current Mainline
 
-Formal reports must distinguish:
+- Suite: `configs/benchmarks/travel_time_surrogate_main.yaml`
+- Algorithm config: `configs/algorithms/rwave_adapter.yaml`
+- Measurement provenance: `speedmap_travel_time_surrogate`
+- `uses_kwave_wavefield=false`
+- `uses_complex_wavefield=false`
+- `surrogate_travel_time_backend=true`
 
-- surrogate rWave over ToF features
-- true ray-Born over complex frequency-domain wavefields
+This is not a validated full rWave or Ray-Born implementation. It is kept as a
+traditional-method comparison point under the travel-time surrogate track.
+
+## Retired k-Wave Complex Path
+
+The previous native Python complex-wavefield prototype and full-Green MATLAB
+experiments are not part of the current mainline. k-Wave raw/precomputed data
+is reserved for `configs/benchmarks/kwave_fwi_main.yaml` and
+`fwi_kwave_adapter`.
+
+If a future rWave track is reopened, it should be implemented as a separate
+benchmark with an explicit complex pressure/reference contract, source
+wavelet convention, Green's function validation, derivative/adjoint checks,
+and independent acceptance metrics. It should not be mixed into the FWI
+mainline or presented as a travel-time surrogate result.

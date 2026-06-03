@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from usctbench.features.phase_delay import frequency_response_from_time
 from usctbench.schema import ReconstructionResult, USCTCase
 
 
@@ -101,13 +102,29 @@ def write_usct_case_mat(case: USCTCase, path: str | Path) -> Path:
 
         measurement = handle.create_group("measurement")
         measurement.attrs["domain"] = str(case.measurement.domain)
-        for name in ("frequencies_hz", "freq_data", "time_data", "tof_s", "delta_tof_s", "log_amp"):
+        for name in (
+            "frequencies_hz",
+            "freq_data",
+            "time_data",
+            "water_reference",
+            "source_wavelet",
+            "time_axis_s",
+            "tof_s",
+            "delta_tof_s",
+            "tof_first_arrival_s",
+            "tof_xcorr_s",
+            "phase_slope_delay_s",
+            "log_amp",
+            "feature_quality",
+            "ray_weights",
+        ):
             _write_optional_dataset(measurement, name, getattr(case.measurement, name))
         _write_optional_dataset(measurement, "valid_mask", _as_numeric_bool(case.measurement.valid_mask))
 
         ground_truth = handle.create_group("ground_truth")
         _write_optional_dataset(ground_truth, "sound_speed_mps", case.ground_truth.sound_speed_mps)
         _write_optional_dataset(ground_truth, "attenuation_np_per_m", case.ground_truth.attenuation_np_per_m)
+        _write_rwave_complex_group(handle, case)
     return out
 
 
@@ -198,6 +215,56 @@ def _as_numeric_bool(value: np.ndarray | None) -> np.ndarray | None:
     return np.asarray(value, dtype=np.uint8)
 
 
+def _write_rwave_complex_group(handle: Any, case: USCTCase) -> None:
+    """Write only the retired rWave complex group when explicitly available.
+
+    The current v0.1 mainline keeps rWave on travel-time surrogate inputs and
+    reserves k-Wave raw/complex data for FWI.  This adapter therefore no longer
+    derives complex rWave features as a side effect of MATLAB export.
+    """
+
+    if (
+        case.measurement.freq_data is None
+        or case.measurement.frequencies_hz is None
+        or case.measurement.water_reference is None
+        or bool(case.metadata.get("write_retired_rwave_complex_group", False)) is False
+    ):
+        return
+    group = handle.create_group("rwave")
+    freq_data = np.asarray(case.measurement.freq_data)
+    reference = _reference_frequency_data_for_matlab(case)
+    scattered = freq_data - reference
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = freq_data / np.where(np.abs(reference) > 0.0, reference, np.nan)
+    group.attrs["scattered_field_convention"] = "scattered_freq_data = freq_data - water_reference_freq_data"
+    group.attrs["complex_ratio_convention"] = "complex_ratio = freq_data / water_reference_freq_data"
+    group.attrs["retired"] = True
+    group.attrs["note"] = "complex rWave export is retired from the main benchmark; k-Wave data is reserved for FWI"
+    group.create_dataset("frequencies_hz", data=np.asarray(case.measurement.frequencies_hz, dtype=float))
+    group.create_dataset("freq_data_real", data=np.real(freq_data))
+    group.create_dataset("freq_data_imag", data=np.imag(freq_data))
+    group.create_dataset("reference_freq_data_real", data=np.real(reference))
+    group.create_dataset("reference_freq_data_imag", data=np.imag(reference))
+    group.create_dataset("scattered_freq_data_real", data=np.real(scattered))
+    group.create_dataset("scattered_freq_data_imag", data=np.imag(scattered))
+    group.create_dataset("complex_ratio_real", data=np.real(ratio))
+    group.create_dataset("complex_ratio_imag", data=np.imag(ratio))
+
+
+def _reference_frequency_data_for_matlab(case: USCTCase) -> np.ndarray:
+    freq_data = np.asarray(case.measurement.freq_data)
+    reference = np.asarray(case.measurement.water_reference)
+    if reference.shape == freq_data.shape:
+        return reference
+    if reference.ndim == 3 and case.measurement.time_axis_s is not None:
+        return frequency_response_from_time(
+            reference.astype(float, copy=False),
+            np.asarray(case.measurement.time_axis_s, dtype=float),
+            np.asarray(case.measurement.frequencies_hz, dtype=float),
+        )
+    raise ValueError("water_reference must be frequency-domain or time-domain with time_axis_s")
+
+
 def _json_dumps(value: dict[str, Any]) -> str:
     return json.dumps(value, default=_json_default, sort_keys=True)
 
@@ -240,6 +307,7 @@ case_data.grid.origin_m = double(h5read(input_mat, '/grid/origin_m'))';
 case_data.grid.roi_mask = usctbench_optional_h5read(input_mat, '/grid/roi_mask');
 case_data.geometry = struct();
 case_data.geometry.type = h5readatt(input_mat, '/geometry', 'type');
+case_data.geometry.radius_m = usctbench_optional_h5readatt(input_mat, '/geometry', 'radius_m');
 case_data.geometry.tx_pos_m = double(h5read(input_mat, '/geometry/tx_pos_m'));
 case_data.geometry.rx_pos_m = double(h5read(input_mat, '/geometry/rx_pos_m'));
 case_data.measurement = struct();
@@ -251,6 +319,31 @@ case_data.measurement.log_amp = usctbench_optional_h5read(input_mat, '/measureme
 case_data.measurement.frequencies_hz = usctbench_optional_h5read(input_mat, '/measurement/frequencies_hz');
 case_data.measurement.freq_data = usctbench_optional_h5read(input_mat, '/measurement/freq_data');
 case_data.measurement.time_data = usctbench_optional_h5read(input_mat, '/measurement/time_data');
+case_data.measurement.water_reference = usctbench_optional_h5read(input_mat, '/measurement/water_reference');
+case_data.measurement.source_wavelet = usctbench_optional_h5read(input_mat, '/measurement/source_wavelet');
+case_data.measurement.time_axis_s = usctbench_optional_h5read(input_mat, '/measurement/time_axis_s');
+case_data.measurement.tof_first_arrival_s = usctbench_optional_h5read(input_mat, '/measurement/tof_first_arrival_s');
+case_data.measurement.tof_xcorr_s = usctbench_optional_h5read(input_mat, '/measurement/tof_xcorr_s');
+case_data.measurement.phase_slope_delay_s = usctbench_optional_h5read(input_mat, '/measurement/phase_slope_delay_s');
+case_data.measurement.feature_quality = usctbench_optional_h5read(input_mat, '/measurement/feature_quality');
+case_data.measurement.ray_weights = usctbench_optional_h5read(input_mat, '/measurement/ray_weights');
+case_data.rwave = struct();
+case_data.rwave.frequencies_hz = usctbench_optional_h5read(input_mat, '/rwave/frequencies_hz');
+case_data.rwave.freq_data_real = usctbench_optional_h5read(input_mat, '/rwave/freq_data_real');
+case_data.rwave.freq_data_imag = usctbench_optional_h5read(input_mat, '/rwave/freq_data_imag');
+case_data.rwave.reference_freq_data_real = usctbench_optional_h5read(input_mat, '/rwave/reference_freq_data_real');
+case_data.rwave.reference_freq_data_imag = usctbench_optional_h5read(input_mat, '/rwave/reference_freq_data_imag');
+case_data.rwave.scattered_freq_data_real = usctbench_optional_h5read(input_mat, '/rwave/scattered_freq_data_real');
+case_data.rwave.scattered_freq_data_imag = usctbench_optional_h5read(input_mat, '/rwave/scattered_freq_data_imag');
+case_data.rwave.complex_ratio_real = usctbench_optional_h5read(input_mat, '/rwave/complex_ratio_real');
+case_data.rwave.complex_ratio_imag = usctbench_optional_h5read(input_mat, '/rwave/complex_ratio_imag');
+case_data.rwave.rytov_data_real = usctbench_optional_h5read(input_mat, '/rwave/rytov_data_real');
+case_data.rwave.rytov_data_imag = usctbench_optional_h5read(input_mat, '/rwave/rytov_data_imag');
+case_data.rwave.log_amplitude_ratio = usctbench_optional_h5read(input_mat, '/rwave/log_amplitude_ratio');
+case_data.rwave.phase_slope_delay_s = usctbench_optional_h5read(input_mat, '/rwave/phase_slope_delay_s');
+case_data.rwave.phase_fit_rms_rad = usctbench_optional_h5read(input_mat, '/rwave/phase_fit_rms_rad');
+case_data.rwave.complex_valid_mask = usctbench_optional_h5read(input_mat, '/rwave/complex_valid_mask');
+case_data.rwave.complex_quality = usctbench_optional_h5read(input_mat, '/rwave/complex_quality');
 case_data.ground_truth = struct();
 case_data.ground_truth.sound_speed_mps = usctbench_optional_h5read(input_mat, '/ground_truth/sound_speed_mps');
 case_data.ground_truth.attenuation_np_per_m = usctbench_optional_h5read(input_mat, '/ground_truth/attenuation_np_per_m');
@@ -259,6 +352,14 @@ end
 function value = usctbench_optional_h5read(input_mat, dataset_name)
 try
     value = h5read(input_mat, dataset_name);
+catch
+    value = [];
+end
+end
+
+function value = usctbench_optional_h5readatt(input_mat, object_name, attr_name)
+try
+    value = h5readatt(input_mat, object_name, attr_name);
 catch
     value = [];
 end

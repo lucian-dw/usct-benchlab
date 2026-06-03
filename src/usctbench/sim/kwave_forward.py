@@ -24,7 +24,7 @@ from usctbench.features.phase_delay import frequency_response_from_time
 from usctbench.io.hdf5 import read_case_hdf5, write_case_hdf5
 from usctbench.provenance import MeasurementProvenance, stamp_measurement_metadata
 from usctbench.schema import GeometrySpec, GridSpec, GroundTruthSpec, MeasurementSpec, USCTCase
-from usctbench.sim.cache import cached_case_matches, kwave_cache_key
+from usctbench.sim.cache import _array_digest, cached_case_matches, kwave_cache_key
 
 _ENV_DEFAULT_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}")
 _NATIVE_SMOKE_BACKENDS = {"native_smoke", "smoke", "analytic_smoke"}
@@ -289,6 +289,11 @@ def _simulation_metadata(
         "n_time": int(simulation.get("n_time", 768)),
         "pml_thickness_pixels": int(simulation.get("pml_thickness_pixels", 8)),
         "frequencies_hz": [float(value) for value in frequencies_hz.tolist()],
+        "forward_map_identity": _forward_map_identity_metadata(
+            property_case,
+            axis_conversion="none_internal_row_y_col_x",
+            crop_resample="none",
+        ),
     }
     return stamp_measurement_metadata(
         property_case.metadata,
@@ -372,6 +377,15 @@ def _external_datasets_to_case(
         "dataset_metadata": object_data["metadata"],
         "water_time_axis_original_length": int(np.asarray(water_data["time_axis_s"]).size),
         "object_time_axis_length": int(time_axis.size),
+        "forward_map_identity": _forward_map_identity_metadata(
+            property_case,
+            sound_speed=sound_speed,
+            attenuation=attenuation,
+            density=density,
+            grid=grid,
+            axis_conversion="external_kwave_matlab_xy_transposed_to_internal_row_y_col_x",
+            crop_resample=str(object_data["metadata"].get("array_axis_conversion", "transpose_external_xy_to_internal_yx")),
+        ),
     }
     metadata = stamp_measurement_metadata(
         property_case.metadata,
@@ -552,6 +566,68 @@ def _read_external_kwave_dataset(path: Path) -> dict[str, Any]:
             "internal_sound_speed_shape_yx": [int(value) for value in sound_speed.shape],
         },
     }
+
+
+def _forward_map_identity_metadata(
+    case: USCTCase,
+    *,
+    sound_speed: np.ndarray | None = None,
+    attenuation: np.ndarray | None = None,
+    density: np.ndarray | None = None,
+    grid: GridSpec | None = None,
+    axis_conversion: str,
+    crop_resample: str,
+) -> dict[str, Any]:
+    """Describe the property maps used by forward simulation and metric GT.
+
+    USCTCase image arrays are always stored internally as `[row=y, col=x]`.
+    This metadata lets downstream reports verify that the map used by the
+    forward model is the same map later used as metric ground truth.
+    """
+
+    sim_grid = grid or case.grid
+    speed = case.ground_truth.sound_speed_mps if sound_speed is None else sound_speed
+    atten = case.ground_truth.attenuation_np_per_m if attenuation is None else attenuation
+    dens = case.ground_truth.density_kg_per_m3 if density is None else density
+    roi = sim_grid.roi_mask
+    return {
+        "source_case_id": case.case_id,
+        "array_axis_convention_internal": "[row=y,col=x]",
+        "external_axis_conversion": axis_conversion,
+        "crop_resample_metadata": crop_resample,
+        "grid_shape": [int(value) for value in sim_grid.shape],
+        "spacing_m": [float(value) for value in sim_grid.spacing_m],
+        "origin_m": [float(value) for value in sim_grid.origin_m],
+        "roi_hash": _array_digest(roi),
+        "geometry_hash": _geometry_digest(case.geometry),
+        "forward_sound_speed_hash": _array_digest(speed),
+        "forward_sound_speed_shape": _array_shape(speed),
+        "forward_density_hash": _array_digest(dens),
+        "forward_density_shape": _array_shape(dens),
+        "forward_attenuation_hash": _array_digest(atten),
+        "forward_attenuation_shape": _array_shape(atten),
+        "metric_gt_sound_speed_hash": _array_digest(speed),
+        "metric_gt_density_hash": _array_digest(dens),
+        "metric_gt_attenuation_hash": _array_digest(atten),
+        "metric_gt_role": "same_internal_arrays_stored_as_ground_truth_for_metric_evaluation",
+        "forward_map_vs_metric_gt_expected_rmse": 0.0,
+    }
+
+
+def _array_shape(value: np.ndarray | None) -> list[int] | None:
+    if value is None:
+        return None
+    return [int(size) for size in np.asarray(value).shape]
+
+
+def _geometry_digest(geometry: GeometrySpec) -> str:
+    payload = np.concatenate(
+        [
+            np.ascontiguousarray(np.asarray(geometry.tx_pos_m, dtype=float)).reshape(-1),
+            np.ascontiguousarray(np.asarray(geometry.rx_pos_m, dtype=float)).reshape(-1),
+        ]
+    )
+    return str(_array_digest(payload))
 
 
 def _read_source_wavelet(siminfo_path: Path) -> np.ndarray:

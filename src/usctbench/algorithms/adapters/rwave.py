@@ -32,6 +32,13 @@ class RWaveAdapter:
 
 
 def _run_python_rwave(algorithm: str, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
+    backend = str(config.parameters.get("backend", "python")).lower()
+    if backend in {"complex", "python_complex", "complex_wavefield"} or bool(config.parameters.get("use_complex_wavefield", False)):
+        raise ValueError(
+            "rWave complex/k-Wave feature backend is retired from the main benchmark. "
+            "Use rwave_adapter with backend=python on travel-time surrogate cases, "
+            "and use kwave_fwi_main for raw k-Wave data."
+        )
     return run_iterative_travel_time_solver(
         algorithm=algorithm,
         case=case,
@@ -44,6 +51,8 @@ def _run_python_rwave(algorithm: str, case: USCTCase, config: AlgorithmConfig) -
         default_smooth_sigma=0.35,
         extra_metrics={
             "ray_born_linearization": True,
+            "surrogate_travel_time_backend": True,
+            "uses_complex_wavefield": False,
             "external_reference": "Ash1362/ray-based-quantitative-ultrasound-tomography",
         },
     )

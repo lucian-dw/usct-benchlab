@@ -8,15 +8,14 @@
 %
 % The public r-Wave toolbox exposes ToF reconstruction and Green's/ray-Born
 % routines such as reconstructTimeofFlightImage.m and reconstructGreensImage.m.
-% The standard usct-benchlab smoke cases often contain travel-time features,
-% not full RF time series, so this wrapper produces the ToF initial image used
-% by the r-Wave Green's workflow and writes it through the common adapter
-% result contract.
+% This wrapper is contract-aware:
+%   1. If the Python adapter exported a /rwave complex-wavefield contract, use
+%      the Rytov phase-slope target plus complex quality weights.
+%   2. Otherwise fall back to the historical ToF smoke path.
+% It is still not the full reconstructGreensImage path unless the external
+% repository is wired to consume the full time-domain Green's workflow.
 
 case_data = usctbench_read_case(usctbench_input_mat);
-if isempty(case_data.measurement.delta_tof_s)
-    error('usctbench:missingDeltaTof', 'measurement.delta_tof_s is required');
-end
 
 shape = double(case_data.grid.shape);
 ny = shape(1);
@@ -28,24 +27,73 @@ num_cg = usctbench_json_number(usctbench_parameters_json, 'inner_iterations', 40
 smooth_sigma = usctbench_json_number(usctbench_parameters_json, 'smooth_sigma', 0.35);
 outer_iterations = usctbench_json_number(usctbench_parameters_json, 'outer_iterations', 3);
 step_length = usctbench_json_number(usctbench_parameters_json, 'step_length', 1.0);
+roi_update_only = usctbench_json_bool(usctbench_parameters_json, 'roi_update_only', false);
 
-target = double(case_data.measurement.delta_tof_s(:));
-valid_mask = case_data.measurement.valid_mask;
-if isempty(valid_mask)
-    valid = true(size(target));
+use_complex_contract = isfield(case_data, 'rwave') && ~isempty(case_data.rwave.phase_slope_delay_s);
+if use_complex_contract
+    target = double(case_data.rwave.phase_slope_delay_s(:));
+    valid_mask = case_data.rwave.complex_valid_mask;
+    if isempty(valid_mask)
+        valid = isfinite(target);
+    else
+        valid = logical(valid_mask(:)) & isfinite(target);
+    end
+    ray_weights = case_data.rwave.complex_quality;
+    if isempty(ray_weights)
+        ray_weights = ones(size(target));
+    else
+        ray_weights = double(ray_weights(:));
+    end
+    if numel(ray_weights) ~= numel(target)
+        ray_weights = ones(size(target));
+    end
+    method_family = 'external_rwave_complex_contract_phase_slope';
+    complex_text = 'true';
+    surrogate_text = 'false';
+    target_source = 'rwave_complex_contract';
 else
-    valid = logical(valid_mask(:));
+    if isempty(case_data.measurement.delta_tof_s)
+        error('usctbench:missingInput', 'measurement.delta_tof_s or /rwave/phase_slope_delay_s is required');
+    end
+    target = double(case_data.measurement.delta_tof_s(:));
+    valid_mask = case_data.measurement.valid_mask;
+    if isempty(valid_mask)
+        valid = true(size(target));
+    else
+        valid = logical(valid_mask(:));
+    end
+    ray_weights = case_data.measurement.ray_weights;
+    if isempty(ray_weights)
+        ray_weights = case_data.measurement.feature_quality;
+    end
+    if isempty(ray_weights)
+        ray_weights = ones(size(target));
+    else
+        ray_weights = double(ray_weights(:));
+    end
+    if numel(ray_weights) ~= numel(target)
+        ray_weights = ones(size(target));
+    end
+    method_family = 'external_rwave_tof_initialization';
+    complex_text = 'false';
+    surrogate_text = 'true';
+    target_source = 'measurement_delta_tof';
 end
 
 H = usctbench_build_straight_ray_matrix(case_data, nx, ny);
 L = usctbench_laplacian_operator(nx, ny);
+roi = usctbench_roi_mask(case_data, nx, ny);
 A = H(valid, :);
 b = target(valid);
-normal_matrix = A' * A + (lambda ^ 2) * (L' * L);
+w = max(0, min(1, ray_weights(valid)));
+sqrt_w = sqrt(w);
+A_weighted = spdiags(sqrt_w, 0, length(sqrt_w), length(sqrt_w)) * A;
+b_weighted = sqrt_w .* b;
+normal_matrix = A_weighted' * A_weighted + (lambda ^ 2) * (L' * L);
 delta_slowness = zeros(nx * ny, 1);
 for iter = 1:max(1, round(outer_iterations))
-    residual = b - A * delta_slowness;
-    rhs = A' * residual;
+    residual = b_weighted - A_weighted * delta_slowness;
+    rhs = A_weighted' * residual;
     update = pcg(normal_matrix, rhs, 1e-8, max(1, round(num_cg)));
     if isempty(update)
         update = normal_matrix \ rhs;
@@ -54,21 +102,39 @@ for iter = 1:max(1, round(outer_iterations))
     if smooth_sigma > 0
         delta_slowness = reshape(usctbench_smooth2(reshape(delta_slowness, [ny, nx]), smooth_sigma), [], 1);
     end
+    if roi_update_only
+        delta_image = reshape(delta_slowness, [ny, nx]);
+        delta_image(~roi) = 0;
+        delta_slowness = delta_image(:);
+    end
     slowness_iter = min(max((1 / c0) + reshape(delta_slowness, [ny, nx]), 1 / bounds(2)), 1 / bounds(1));
+    if roi_update_only
+        slowness_iter(~roi) = 1 / c0;
+    end
     delta_slowness = reshape(slowness_iter - (1 / c0), [], 1);
 end
 
 slowness = reshape((1 / c0) + delta_slowness, [ny, nx]);
 slowness = min(max(slowness, 1 / bounds(2)), 1 / bounds(1));
+if roi_update_only
+    slowness(~roi) = 1 / c0;
+end
 sound_speed = 1 ./ slowness;
 
 metrics = sprintf(['{"external_entrypoint":"rwave_tof_greens_entrypoint",' ...
     '"external_reference":"Ash1362/ray-based-quantitative-ultrasound-tomography",' ...
-    '"method_family":"external_rwave_tof_initialization",' ...
+    '"method_family":"%s",' ...
+    '"target_source":"%s",' ...
     '"ray_born_linearization":true,' ...
+    '"uses_complex_wavefield":%s,' ...
+    '"complex_contract_used":%s,' ...
+    '"external_greens_full_wavefield":false,' ...
+    '"surrogate_travel_time_backend":%s,' ...
+    '"complex_valid_fraction":%.17g,' ...
     '"regularization":"laplacian","regularization_lambda":%.17g,' ...
     '"outer_iterations":%.17g,"inner_iterations":%.17g,' ...
-    '"smooth_sigma":%.17g}'], lambda, outer_iterations, num_cg, smooth_sigma);
+    '"smooth_sigma":%.17g,"roi_update_only":%s}'], method_family, target_source, complex_text, complex_text, surrogate_text, ...
+    mean(valid), lambda, outer_iterations, num_cg, smooth_sigma, usctbench_bool_text(roi_update_only));
 usctbench_write_result(usctbench_output_mat, 'rwave_adapter', case_data.case_id, sound_speed, metrics);
 
 function H = usctbench_build_straight_ray_matrix(case_data, nx, ny)
@@ -133,6 +199,17 @@ kernel = kernel / sum(kernel);
 out = conv2(conv2(image, kernel, 'same'), kernel.', 'same');
 end
 
+function roi = usctbench_roi_mask(case_data, nx, ny)
+if isfield(case_data, 'grid') && isfield(case_data.grid, 'roi_mask') && ~isempty(case_data.grid.roi_mask)
+    roi = logical(case_data.grid.roi_mask);
+    if ~isequal(size(roi), [ny, nx])
+        roi = reshape(roi, [ny, nx]);
+    end
+else
+    roi = true(ny, nx);
+end
+end
+
 function value = usctbench_json_number(json_text, key, default_value)
 value = default_value;
 pattern = ['"' key '"\s*:\s*([-+0-9.eE]+)'];
@@ -151,5 +228,23 @@ if ~isempty(tokens)
     if numel(parsed) >= numel(default_value)
         value = parsed(1:numel(default_value)).';
     end
+end
+end
+
+function value = usctbench_json_bool(json_text, key, default_value)
+value = default_value;
+pattern = ['"' key '"\s*:\s*(true|false|1|0)'];
+tokens = regexp(json_text, pattern, 'tokens', 'once');
+if ~isempty(tokens)
+    token = lower(tokens{1});
+    value = strcmp(token, 'true') || strcmp(token, '1');
+end
+end
+
+function text = usctbench_bool_text(value)
+if value
+    text = 'true';
+else
+    text = 'false';
 end
 end

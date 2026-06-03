@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -141,6 +143,7 @@ def run_matlab_backend(
     result.artifacts.update(artifacts)
     result.metrics.setdefault("adapter_dependency_available", True)
     result.metrics["external_adapter_output_loaded"] = True
+    _augment_matlab_log_metrics(result, log_path)
     _augment_external_result_metrics(result, case, config)
     return result
 
@@ -222,3 +225,91 @@ def _augment_external_result_metrics(result: ReconstructionResult, case: USCTCas
                 result.metrics.setdefault(key, value)
     except Exception as exc:
         result.metrics.setdefault("external_metric_augmentation_error", f"{type(exc).__name__}: {exc}")
+
+
+def _augment_matlab_log_metrics(result: ReconstructionResult, log_path: Path) -> None:
+    try:
+        diagnostics = _parse_matlab_log_diagnostics(log_path.read_text(encoding="utf-8", errors="replace"))
+    except Exception as exc:  # pragma: no cover - diagnostic only.
+        result.metrics.setdefault("matlab_log_diagnostic_error", f"{type(exc).__name__}: {exc}")
+        return
+    result.metrics.update(diagnostics)
+
+
+def _parse_matlab_log_diagnostics(text: str) -> dict[str, object]:
+    """Extract lightweight numerical diagnostics from external MATLAB logs."""
+
+    bad_linkings = _extract_numbers_after(text, r"The number of bad linkings:\s*([+-]?\d+(?:\.\d+)?)")
+    sign_jacobian = _extract_numbers_after(
+        text,
+        r"The number of the rays for which the sign of the Jacobian is changed are:\s*([+-]?\d+(?:\.\d+)?)",
+    )
+    objectives = _extract_numbers_after(text, r"The objective function is:\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)")
+    relative_errors = _extract_numbers_after(text, r"The relative error is:\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)%")
+    frequency_levels = _extract_numbers_after(text, r"The frequency level \(linearised subproblem\) is:\s*([+-]?\d+(?:\.\d+)?)")
+    finite_objectives = [value for value in objectives if math.isfinite(value)]
+    nan_count = len(re.findall(r"(?<![A-Za-z])NaN(?![A-Za-z])", text, flags=re.IGNORECASE))
+    inf_count = len(re.findall(r"(?<![A-Za-z])Inf(?![A-Za-z])", text, flags=re.IGNORECASE))
+
+    diagnostics: dict[str, object] = {
+        "matlab_log_bad_linking_reports": len(bad_linkings),
+        "matlab_log_bad_linkings_total": float(np.sum(bad_linkings)) if bad_linkings else 0.0,
+        "matlab_log_bad_linkings_max": float(np.max(bad_linkings)) if bad_linkings else 0.0,
+        "matlab_log_sign_jacobian_reports": len(sign_jacobian),
+        "matlab_log_sign_jacobian_changed_total": float(np.sum(sign_jacobian)) if sign_jacobian else 0.0,
+        "matlab_log_sign_jacobian_changed_max": float(np.max(sign_jacobian)) if sign_jacobian else 0.0,
+        "matlab_log_objective_reports": len(finite_objectives),
+        "matlab_log_nan_token_count": nan_count,
+        "matlab_log_inf_token_count": inf_count,
+        "matlab_log_frequency_level_reports": len(frequency_levels),
+        "matlab_log_frequency_level_max": float(np.max(frequency_levels)) if frequency_levels else 0.0,
+        "matlab_log_relative_error_reports": len(relative_errors),
+        "matlab_log_relative_error_percent_max": float(np.max(relative_errors)) if relative_errors else float("nan"),
+        "matlab_log_relative_error_percent_last": float(relative_errors[-1]) if relative_errors else float("nan"),
+    }
+    if finite_objectives:
+        initial = float(finite_objectives[0])
+        final = float(finite_objectives[-1])
+        diagnostics.update(
+            {
+                "matlab_log_objective_initial": initial,
+                "matlab_log_objective_final": final,
+                "matlab_log_objective_min": float(np.min(finite_objectives)),
+                "matlab_log_objective_max": float(np.max(finite_objectives)),
+                "matlab_log_objective_increased": final > initial,
+            }
+        )
+    else:
+        diagnostics.update(
+            {
+                "matlab_log_objective_initial": float("nan"),
+                "matlab_log_objective_final": float("nan"),
+                "matlab_log_objective_min": float("nan"),
+                "matlab_log_objective_max": float("nan"),
+                "matlab_log_objective_increased": False,
+            }
+        )
+    diagnostics["matlab_log_likely_failure_mode"] = _classify_matlab_log_diagnostics(diagnostics)
+    return diagnostics
+
+
+def _extract_numbers_after(text: str, pattern: str) -> list[float]:
+    return [float(match) for match in re.findall(pattern, text, flags=re.IGNORECASE)]
+
+
+def _classify_matlab_log_diagnostics(metrics: dict[str, object]) -> str:
+    nan_count = int(metrics.get("matlab_log_nan_token_count", 0))
+    bad_linkings = float(metrics.get("matlab_log_bad_linkings_total", 0.0))
+    sign_total = float(metrics.get("matlab_log_sign_jacobian_changed_total", 0.0))
+    objective_increased = bool(metrics.get("matlab_log_objective_increased", False))
+    if nan_count > 0:
+        return "nan_or_nonfinite_gradient"
+    if bad_linkings > 0:
+        return "ray_linking_or_caustic_failure"
+    if sign_total > 0 and objective_increased:
+        return "sign_jacobian_or_update_direction"
+    if objective_increased:
+        return "source_frequency_or_update_model_mismatch"
+    if sign_total > 0:
+        return "sign_jacobian_present_but_objective_stable"
+    return "no_log_failure_signal"

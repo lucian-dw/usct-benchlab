@@ -124,3 +124,51 @@ def test_cgls_laplacian_regularization_runs_on_synthetic_case():
     assert np.isfinite(result.sound_speed_mps).all()
     assert result.metrics["regularization"] == "laplacian"
     assert result.metrics["regularization_lambda_squared"] == pytest.approx(1.0e-8)
+
+
+def test_cgls_coverage_preconditioning_and_roi_laplacian_report_diagnostics():
+    case = make_sound_speed_case(shape=(14, 14), n_transducers=18, inclusion_mps=1450.0)
+    result = StraightRayCGLSAlgorithm().run(
+        case,
+        AlgorithmConfig(
+            parameters={
+                "iterations": 8,
+                "reference_sound_speed_mps": 1500.0,
+                "regularization": "laplacian",
+                "regularization_lambda": 1.0e-3,
+                "coverage_preconditioning": True,
+                "roi_laplacian": True,
+                "roi_update_only": True,
+                "boundary_band_pixels": 2,
+            }
+        ),
+    )
+
+    assert result.status == "success"
+    assert result.metrics["coverage_preconditioning"] is True
+    assert result.metrics["roi_laplacian"] is True
+    assert result.metrics["roi_update_only"] is True
+    assert np.isfinite(result.metrics["boundary_band_rmse"])
+    assert "coverage_abs_error_corr" in result.metrics
+
+
+def test_cgls_huber_irls_runs_on_synthetic_case():
+    case = make_sound_speed_case(shape=(12, 12), n_transducers=16, inclusion_mps=1450.0)
+    result = StraightRayCGLSAlgorithm().run(
+        case,
+        AlgorithmConfig(
+            parameters={
+                "iterations": 4,
+                "robust_loss": "huber",
+                "irls_iterations": 2,
+                "huber_delta_s": 1.0e-6,
+                "regularization": "laplacian",
+                "regularization_lambda": 1.0e-3,
+            }
+        ),
+    )
+
+    assert result.status == "success"
+    assert result.metrics["robust_loss"] == "huber"
+    assert result.metrics["irls_iterations"] == 2
+    assert result.metrics["data_residual_reduction"] >= 0.0

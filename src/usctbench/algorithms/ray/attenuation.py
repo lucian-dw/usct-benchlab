@@ -5,9 +5,10 @@ from __future__ import annotations
 import numpy as np
 
 from usctbench.algorithms.ray._common import (
+    configured_ray_weights,
     masked_norm,
+    ray_weight_metrics,
     residual_metrics,
-    ray_weights,
     run_with_failure_capture,
     sirt_solve,
     target_attenuation_integral,
@@ -24,7 +25,7 @@ class AttenuationSIRTAlgorithm:
         def _run() -> ReconstructionResult:
             projector = StraightRayProjector.from_case(case)
             target, mask = target_attenuation_integral(case, projector)
-            weights = ray_weights(case, projector, mask)
+            weights = configured_ray_weights(case, projector, mask, config)
             iterations = int(config.parameters.get("iterations", 50))
             relaxation = float(config.parameters.get("relaxation", 0.8))
             upper = float(config.parameters.get("attenuation_upper_np_per_m", 80.0))
@@ -47,8 +48,7 @@ class AttenuationSIRTAlgorithm:
                 "attenuation_input_has_signal": bool(initial_norm > 0.0),
                 "attenuation_input_is_surrogate": _is_surrogate_attenuation_case(case),
                 "iterations": iterations,
-                "ray_weight_mean": float(np.mean(weights[mask])) if np.any(mask) else 0.0,
-                "ray_weight_nonzero_fraction": float(np.mean(weights[mask] > 0.0)) if np.any(mask) else 0.0,
+                **ray_weight_metrics(weights, mask, config),
             }
             if case.ground_truth.attenuation_np_per_m is not None:
                 metrics.update(

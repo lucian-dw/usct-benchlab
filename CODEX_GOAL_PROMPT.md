@@ -1,6 +1,6 @@
-# Codex Goal Mode Prompt
+# CODEX_GOAL_PROMPT.md — Start `usct-benchlab` v0.1
 
-Copy this whole prompt into Codex Goal Mode.
+Copy this prompt into Codex Goal Mode.
 
 ---
 
@@ -12,32 +12,85 @@ git@github.com:Math-Wu/usct-benchlab.git
 
 Project name: `usct-benchlab`.
 
-This is a USCT traditional algorithm benchmark library for a medical imaging agent. The first version must focus on **traditional and classical algorithms only**. Do **not** implement diffusion, GAN, score model, or heavy generative models in v0.1. Keep extension points for deep learning, but the acceptance target is classical USCT algorithms.
+Read these files first, in order:
 
-## Context
+1. `AGENTS.md`
+2. `README.md` if it exists
+3. `CODEX_TASKS.md` if it exists
+4. `docs/project/USCT_BENCHLAB_V0_DEVELOPMENT_PLAN.md` if it exists
+5. `docs/project/ALGORITHM_SETTINGS_TROUBLESHOOTING.md` if it exists
+6. `docs/setup/A100_SERVER_SETUP.md` if it exists
 
-USCT algorithms should be organized by physical modeling complexity:
+## Current real workflow
+
+I use Codex locally on my Mac, but the Mac is only a lightweight editing/control environment. The A100 server is the authoritative runtime environment for CUDA, PyTorch-GPU, MATLAB/external wrappers, OpenBreastUS inspection, and benchmark runs.
+
+Local Mac workspace:
+
+```text
+/Users/wudalong/Desktop/usct-benchlab
+```
+
+A100 workspace:
+
+```text
+~/usct-benchlab
+```
+
+The Git repository may be either the workspace root or a `code/` subdirectory. Detect the repository root using:
+
+```bash
+git rev-parse --show-toplevel
+```
+
+Use GitHub as the synchronization bridge:
+
+```text
+Mac edit -> git commit/push -> GitHub -> A100 git pull -> A100 run tests/benchmarks
+```
+
+If you need to run heavy commands, use the configured SSH MCP connection to A100. Do not assume Codex is running directly on A100.
+
+Before any A100 run, execute remotely:
+
+```bash
+cd ~/usct-benchlab/code 2>/dev/null || cd ~/usct-benchlab
+git status
+git pull --ff-only || git pull
+bash scripts/setup_workspace.sh || true
+nvidia-smi
+python --version
+```
+
+Do not use `/data/...`. I do not have sudo permission on the A100 server. Use workspace-relative paths:
+
+```bash
+export USCT_WORKSPACE=$HOME/usct-benchlab
+export USCT_DATA_ROOT=$USCT_WORKSPACE/data/openbreastus
+export USCT_SAMPLE_ROOT=$USCT_WORKSPACE/data/openbreastus_sample
+export USCT_RUN_ROOT=$USCT_WORKSPACE/runs/usctbench_runs
+```
+
+On Mac, do not require CUDA, MATLAB, k-Wave, Deepwave, or the full OpenBreastUS dataset. Mac tests should be limited to static checks, schema tests, CLI import tests, and tiny synthetic fixtures.
+
+## Project goal
+
+This is a USCT traditional algorithm benchmark library for a medical imaging agent. v0.1 must focus on **traditional and classical algorithms only**.
+
+Do **not** implement diffusion, GAN, score-based models, large neural-operator training, or heavy generative models in v0.1. Keep extension points for learning methods, but the v0.1 acceptance target is classical USCT algorithms.
+
+Organize USCT algorithms by physical modeling complexity:
 
 1. data/geometric calibration and feature extraction;
 2. straight-ray travel-time tomography;
 3. straight-ray attenuation tomography;
 4. refraction-corrected/bent-ray travel-time tomography;
 5. weak-scattering Born/Rytov/ray-Born reconstruction;
-6. small full-waveform inversion proof-of-life.
+6. tiny full-waveform inversion proof-of-life.
 
-The dataset is OpenBreastUS. It is already downloaded by me on the A100 server. Do not download the full dataset. Inspect the local data path and build smoke/mini subsets.
+The dataset is OpenBreastUS. It is already downloaded by me on A100. Do not download the full dataset. Inspect the local data path and build smoke/mini subsets.
 
-Expected environment variables:
-
-```bash
-export USCT_DATA_ROOT=/data/openbreastus
-export USCT_SAMPLE_ROOT=/data/openbreastus_sample
-export USCT_RUN_ROOT=/data/usctbench_runs
-```
-
-If these paths do not exist, create clear instructions and continue with synthetic fixtures so the repository remains testable.
-
-## Main goal
+## Main deliverable
 
 Build a working v0.1 library where algorithms can be called by an agent through a stable CLI:
 
@@ -49,8 +102,6 @@ usct run straight_sart --case <case.h5> --config configs/algorithms/straight_sar
 usct eval --run <run_dir> --protocol configs/benchmarks/openbreastus_smoke.yaml
 usct bench --suite configs/benchmarks/openbreastus_smoke.yaml
 ```
-
-## Required deliverables
 
 Create or update:
 
@@ -70,21 +121,29 @@ scripts/
 tests/
 ```
 
-Implement:
+## Required implementation order
 
-1. `USCTCase` and `ReconstructionResult` schema.
-2. HDF5 read/write helpers.
-3. Algorithm registry.
-4. Typer/Rich CLI.
-5. OpenBreastUS inspector and smoke subset creator.
-6. Feature extraction for ray methods: phase-delay / travel-time-like feature, log-amplitude ratio, and valid mask.
-7. Metrics: ROI RMSE, MAE, NRMSE, SSIM, PSNR, runtime, residual, pass/fail report.
-8. Straight-ray projector with adjoint test.
-9. Straight-ray SART/SIRT/CGLS sound-speed reconstruction.
-10. Straight-ray attenuation tomography.
-11. Optional MATLAB adapters for refraction-corrected GN and r-Wave ray-Born.
-12. Tiny FWI with synthetic gradient check and loss-decrease test.
-13. Algorithm cards with settings and troubleshooting.
+Do not start with FWI. Follow this order:
+
+1. Repository skeleton, package install, tests, CLI.
+2. `USCTCase` and `ReconstructionResult` schema.
+3. HDF5 read/write helpers.
+4. Algorithm registry.
+5. `scripts/setup_workspace.sh` that works both on Mac and A100.
+6. OpenBreastUS inspector and smoke subset creator.
+7. Feature extraction for ray methods:
+   - phase-delay / travel-time-like feature;
+   - log-amplitude ratio;
+   - valid mask;
+   - water/reference handling when available.
+8. Metrics: ROI RMSE, MAE, NRMSE, SSIM, PSNR, runtime, residual, pass/fail report.
+9. Straight-ray projector with adjoint test.
+10. Straight-ray SART/SIRT/CGLS sound-speed reconstruction.
+11. Straight-ray attenuation tomography.
+12. Synthetic fixtures and strict tests.
+13. Optional MATLAB adapters for refraction-corrected GN and r-Wave/ray-Born.
+14. Tiny FWI with synthetic gradient check and loss-decrease test.
+15. Algorithm cards with settings and troubleshooting.
 
 ## External code to study or optionally wrap
 
@@ -98,22 +157,7 @@ Use these as references/adapters, not as uncontrolled code dumps:
 - `ucl-bug/k-wave`, `k-wave-python`, or `deepwave`: optional wave simulation/FWI backends.
 - `astra-toolbox`: optional accelerated tomography primitives.
 
-Check licenses before vendoring. Prefer `external/` adapters and documented install steps.
-
-## Implementation order
-
-Do not start with FWI. Follow this order:
-
-1. Repo skeleton, package install, tests, CLI.
-2. Schema and HDF5 roundtrip.
-3. OpenBreastUS inspection and smoke subset creation.
-4. Metrics and benchmark runner.
-5. Straight-ray projector and SART/SIRT/CGLS.
-6. Attenuation tomography.
-7. Synthetic fixtures and strict tests.
-8. Optional MATLAB adapters.
-9. Tiny FWI proof-of-life.
-10. Documentation and benchmark report.
+Check licenses before vendoring. Prefer adapters and documented install steps. Do not commit full external repos unless explicitly approved.
 
 ## Acceptance rules
 
@@ -132,8 +176,8 @@ Hard gates:
 - output shape matches case grid;
 - sound speed in m/s and plausible range;
 - all unit tests pass;
-- synthetic correctness test passes;
-- OpenBreastUS smoke run produces metrics;
+- synthetic correctness tests pass;
+- OpenBreastUS smoke run produces metrics on A100;
 - failure report is generated if convergence fails.
 
 Target initial thresholds are engineering smoke thresholds, not final paper claims:
@@ -141,41 +185,36 @@ Target initial thresholds are engineering smoke thresholds, not final paper clai
 - straight-ray SART should improve over water/background baseline on smoke cases;
 - attenuation tomography should reduce log-amplitude residual on synthetic and smoke feature tests;
 - tiny FWI should pass finite-difference gradient check on synthetic data and reduce waveform residual;
-- bent-ray/ray-Born adapters may be optional but must be callable and documented.
+- bent-ray/ray-Born adapters may be optional but must be callable or skipped with clear explanation.
 
 ## Expert troubleshooting rules
 
-When a run fails, do not randomly tune everything. Follow the expert guide in `docs/ALGORITHM_SETTINGS_TROUBLESHOOTING.md`:
+When a run fails, do not randomly tune everything. Follow `docs/project/ALGORITHM_SETTINGS_TROUBLESHOOTING.md` if present, and use this order:
 
-- For ray methods, first check units, sign convention, geometry, missing-data mask, phase unwrap, and water/reference subtraction.
-- For SART/SIRT, lower relaxation, increase smoothing, clip SoS bounds, and inspect the sinogram before changing the algorithm.
-- For bent-ray GN, start from a smoothed straight-ray result, increase regularization, add line search, and reduce outer iterations.
-- For ray-Born/Rytov, use a better background, lower frequency first, and reject low-SNR receivers.
-- For FWI, lower the starting frequency, smooth the initial model, use frequency continuation, reduce learning rate, verify source wavelet/PML, and check gradient sign.
+1. Check units, sign convention, geometry, receiver ordering, missing-data mask, phase unwrap, and water/reference subtraction.
+2. For SART/SIRT, lower relaxation, increase smoothing, clip SoS bounds, inspect the sinogram, then increase iterations.
+3. For bent-ray GN, start from a smoothed straight-ray result, increase regularization, add line search, and reduce outer iterations.
+4. For ray-Born/Rytov, use a better background, lower frequency first, reject low-SNR receivers, and verify complex phase convention.
+5. For FWI, lower starting frequency, smooth the initial model, use frequency continuation, reduce learning rate, verify source wavelet/PML, and check gradient sign.
 
-## Server behavior
+## Git and execution rules
 
-Before heavy work, run:
-
-```bash
-pwd
-nvidia-smi
-python --version
-git status
-```
-
-Do not assume CUDA version. Use CPU-compatible tests where possible and GPU only for benchmark/FWI. A100 memory is large, but v0.1 should still support small smoke runs.
+- Do not commit data, runs, checkpoints, external cloned repositories, or large scientific files.
+- Prefer small commits.
+- Before heavy A100 execution, make sure A100 has pulled the latest GitHub state.
+- If you patch directly on A100, commit and push from A100, then make sure the Mac pulls the changes.
+- Avoid simultaneous uncommitted edits on Mac and A100.
+- If data paths are missing, keep the repo testable using synthetic fixtures and write clear instructions instead of failing silently.
 
 ## Final output expected from you
 
-When you finish, provide:
+When you finish a milestone, provide:
 
-1. a concise summary of implemented components;
-2. exact commands to run smoke benchmark;
-3. known limitations;
-4. which algorithms passed/failed and why;
-5. a commit hash or branch name.
+1. concise summary of implemented components;
+2. exact commands to run local lightweight tests;
+3. exact commands to run A100 smoke benchmark;
+4. known limitations;
+5. which algorithms passed/failed and why;
+6. commit hash or branch name.
 
-Begin by setting up the repository skeleton and tests. Work incrementally and commit often.
-
----
+Begin now by setting up the repository skeleton, workspace script, tests, and CLI. Then push to GitHub and run the first A100 smoke checks through SSH MCP.

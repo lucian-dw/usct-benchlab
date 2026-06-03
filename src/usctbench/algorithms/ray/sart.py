@@ -5,10 +5,11 @@ from __future__ import annotations
 import numpy as np
 
 from usctbench.algorithms.ray._common import (
+    configured_ray_weights,
     masked_norm,
     reference_sound_speed,
     residual_metrics,
-    ray_weights,
+    ray_weight_metrics,
     run_with_failure_capture,
     sart_solve,
     slowness_to_sound_speed,
@@ -27,7 +28,7 @@ class StraightRaySARTAlgorithm:
         def _run() -> ReconstructionResult:
             projector = StraightRayProjector.from_case(case)
             target, mask = target_delta_tof(case, projector)
-            weights = ray_weights(case, projector, mask)
+            weights = configured_ray_weights(case, projector, mask, config)
             iterations = int(config.parameters.get("iterations", 10))
             relaxation = float(config.parameters.get("relaxation", 0.2))
             subsets = int(config.parameters.get("subsets", 8))
@@ -59,8 +60,7 @@ class StraightRaySARTAlgorithm:
                 "smooth_every": smooth_every,
                 "roi_update_only": roi_update_only,
                 "residual_curve": residual_norms,
-                "ray_weight_mean": float(np.mean(weights[mask])) if np.any(mask) else 0.0,
-                "ray_weight_nonzero_fraction": float(np.mean(weights[mask] > 0.0)) if np.any(mask) else 0.0,
+                **ray_weight_metrics(weights, mask, config),
             }
             if case.ground_truth.sound_speed_mps is not None:
                 metrics.update(

@@ -107,8 +107,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     features_parser = subparsers.add_parser("features", help="Wavefield feature extraction commands.")
     features_subparsers = features_parser.add_subparsers(dest="features_command")
-    extract_parser = features_subparsers.add_parser("extract", help="Extract algorithm-ready features from a wavefield case.")
+    extract_parser = features_subparsers.add_parser("extract", help="Extract legacy debug features from a wavefield case.")
     extract_parser.add_argument("--case", required=True, help="Wavefield case HDF5 path.")
+    extract_parser.add_argument(
+        "--channel",
+        default="legacy",
+        choices=["legacy"],
+        help="Observable channel to extract. Channelized k-Wave-to-ray feature paths are retired from the mainline.",
+    )
     extract_parser.add_argument(
         "--method",
         default="robust_fusion",

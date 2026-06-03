@@ -33,6 +33,11 @@ class BentRayGNAdapter:
 
 
 def _run_python_bent_ray(algorithm: str, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
+    if bool(config.parameters.get("true_bent_ray", False)):
+        raise ValueError(
+            "true_bent_ray prototype is retired from the main benchmark. "
+            "Use bent_ray_gn as a regularized travel-time surrogate, and use kwave_fwi_main for k-Wave data."
+        )
     return run_iterative_travel_time_solver(
         algorithm=algorithm,
         case=case,
@@ -44,7 +49,9 @@ def _run_python_bent_ray(algorithm: str, case: USCTCase, config: AlgorithmConfig
         default_regularization_lambda=3.0e-5,
         default_smooth_sigma=0.6,
         extra_metrics={
-            "refraction_correction_enabled": True,
+            "refraction_correction_enabled": False,
+            "surrogate_travel_time_backend": True,
+            "uses_true_bent_rays": False,
             "external_reference": "rehmanali1994/refractionCorrectedUSCT.github.io",
         },
     )

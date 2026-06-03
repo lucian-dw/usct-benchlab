@@ -20,6 +20,7 @@ from typing import Any
 import yaml
 
 from usctbench.benchmark.report import write_failure_report
+from usctbench.features.channels import COMPLEX_WAVEFIELD, EIKONAL_TOF, require_feature_channel, require_raw_wavefield
 from usctbench.io.hdf5 import read_case_hdf5, write_result_hdf5
 from usctbench.provenance import case_measurement_metadata
 from usctbench.registry import get_algorithm
@@ -85,6 +86,7 @@ def run_algorithm_case(
                 metrics={"feature_qc_failed": True, **_feature_qc_metrics(case)},
             )
         else:
+            _validate_observable_contract(algorithm_name, case, config)
             algorithm = get_algorithm(algorithm_name)
             result = algorithm.run(case, config)
     except Exception as exc:
@@ -187,8 +189,8 @@ def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
     suite = _load_yaml(suite_file)
     suite_name = suite.get("name", suite_file.stem)
     case_glob = _expand(str(suite["case_glob"]))
-    cases = sorted(Path(path) for path in glob.glob(case_glob, recursive=True))
-    if not cases and not bool(suite.get("allow_empty", False)):
+    suite_cases = sorted(Path(path) for path in glob.glob(case_glob, recursive=True))
+    if not suite_cases and not bool(suite.get("allow_empty", False)):
         raise ValueError(f"benchmark suite matched no cases: {case_glob}")
     output_root = Path(_expand(str(suite.get("outputs", {}).get("root", "runs/usctbench_runs"))))
     run_id = suite.get("run_id") or f"{suite_name}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
@@ -205,11 +207,18 @@ def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
         config_path = Path(_expand(str(algorithm["config"])))
         if not config_path.is_absolute():
             config_path = suite_file.parent.parent.parent / config_path if suite_file.parent.name == "benchmarks" else Path.cwd() / config_path
+        algorithm_case_glob = algorithm.get("case_glob")
+        cases = suite_cases
+        if algorithm_case_glob:
+            expanded_glob = _expand(str(algorithm_case_glob))
+            cases = sorted(Path(path) for path in glob.glob(expanded_glob, recursive=True))
+            if not cases and not bool(algorithm.get("allow_empty", suite.get("allow_empty", False))):
+                raise ValueError(f"benchmark suite algorithm {algorithm_name} matched no cases: {expanded_glob}")
         for case_path in cases:
             run_algorithm_case(algorithm_name, case_path, config_path, run_root / algorithm_name)
 
     evaluation = evaluate_run(run_root, suite_file)
-    return {"run_root": str(run_root), "num_cases": len(cases), **evaluation}
+    return {"run_root": str(run_root), "num_cases": len(suite_cases), **evaluation}
 
 
 def _write_result_artifacts(
@@ -266,6 +275,32 @@ def _write_result_artifacts(
         stale_failure_report = out_dir / "failure_report.md"
         if stale_failure_report.exists():
             stale_failure_report.unlink()
+
+
+def _validate_observable_contract(algorithm_name: str, case: USCTCase, config: AlgorithmConfig) -> None:
+    required = str(config.parameters.get("required_feature_channel", config.metadata.get("required_feature_channel", "")) or "")
+    algorithm = str(algorithm_name)
+    if algorithm == "bent_ray_gn" and bool(config.parameters.get("true_bent_ray", False)):
+        required = EIKONAL_TOF
+    elif algorithm == "rwave_adapter" and (
+        str(config.parameters.get("backend", "")).lower() in {"complex", "python_complex", "complex_wavefield"}
+        or bool(config.parameters.get("use_complex_wavefield", False))
+    ):
+        required = COMPLEX_WAVEFIELD
+    elif algorithm == "fwi_kwave_adapter" and bool(config.parameters.get("data_sanity_only", False)):
+        require_raw_wavefield(case, algorithm=algorithm)
+        return
+    elif algorithm.startswith("straight_") and not required:
+        # Legacy oracle/surrogate tests predate channel metadata. New k-Wave
+        # configs should set required_feature_channel=apparent_tof explicitly.
+        return
+    elif algorithm == "bent_ray_gn" and not required:
+        return
+    elif algorithm == "rwave_adapter" and not required:
+        return
+    if required:
+        allow_legacy = bool(config.parameters.get("allow_legacy_missing_feature_channel", False))
+        require_feature_channel(case, required, algorithm=algorithm, allow_legacy_missing=allow_legacy)
 
 
 def _write_straight_ray_diagnostics(result: ReconstructionResult, case: USCTCase | None, out_dir: Path) -> None:

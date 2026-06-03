@@ -1,9 +1,16 @@
 name: straight_sirt
 parameters:
   iterations: 50
-  relaxation: 0.3
-  smooth_sigma: 0.0
-  smooth_every: 0
+  relaxation: 0.25
+  smooth_sigma: 0.5
+  smooth_every: 1
   roi_update_only: false
+  min_ray_weight: 0.0
+  ray_weight_power: 1.0
   reference_sound_speed_mps: 1500.0
   sound_speed_bounds_mps: [1300.0, 1700.0]
+metadata:
+  description: Straight-ray SIRT travel-time surrogate baseline with light per-iteration smoothing.
+  benchmark_role: travel-time surrogate mainline for traditional methods; not a k-Wave wavefield inversion result.
+  measurement_provenance: speedmap_travel_time_surrogate
+  uses_kwave_wavefield: false

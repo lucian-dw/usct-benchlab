@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from usctbench.data.features import extract_frequency_features, log_amplitude_ratio, phase_delay_seconds, valid_amplitude_mask
+from usctbench.features.quality import _sinogram_local_smooth_quality
 
 
 def test_log_amplitude_ratio_uses_reference_convention():
@@ -64,3 +65,17 @@ def test_valid_amplitude_mask_requires_all_frequency_bins():
 
     assert mask.shape == (1, 1)
     assert mask[0, 0] is np.False_
+
+
+def test_local_sinogram_smooth_quality_downweights_spike():
+    pytest.importorskip("scipy.ndimage")
+    delta = np.zeros((9, 9), dtype=float)
+    valid = np.ones_like(delta, dtype=bool)
+    delta[4, 4] = 2.0e-6
+
+    quality, mad = _sinogram_local_smooth_quality(delta, valid)
+
+    assert quality.shape == delta.shape
+    assert mad >= 0.0
+    assert quality[4, 4] < 0.2
+    assert quality[4, 5] > quality[4, 4]

@@ -301,12 +301,14 @@ def normalized_cross_correlation_delay(
             keep_lag = (lag_seconds >= min_lag[tx, rx]) & (lag_seconds <= max_lag[tx, rx])
             if not np.any(keep_lag):
                 continue
-            signal = _demean(_apply_time_gate(signals[tx, rx], times, sig_start[tx, rx], sig_end[tx, rx]))
-            ref = _demean(_apply_time_gate(refs[tx, rx], times, ref_start[tx, rx], ref_end[tx, rx]))
+            sig0, signal = _gated_demeaned_segment(signals[tx, rx], times, sig_start[tx, rx], sig_end[tx, rx])
+            ref0, ref = _gated_demeaned_segment(refs[tx, rx], times, ref_start[tx, rx], ref_end[tx, rx])
+            if signal.size < 3 or ref.size < 3:
+                continue
             corr_values = []
             lags = lag_values[keep_lag]
             for lag in lags:
-                a, b = _overlap_for_lag(signal, ref, int(lag))
+                a, b = _overlap_for_segment_lag(signal, sig0, ref, ref0, int(lag))
                 if a.size < 3:
                     corr_values.append(np.nan)
                     continue
@@ -468,6 +470,20 @@ def _apply_time_gate(signal: np.ndarray, times: np.ndarray, start: float, end: f
     return out
 
 
+def _gated_demeaned_segment(signal: np.ndarray, times: np.ndarray, start: float, end: float) -> tuple[int, np.ndarray]:
+    values = np.asarray(signal, dtype=float)
+    keep = np.flatnonzero((times >= float(start)) & (times <= float(end)) & np.isfinite(values))
+    if keep.size == 0:
+        return 0, np.asarray([], dtype=float)
+    segment = values[keep].astype(float, copy=True)
+    window = np.hanning(segment.size)
+    if window.size <= 2:
+        window = np.ones_like(window)
+    segment *= window
+    segment = _demean(segment)
+    return int(keep[0]), segment
+
+
 def _aic_curve(trace: np.ndarray) -> np.ndarray:
     values = np.asarray(trace, dtype=float)
     n = values.size
@@ -497,6 +513,32 @@ def _overlap_for_lag(signal: np.ndarray, ref: np.ndarray, lag: int) -> tuple[np.
     if lag >= 0:
         return signal[lag:], ref[: signal.size - lag]
     return signal[: signal.size + lag], ref[-lag:]
+
+
+def _overlap_for_segment_lag(
+    signal: np.ndarray,
+    signal_start: int,
+    ref: np.ndarray,
+    ref_start: int,
+    lag: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return overlapping samples for lag using original trace indices.
+
+    `lag` follows the project convention used by full-trace xcorr:
+    positive lag means the object signal is delayed relative to the reference.
+    """
+
+    sig0 = int(signal_start)
+    sig1 = sig0 + int(signal.size)
+    ref0 = int(ref_start)
+    ref1 = ref0 + int(ref.size)
+    start_ref = max(ref0, sig0 - int(lag))
+    end_ref = min(ref1, sig1 - int(lag))
+    if end_ref <= start_ref:
+        return np.asarray([], dtype=float), np.asarray([], dtype=float)
+    start_sig = start_ref + int(lag)
+    end_sig = end_ref + int(lag)
+    return signal[start_sig - sig0 : end_sig - sig0], ref[start_ref - ref0 : end_ref - ref0]
 
 
 def _peak_ratio(corr: np.ndarray, best_index: int, *, exclusion: int = 2) -> float:

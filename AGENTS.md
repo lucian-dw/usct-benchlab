@@ -1,26 +1,160 @@
-# AGENTS.md — Codex multi-agent instructions for `usct-benchlab`
+# AGENTS.md — `usct-benchlab` Codex instructions
 
-This repository is a USCT traditional algorithm benchmark library. v0.1 is **traditional-first**: do not implement diffusion, GAN, score model, or large neural operator training as a first milestone. Keep the architecture extensible for learning methods, but deliver a robust classical benchmark harness first.
+This repository is `usct-benchlab`, a USCT traditional algorithm benchmark library for a medical imaging agent.
 
-## Non-negotiable constraints
+v0.1 is **traditional-first**. The priority is to build a reliable benchmark harness and run classical USCT algorithms before any generative model work.
 
-1. **No data in git.** Never commit OpenBreastUS files, checkpoints, generated wavefields, raw `.mat` data, `.h5` cases, or benchmark runs.
+Do **not** implement diffusion, GAN, score-based models, large neural-operator training, or other heavy generative methods in v0.1. Keep extension points for learning-based methods, but the acceptance target is classical USCT algorithms.
+
+---
+
+## 0. Real development workflow
+
+The user works from a local Mac, but the Mac is **not** the authoritative scientific-computing environment.
+
+Use this workflow:
+
+```text
+Mac local = lightweight editing / documentation / control / small tests
+GitHub    = synchronization bridge
+A100      = authoritative runtime environment for CUDA, OpenBreastUS, MATLAB-related wrappers, benchmarks, and heavy numerical debugging
+```
+
+Preferred loop:
+
+```text
+Mac edit -> git commit/push -> GitHub -> A100 git pull -> A100 run tests/benchmarks
+```
+
+If A100 reveals bugs, either:
+
+1. fix locally on Mac, commit/push, then pull on A100; or
+2. patch directly on A100, commit/push, then pull back on Mac.
+
+Avoid simultaneous uncommitted edits on both Mac and A100. Before editing on either side, run `git status`. Before running on A100, run `git pull`.
+
+---
+
+## 1. Known paths and repository layout
+
+The local Mac workspace is usually:
+
+```text
+/Users/wudalong/Desktop/usct-benchlab
+```
+
+The A100 workspace is usually:
+
+```text
+~/usct-benchlab
+```
+
+The Git repository may be either the workspace root or a `code/` subdirectory. Always detect it using:
+
+```bash
+git rev-parse --show-toplevel
+```
+
+Preferred split layout:
+
+```text
+<workspace>/
+  code/          # Git repository, if split layout is used
+  data/          # OpenBreastUS and smoke subsets, never committed
+  runs/          # benchmark outputs, never committed
+  external/      # third-party repos, never committed unless deliberately vendored and licensed
+  checkpoints/   # model weights/checkpoints, never committed
+```
+
+If the repository root itself is `<workspace>/usct-benchlab`, still use the same logical layout and keep data/runs/checkpoints ignored by Git.
+
+Do not use `/data/...`. The user does not have sudo permission on the A100 server.
+
+Use environment variables and workspace-relative paths:
+
+```bash
+export USCT_WORKSPACE=<workspace>
+export USCT_DATA_ROOT=$USCT_WORKSPACE/data/openbreastus
+export USCT_SAMPLE_ROOT=$USCT_WORKSPACE/data/openbreastus_sample
+export USCT_RUN_ROOT=$USCT_WORKSPACE/runs/usctbench_runs
+```
+
+On Mac, `USCT_WORKSPACE` should usually be:
+
+```bash
+/Users/wudalong/Desktop/usct-benchlab
+```
+
+On A100, `USCT_WORKSPACE` should usually be:
+
+```bash
+$HOME/usct-benchlab
+```
+
+---
+
+## 2. Remote A100 behavior through SSH MCP
+
+Codex is normally controlled locally on Mac. When A100 execution is needed, use the configured SSH MCP connection to run commands remotely.
+
+Before any A100 run, execute remotely:
+
+```bash
+cd ~/usct-benchlab/code 2>/dev/null || cd ~/usct-benchlab
+git status
+git pull --ff-only || git pull
+bash scripts/setup_workspace.sh || true
+nvidia-smi
+python --version
+```
+
+A100 is responsible for:
+
+- OpenBreastUS inspection and indexing;
+- smoke/mini subset generation;
+- CUDA/PyTorch installation checks;
+- MATLAB/external adapter checks when available;
+- straight-ray smoke benchmarks;
+- attenuation benchmarks;
+- FWI synthetic tests and later FWI smoke benchmarks;
+- long-running numerical debugging.
+
+Mac is responsible for:
+
+- documentation;
+- lightweight code editing;
+- interface/schema design;
+- static checks;
+- small synthetic tests that do not require CUDA, MATLAB, or the full OpenBreastUS dataset.
+
+Never require the Mac to install CUDA, MATLAB, k-Wave, Deepwave, or the full OpenBreastUS dataset.
+
+---
+
+## 3. Non-negotiable constraints
+
+1. **No data in Git.** Never commit OpenBreastUS files, checkpoints, generated wavefields, raw `.mat` data, `.h5` cases, `.npy/.npz` arrays, or benchmark runs.
 2. **Use the private remote**: `git@github.com:Math-Wu/usct-benchlab.git`.
 3. **Every algorithm must use the same I/O**: `USCTCase -> ReconstructionResult`.
-4. **Every runnable algorithm must have tests, metrics, and an algorithm card.**
-5. **Prefer small, verified steps**. Do not build a huge FWI system before the loader, projector, and metrics pass.
+4. **Every runnable algorithm must have tests, metrics, configs, and an algorithm card.**
+5. **Prefer small verified steps.** Do not build a huge FWI system before the loader, projector, and metrics pass.
 6. **Do not silently change units.** Sound speed is `m/s`; slowness is `s/m`; attenuation is `Np/m` unless explicitly converted; frequency is `Hz`; coordinates are meters.
-7. **All external code must be isolated** under `external/` or wrapped by an adapter. Check license before vendoring code. Prefer submodules or documented install steps.
-8. **OpenBreastUS is already downloaded by the user**. Do not download the full dataset. Inspect and index the existing local copy.
-9. **If OpenBreastUS structure differs from assumptions**, write a schema-inspection report and adapt the loader; do not hard-code guessed paths.
+7. **External code must be isolated** under `external/` or wrapped by an adapter. Check license before vendoring code. Prefer submodules or documented install steps.
+8. **OpenBreastUS is already downloaded by the user on A100.** Do not download the full dataset. Inspect and index the existing local copy.
+9. **If OpenBreastUS structure differs from assumptions**, write a schema-inspection report and adapt the loader. Do not hard-code guessed paths.
 10. **If an experiment fails**, write the failure and next actions to `runs/<run_id>/failure_report.md` instead of hiding it.
+11. **Do not use sudo** unless the user explicitly says sudo is available. Assume no sudo on A100.
+12. **Do not start v0.1 with diffusion/generative models.** They belong in a future roadmap only.
 
-## Branch and commit discipline
+---
 
-Use short feature branches:
+## 4. Git discipline
+
+Use short feature branches for nontrivial changes:
 
 ```bash
 git checkout -b feat/schema-loader
+git checkout -b feat/openbreastus-inspector
 git checkout -b feat/straight-ray-sart
 git checkout -b feat/metrics-benchmark
 git checkout -b feat/fwi-tiny
@@ -29,23 +163,96 @@ git checkout -b feat/fwi-tiny
 Commit only source, configs, tests, docs, and small synthetic fixtures. Do not commit files under:
 
 ```text
-data/raw/
-data/processed/
+data/
 runs/
 checkpoints/
-external/*  # if cloned repos are large or license is unclear
+external/           # unless intentionally adding a small licensed adapter, not a full external repo
+third_party/
 *.mat
 *.h5
+*.hdf5
 *.npy
 *.npz
+*.zarr/
 *.pt
 *.pth
 *.ckpt
 ```
 
-## Agent 0 — Architecture lead
+If data or run outputs were accidentally staged, unstage them:
 
-Mission: create the package skeleton and the registry that all other agents use.
+```bash
+git rm -r --cached data runs checkpoints external third_party 2>/dev/null || true
+git status
+```
+
+---
+
+## 5. Project architecture target
+
+Build a package with a stable agent-facing CLI:
+
+```bash
+usct data inspect-openbreastus --root $USCT_DATA_ROOT
+usct data make-smoke --root $USCT_DATA_ROOT --out $USCT_SAMPLE_ROOT --cases-per-density 1
+usct list-algorithms
+usct run straight_sart --case <case.h5> --config configs/algorithms/straight_sart.yaml --out <run_dir>
+usct eval --run <run_dir> --protocol configs/benchmarks/openbreastus_smoke.yaml
+usct bench --suite configs/benchmarks/openbreastus_smoke.yaml
+```
+
+Every algorithm run must write:
+
+```text
+runs/<run_id>/<case_id>/result.h5
+runs/<run_id>/<case_id>/metrics.json
+runs/<run_id>/<case_id>/metadata.yaml
+runs/<run_id>/<case_id>/preview.png
+```
+
+Core interfaces:
+
+```python
+class USCTCase(BaseModel): ...
+class ReconstructionResult(BaseModel): ...
+class AlgorithmConfig(BaseModel): ...
+class Algorithm(Protocol):
+    name: str
+    def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult: ...
+```
+
+---
+
+## 6. Implementation order
+
+Follow this order. Do not start with FWI or deep learning.
+
+1. Repository skeleton, package install, tests, CLI.
+2. `USCTCase` and `ReconstructionResult` schema.
+3. HDF5 read/write helpers.
+4. Algorithm registry.
+5. OpenBreastUS inspector and smoke subset creator.
+6. Feature extraction for ray methods:
+   - phase-delay / travel-time-like feature;
+   - log-amplitude ratio;
+   - valid mask;
+   - reference/water handling when available.
+7. Metrics and benchmark runner.
+8. Straight-ray projector with adjoint test.
+9. Straight-ray SART/SIRT/CGLS sound-speed reconstruction.
+10. Straight-ray attenuation tomography.
+11. Synthetic fixtures and strict tests.
+12. Optional MATLAB adapters for refraction-corrected GN and r-Wave/ray-Born.
+13. Tiny FWI with synthetic gradient check and loss-decrease test.
+14. Algorithm cards and troubleshooting documentation.
+
+---
+
+## 7. Agent roles
+
+### Agent 0 — Architecture lead
+
+Mission: create the package skeleton and registry used by all other agents.
 
 Deliverables:
 
@@ -58,29 +265,7 @@ Deliverables:
 - `tests/test_schema_roundtrip.py`
 - `docs/architecture.md`
 
-Required interfaces:
-
-```python
-class USCTCase(BaseModel): ...
-class ReconstructionResult(BaseModel): ...
-class AlgorithmConfig(BaseModel): ...
-class Algorithm(Protocol):
-    name: str
-    def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult: ...
-```
-
-CLI must expose:
-
-```bash
-usct data inspect-openbreastus
-usct data make-smoke
-usct run <algorithm>
-usct eval --run <run_dir>
-usct bench --suite <yaml>
-usct list-algorithms
-```
-
-## Agent 1 — OpenBreastUS data lead
+### Agent 1 — OpenBreastUS data lead
 
 Mission: turn local OpenBreastUS data into a stable benchmark subset.
 
@@ -89,25 +274,19 @@ Deliverables:
 - `src/usctbench/data/openbreastus.py`
 - `src/usctbench/data/features.py`
 - `src/usctbench/data/smoke_subset.py`
-- `data/README.md`
+- `data/README.md` if needed, but keep actual data ignored
 - `docs/OPENBREASTUS_DATA_PROTOCOL.md`
 - `tests/test_openbreastus_inspection.py`
 
 Tasks:
 
-1. Inspect the actual local tree at `$USCT_DATA_ROOT`.
+1. Inspect the actual local tree at `$USCT_DATA_ROOT` on A100.
 2. Generate `openbreastus_index.json` with case id, density class, speed file path, wavefield paths, available frequencies, shape, and split.
 3. Create `openbreastus-smoke-v1`: one small case from each density class if available.
-4. Convert each selected case to a standard `USCTCase` HDF5 file.
-5. Extract robust features for ray algorithms:
-   - phase delay / travel-time-like feature;
-   - log-amplitude ratio;
-   - valid receiver mask;
-   - water/reference field handling if present.
+4. Convert selected cases to standard `USCTCase` HDF5 files.
+5. Save intermediate diagnostic plots and masks.
 
-Do not assume the phase-delay formula is always correct. Save intermediate diagnostic plots and masks.
-
-## Agent 2 — Metrics and benchmark lead
+### Agent 2 — Metrics and benchmark lead
 
 Mission: define what “runs successfully” means.
 
@@ -130,9 +309,9 @@ Minimum metrics:
 - Runtime, memory, number of iterations.
 - Pass/fail fields with explicit reasons.
 
-## Agent 3 — Straight-ray tomography lead
+### Agent 3 — Straight-ray tomography lead
 
-Mission: implement the reliable baseline.
+Mission: implement the reliable baseline first.
 
 Deliverables:
 
@@ -151,9 +330,9 @@ Key tests:
 - dot-product adjoint test passes with relative error `<1e-4`;
 - sign convention test: positive delay through slower object should reconstruct slower speed.
 
-## Agent 4 — Attenuation tomography lead
+### Agent 4 — Attenuation tomography lead
 
-Mission: implement a simple but useful attenuation baseline.
+Mission: implement a simple attenuation baseline.
 
 Deliverables:
 
@@ -164,7 +343,7 @@ Deliverables:
 
 Use log-amplitude ratios and robust clipping. Treat attenuation as a separate baseline; do not couple it to FWI in v0.1.
 
-## Agent 5 — Refraction and ray-Born lead
+### Agent 5 — Refraction and ray-Born lead
 
 Mission: wrap or minimally reproduce established MATLAB methods.
 
@@ -182,13 +361,13 @@ Rules:
 
 - Do not rewrite large MATLAB packages blindly.
 - Wrap external code as an optional adapter.
-- Save all input `.mat` files generated for MATLAB under the run directory.
+- Save input `.mat` files generated for MATLAB under the run directory.
 - Save stdout/stderr logs from MATLAB.
 - If MATLAB is unavailable, skip with a clear message, not a crash.
 
-## Agent 6 — Tiny FWI lead
+### Agent 6 — Tiny FWI lead
 
-Mission: implement a small proof-of-life FWI, not a production FWI.
+Mission: implement a small proof-of-life FWI, not production FWI.
 
 Deliverables:
 
@@ -209,7 +388,7 @@ v0.1 restrictions:
 - Require loss decrease before claiming success.
 - Do not add attenuation inversion until sound-speed-only FWI is stable.
 
-## Agent 7 — Documentation/literature lead
+### Agent 7 — Documentation/literature lead
 
 Mission: keep the library useful for later researchers.
 
@@ -231,7 +410,7 @@ Each algorithm card must include:
 - acceptance tests;
 - references and related code.
 
-## Agent 8 — DevOps/A100 lead
+### Agent 8 — DevOps/A100 lead
 
 Mission: keep the A100 server reproducible.
 
@@ -241,14 +420,17 @@ Deliverables:
 - `requirements.txt`
 - `.gitignore`
 - `.env.example`
+- `scripts/setup_workspace.sh`
 - `scripts/check_server.sh`
 - `scripts/bootstrap_a100.sh`
 - `scripts/run_smoke.sh`
 - `docs/A100_SERVER_SETUP.md`
 
-The scripts must never require full OpenBreastUS download. They must operate on local paths.
+Scripts must never require full OpenBreastUS download. They must operate on local paths.
 
-## Standard failure-report format
+---
+
+## 8. Standard failure-report format
 
 Every failed benchmark run should write:
 
@@ -266,15 +448,56 @@ Every failed benchmark run should write:
 - Plots:
 ```
 
-## Definition of Done for v0.1
+---
+
+## 9. Expert troubleshooting rules
+
+When a run fails, do not tune everything randomly.
+
+Ray methods:
+
+1. Check units, sign convention, geometry, receiver ordering, missing-data mask, phase unwrap, and water/reference subtraction.
+2. Inspect sinograms before changing the reconstruction algorithm.
+3. For SART/SIRT, lower relaxation, increase smoothing, clip SoS bounds, and increase iterations gradually.
+4. For CGLS, check operator scaling and regularization before increasing iterations.
+
+Bent-ray GN:
+
+1. Start from a smoothed straight-ray reconstruction.
+2. Increase regularization.
+3. Add or strengthen line search.
+4. Reduce outer iterations if divergence appears early.
+5. Check whether ray tracing produces invalid paths.
+
+Ray-Born/Rytov:
+
+1. Use a better background model.
+2. Start from lower frequency.
+3. Reject low-SNR receivers.
+4. Check complex phase convention and reference field alignment.
+
+FWI:
+
+1. Lower starting frequency.
+2. Smooth the initial model.
+3. Use frequency continuation.
+4. Reduce learning rate or step length.
+5. Verify source wavelet, receiver geometry, PML, and gradient sign.
+6. Require finite-difference gradient check on a tiny synthetic problem.
+
+---
+
+## 10. Definition of Done for v0.1
 
 v0.1 is done when:
 
-1. `pytest -q` passes.
-2. `usct data inspect-openbreastus` runs on the A100 server.
-3. `usct data make-smoke` creates a smoke subset.
-4. `straight_sart`, `attenuation_sirt`, and `fwi_tiny` run on at least one smoke case.
-5. At least one bent-ray or ray-Born adapter is callable, even if marked optional due to MATLAB/external dependency.
-6. Benchmark reports are generated automatically.
-7. Algorithm cards exist for every registered algorithm.
-8. No data, checkpoints, or run outputs are committed.
+1. `pytest -q` passes locally for synthetic/unit tests.
+2. `pytest -q` passes on A100.
+3. `usct data inspect-openbreastus` runs on A100.
+4. `usct data make-smoke` creates a smoke subset on A100.
+5. `straight_sart` and `attenuation_sirt` run on at least one smoke case.
+6. `fwi_tiny` passes synthetic gradient check and loss-decrease test.
+7. At least one bent-ray or ray-Born adapter is callable or explicitly skipped due to missing MATLAB/external dependency with a clear report.
+8. Benchmark reports are generated automatically.
+9. Algorithm cards exist for every registered algorithm.
+10. No data, checkpoints, external full repos, or run outputs are committed.

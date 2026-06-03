@@ -1,25 +1,67 @@
 # Benchmark Tiers
 
-v0.1 keeps traditional algorithms first, but separates measurement provenance.
+v0.1 uses two main benchmark tracks.
 
-## Tier 0: travel-time oracle/debug
+## Track A: Travel-Time Surrogate Main
 
-`measurement_provenance=oracle_travel_time` is a fast solver sanity benchmark. The feature is generated directly from ground truth with a known projector. Use it for adjoint checks, sign checks, and regression tests. Do not report it as wavefield inversion evidence.
+`configs/benchmarks/travel_time_surrogate_main.yaml` is the canonical
+traditional-method track. It runs:
 
-## Tier 1: speed-map travel-time surrogate
+- `straight_cgls`
+- `straight_sirt`
+- `straight_sart`
+- `bent_ray_gn`
+- `rwave_adapter`
 
-`measurement_provenance=speedmap_travel_time_surrogate` covers OpenBreastUS speed-map-only mirrors and NBPslices2D property maps converted into ray features. It is useful for comparing solver stability on realistic anatomy, but the measurement is still generated from GT property maps.
+The measurement provenance is `speedmap_travel_time_surrogate`. These cases
+are generated from property maps or oracle travel-time features and are useful
+for solver sanity, stability comparisons, and fast regression testing. They
+must not be reported as full wavefield inversion evidence.
 
-## Tier 2: self-simulated k-Wave wavefield
+Expected metadata:
 
-`measurement_provenance=self_simulated_kwave_wavefield` starts from a property-map case, runs a forward wave simulation, QC checks the raw time/frequency data, then extracts shared features. This is the default unified wavefield benchmark path, but it has inverse-crime risk because the forward model uses the same GT property map library.
+- `benchmark_type=travel_time_surrogate`
+- `measurement_provenance=speedmap_travel_time_surrogate`
+- `uses_kwave_wavefield=false`
+- `uses_complex_wavefield=false`
+- `inverse_crime_risk=high`
 
-## Tier 3: OpenBreastUS precomputed wavefield
+## Track B: k-Wave FWI Main
 
-`measurement_provenance=openbreastus_precomputed_wavefield` is preferred when a dataset provides independent precomputed RF/frequency-domain wavefields and water/reference pairs. It should be the formal OpenBreastUS benchmark tier once inspection confirms the schema.
+`configs/benchmarks/kwave_fwi_main.yaml` is the canonical k-Wave track. It
+runs only:
 
-## Tier 4: external measurement
+- `fwi_kwave_adapter`
 
-`measurement_provenance=external_measurement` is reserved for real measured data or independently provided channel data with documented acquisition metadata.
+The FWI adapter consumes raw/precomputed k-Wave channel data or external
+preprocessed k-Wave MAT files. The current mainline is bulk-support pure FWI
+aligned to the A100 `openbreastus_diffusion/kwave_dps` implementation, without
+diffusion or generative priors.
 
-Every run metadata must include `benchmark_type`, `measurement_provenance`, `forward_model`, `uses_gt_generated_measurement`, `uses_kwave_wavefield`, `uses_openbreastus_precomputed_wavefield`, `uses_complex_wavefield`, `feature_source`, and `inverse_crime_risk`.
+Expected metadata:
+
+- `benchmark_type=kwave_fwi_main`
+- `measurement_provenance=self_simulated_kwave_wavefield_or_precomputed_kwave_mat`
+- `uses_kwave_wavefield=true`
+- `uses_complex_wavefield=true`
+- `inverse_crime_risk=medium`
+
+## Retired From Mainline
+
+The previous unified k-Wave ray-feature path is retired from the main
+benchmark. In particular, do not run straight-ray, bent-ray surrogate,
+attenuation, or rWave surrogate algorithms on k-Wave-derived apparent/eikonal
+ToF feature cases as a formal result. The compatibility file
+`configs/benchmarks/kwave_unified_quality.yaml` now points to FWI only and
+exists only to avoid stale entry-point confusion.
+
+The following paths are no longer mainline:
+
+- k-Wave apparent/eikonal ToF feature cases for ray algorithms
+- true-bent shortest-path/eikonal prototypes
+- finite-frequency ToF prototypes
+- rWave complex/full-Green k-Wave prototypes
+
+They can be revisited later as separate research tracks, but the current
+repository state intentionally keeps traditional methods on travel-time
+surrogate data and k-Wave data on FWI.
