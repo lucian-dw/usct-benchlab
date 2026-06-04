@@ -1,26 +1,30 @@
-# local data and generated outputs
+# Local data and generated outputs
 /data/
 /runs/
 /checkpoints/
 /external/
 /third_party/
 
-# env
+# Environment files
 .env
 .env.*
 !.env.example
+.venv/
+venv/
 
 # Python
 __pycache__/
 *.py[cod]
 *.egg-info/
+build/
+dist/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
 
-# large scientific files
+# Large scientific files
 *.h5
 *.hdf5
 *.mat
@@ -32,7 +36,7 @@ htmlcov/
 *.ckpt
 *.pkl
 
-# logs
+# Logs
 *.log
 logs/
 

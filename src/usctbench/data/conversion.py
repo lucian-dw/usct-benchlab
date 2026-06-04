@@ -10,11 +10,11 @@ import zipfile
 
 import numpy as np
 
-from usctbench.algorithms.ray.straight_projector import StraightRayProjector
+from usctbench.algorithms.ray import StraightRayProjector
 from usctbench.data.synthetic import make_grid, make_ring_geometry
-from usctbench.io.hdf5 import write_case_hdf5
-from usctbench.provenance import MeasurementProvenance, stamp_measurement_metadata
-from usctbench.schema import GeometrySpec, GridSpec, GroundTruthSpec, MeasurementSpec, USCTCase
+from usctbench.core.io import write_case_hdf5
+from usctbench.core.provenance import MeasurementProvenance, stamp_measurement_metadata
+from usctbench.core.schema import GeometrySpec, GridSpec, GroundTruthSpec, MeasurementSpec, USCTCase
 
 
 NBP_PIXEL_SPACING_M = 1.0e-4

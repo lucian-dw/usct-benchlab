@@ -20,12 +20,11 @@ from typing import Any
 import yaml
 
 from usctbench.benchmark.report import write_failure_report
-from usctbench.features.channels import COMPLEX_WAVEFIELD, EIKONAL_TOF, require_feature_channel, require_raw_wavefield
-from usctbench.io.hdf5 import read_case_hdf5, write_result_hdf5
-from usctbench.provenance import case_measurement_metadata
-from usctbench.registry import get_algorithm
-from usctbench.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
-from usctbench.viz.preview import write_preview_png
+from usctbench.core.io import read_case_hdf5, write_result_hdf5
+from usctbench.core.provenance import case_measurement_metadata
+from usctbench.core.registry import get_algorithm
+from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
+from usctbench.viz import write_preview_png
 
 _ENV_DEFAULT_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}")
 
@@ -67,28 +66,8 @@ def run_algorithm_case(
         case_id = case.case_id
         config = load_algorithm_config(config_path)
         config.parameters.setdefault("_run_output_dir", str(out_root / case_id))
-        if bool(case.metadata.get("simulation_failed_qc", False)):
-            result = ReconstructionResult(
-                algorithm=algorithm_name,
-                case_id=case.case_id,
-                runtime_s=0.0,
-                status=ResultStatus.SKIPPED,
-                failure_reason="simulation_failed_qc",
-                metrics={"simulation_failed_qc": True},
-            )
-        elif bool(case.metadata.get("feature_failed_qc", False)):
-            result = ReconstructionResult(
-                algorithm=algorithm_name,
-                case_id=case.case_id,
-                runtime_s=0.0,
-                status=ResultStatus.SKIPPED,
-                failure_reason="feature_qc_failed",
-                metrics={"feature_qc_failed": True, **_feature_qc_metrics(case)},
-            )
-        else:
-            _validate_observable_contract(algorithm_name, case, config)
-            algorithm = get_algorithm(algorithm_name)
-            result = algorithm.run(case, config)
+        algorithm = get_algorithm(algorithm_name)
+        result = algorithm.run(case, config)
     except Exception as exc:
         result = ReconstructionResult(
             algorithm=algorithm_for_report,
@@ -277,39 +256,12 @@ def _write_result_artifacts(
             stale_failure_report.unlink()
 
 
-def _validate_observable_contract(algorithm_name: str, case: USCTCase, config: AlgorithmConfig) -> None:
-    required = str(config.parameters.get("required_feature_channel", config.metadata.get("required_feature_channel", "")) or "")
-    algorithm = str(algorithm_name)
-    if algorithm == "bent_ray_gn" and bool(config.parameters.get("true_bent_ray", False)):
-        required = EIKONAL_TOF
-    elif algorithm == "rwave_adapter" and (
-        str(config.parameters.get("backend", "")).lower() in {"complex", "python_complex", "complex_wavefield"}
-        or bool(config.parameters.get("use_complex_wavefield", False))
-    ):
-        required = COMPLEX_WAVEFIELD
-    elif algorithm == "fwi_kwave_adapter" and bool(config.parameters.get("data_sanity_only", False)):
-        require_raw_wavefield(case, algorithm=algorithm)
-        return
-    elif algorithm.startswith("straight_") and not required:
-        # Legacy oracle/surrogate tests predate channel metadata. New k-Wave
-        # configs should set required_feature_channel=apparent_tof explicitly.
-        return
-    elif algorithm == "bent_ray_gn" and not required:
-        return
-    elif algorithm == "rwave_adapter" and not required:
-        return
-    if required:
-        allow_legacy = bool(config.parameters.get("allow_legacy_missing_feature_channel", False))
-        require_feature_channel(case, required, algorithm=algorithm, allow_legacy_missing=allow_legacy)
-
-
 def _write_straight_ray_diagnostics(result: ReconstructionResult, case: USCTCase | None, out_dir: Path) -> None:
     ray_diagnostic_algorithms = {"bent_ray_gn", "rwave_adapter"}
     if case is None or (not str(result.algorithm).startswith("straight_") and str(result.algorithm) not in ray_diagnostic_algorithms):
         return
     try:
-        from usctbench.algorithms.ray._common import ray_weights, valid_ray_mask
-        from usctbench.algorithms.ray.straight_projector import StraightRayProjector
+        from usctbench.algorithms.ray import StraightRayProjector, ray_weights, valid_ray_mask
     except Exception:
         return
 

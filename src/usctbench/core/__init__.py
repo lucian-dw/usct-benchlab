@@ -1,8 +1,6 @@
-"""USCT benchmark package."""
+"""Core schemas, I/O, registry, and provenance helpers."""
 
-from __future__ import annotations
-
-from .core.schema import (
+from .schema import (
     AlgorithmConfig,
     GeometrySpec,
     GridSpec,

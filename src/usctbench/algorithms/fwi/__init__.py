@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from usctbench.registry import register_algorithm
+from usctbench.core.registry import register_algorithm
 
-from .kwave_adapter import KWaveFWIAdapterAlgorithm
-from .tiny_fwi import TinyFWIAlgorithm
+from .adapter import KWaveFWIAdapterAlgorithm
+from .tiny import TinyFWIAlgorithm
 
 
 def register_fwi_algorithms(*, replace: bool = False) -> None:

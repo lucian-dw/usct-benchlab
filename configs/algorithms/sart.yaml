@@ -1,0 +1,10 @@
+name: straight_sart
+parameters:
+  iterations: 20
+  relaxation: 0.1
+  subsets: 8
+  smooth_sigma: 0.75
+  smooth_every: 1
+  reference_sound_speed_mps: 1500.0
+  sound_speed_bounds_mps: [1300.0, 1700.0]
+  roi_update_only: true

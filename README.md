@@ -1,66 +1,68 @@
 # usct-benchlab
 
-`usct-benchlab` is a v0.1 benchmark harness for ultrasound computed
-tomography (USCT) reconstruction. It standardizes data conversion,
-`USCTCase -> ReconstructionResult` algorithm execution, image/data metrics,
-and benchmark reports for classical USCT baselines and k-Wave FWI.
+`usct-benchlab` is a lightweight Python benchmark package for ultrasound computed tomography (USCT) reconstruction algorithms with unified input/output, classical baselines, and FWI adapter support. It provides dataset conversion helpers, runnable algorithm configs, common metrics, preview figures, and benchmark summaries for reproducible comparisons.
 
-## v0.1 Status
+## Supported Algorithms
 
-v0.1 is in cleanup and release preparation. The mainline is intentionally
-traditional-first and does not include diffusion, score-based reconstruction,
-GANs, or other generative models.
-
-Main conclusion:
-
-- Travel-time surrogate baselines are classical sanity and regression methods.
-- k-Wave full-wave data is reserved for the FWI workflow.
-- k-Wave-derived ToF/ray/rWave experiments exposed an observable mismatch and
-  are retired from benchmark ranking. They remain archived as diagnostics.
-- FWI is the current high-fidelity reconstruction mainline.
-
-## Algorithm Tiers
-
-| Tier | Algorithms | Data source | v0.1 role |
-| --- | --- | --- | --- |
-| Travel-time surrogate baseline | `straight_cgls`, `straight_sirt`, `straight_sart` | Property-map generated travel-time features | Classical solver sanity, fast comparisons |
-| Travel-time surrogate baseline | `bent_ray_gn` | Property-map generated travel-time features | Regularized bent-ray surrogate baseline |
-| Travel-time surrogate baseline | `rwave_adapter` | Property-map generated travel-time features | rWave/ray-Born surrogate baseline |
-| k-Wave FWI mainline | `fwi_kwave_adapter` | Raw or precomputed k-Wave channel data | High-fidelity reconstruction track |
-| Diagnostic only | k-Wave-derived ray/rWave/true-bent prototypes | k-Wave-derived apparent ToF or complex feature cases | Archived observable-mismatch diagnostics, not ranked |
+| Algorithm | Command name | Input requirement | Typical use | Config file |
+| --- | --- | --- | --- | --- |
+| CGLS | `straight_cgls` | `USCTCase` with ring geometry and travel-time measurements | Fast straight-ray sound-speed baseline | `configs/algorithms/cgls.yaml` |
+| SIRT | `straight_sirt` | `USCTCase` with ring geometry and travel-time measurements | Robust iterative sound-speed baseline | `configs/algorithms/sirt.yaml` |
+| SART | `straight_sart` | `USCTCase` with ring geometry and travel-time measurements | Ordered-update straight-ray baseline | `configs/algorithms/sart.yaml` |
+| Bent-ray | `bent_ray_gn` | `USCTCase` with travel-time measurements | Regularized bent-ray-style comparison | `configs/algorithms/bent_ray.yaml` |
+| rWave adapter | `rwave_adapter` | `USCTCase` with travel-time measurements | Adapter-style wave-inspired baseline | `configs/algorithms/rwave.yaml` |
+| FWI adapter | `fwi_kwave_adapter` | `USCTCase` plus external k-Wave/FWI artifact or command path | High-fidelity FWI result ingestion and reporting | `configs/algorithms/fwi_kwave.yaml` |
+| Tiny FWI sanity | `fwi_tiny` | Small synthetic sound-speed case | Local proof-of-life for waveform inversion plumbing | `configs/algorithms/fwi_tiny.yaml` |
 
 ## Installation
 
+Conda workflow:
+
 ```bash
-pip install -e ".[dev]"
+conda create -n usctbench python=3.10 -y
+conda activate usctbench
+pip install -e ".[dev,viz]"
+```
+
+Pip workflow:
+
+```bash
+pip install -r requirements.txt
+pip install -e .
+```
+
+Check the installation:
+
+```bash
 usct --help
 usct list-algorithms
 pytest -q
 ```
 
-## Workspace Layout
+## Environment
 
-Use a split workspace so data and generated runs stay out of Git:
-
-```text
-<workspace>/
-  code/          # this Git repository
-  data/          # OpenBreastUS, NBPslice2D, converted cases
-  runs/          # benchmark outputs
-  external/      # optional third-party checkouts
-  checkpoints/   # local model/checkpoint files, never committed
-```
-
-Typical environment:
+Use environment variables so local data and generated runs stay outside Git:
 
 ```bash
 export USCT_WORKSPACE=/path/to/usct-benchlab
 export USCT_DATA_ROOT=$USCT_WORKSPACE/data/openbreastus
-export USCT_SAMPLE_ROOT=$USCT_WORKSPACE/data/openbreastus_sample
 export USCT_RUN_ROOT=$USCT_WORKSPACE/runs/usctbench_runs
+export USCT_NBP_ZIP_PATH=/path/to/NBPslices2D.zip
+export USCT_KWAVE_FWI_RESULT_PATH=/path/to/fwi_result.mat
 ```
 
-## Data Preparation
+Recommended workspace layout:
+
+```text
+<workspace>/
+  code/          # this repository
+  data/          # local datasets and converted cases
+  runs/          # benchmark outputs
+  external/      # optional external projects
+  checkpoints/   # local weights or checkpoints
+```
+
+## Prepare Datasets
 
 OpenBreastUS:
 
@@ -71,7 +73,8 @@ usct data inspect-openbreastus \
 
 usct data make-quality \
   --root "$USCT_DATA_ROOT" \
-  --out "$USCT_WORKSPACE/data/openbreastus_quality" \
+  --out "$USCT_WORKSPACE/data/openbreastus_demo" \
+  --cases-per-density 1 \
   --converted-shape 256 \
   --n-transducers 128
 ```
@@ -79,113 +82,156 @@ usct data make-quality \
 NBPslice2D:
 
 ```bash
-export USCT_NBP_ZIP_PATH=/path/to/NBPslices2D.zip
-export USCT_NBP_SAMPLE_ROOT=$USCT_WORKSPACE/data/nbpslice2d_quality
-
 usct data inspect-nbpslice2d \
   --zip "$USCT_NBP_ZIP_PATH" \
   --out "$USCT_RUN_ROOT/nbpslice2d_index.json"
 
 usct data make-nbp-quality \
   --zip "$USCT_NBP_ZIP_PATH" \
-  --out "$USCT_NBP_SAMPLE_ROOT" \
+  --out "$USCT_WORKSPACE/data/nbpslice2d_demo" \
+  --cases-per-type 1 \
   --converted-shape 256 \
   --n-transducers 128
 ```
 
-## Run Travel-Time Surrogate Benchmark
-
-This is the canonical traditional-method track for CGLS/SIRT/SART, the
-bent-ray surrogate, and the rWave surrogate.
+Synthetic demo:
 
 ```bash
-export USCT_TRAVEL_TIME_SURROGATE_CASE_GLOB="$USCT_WORKSPACE/data/openbreastus_quality/cases/*.h5"
-export USCT_TRAVEL_TIME_SURROGATE_RUN_ROOT="$USCT_RUN_ROOT"
-
-usct bench --suite configs/benchmarks/travel_time_surrogate_main.yaml
+usct data make-synthetic-smoke \
+  --out "$USCT_WORKSPACE/data/synthetic_demo" \
+  --shape 48 \
+  --n-transducers 48
 ```
 
-The same suite can be pointed at NBPslice2D quality cases by changing
-`USCT_TRAVEL_TIME_SURROGATE_CASE_GLOB`.
+## Run One Algorithm
 
-## Run k-Wave/FWI Benchmark
-
-The FWI track consumes raw/precomputed k-Wave data or an external k-Wave FWI
-result through the adapter. It does not run ray/rWave algorithms on k-Wave ToF
-features.
+CGLS:
 
 ```bash
-export USCT_KWAVE_FWI_CASE_GLOB="$USCT_WORKSPACE/data/kwave_fwi_main/cases/*.h5"
-export USCT_KWAVE_FWI_RUN_ROOT="$USCT_RUN_ROOT"
-export USCT_KWAVE_FWI_RESULT_PATH=/path/to/fwi_result.mat
-
-usct bench --suite configs/benchmarks/kwave_fwi_main.yaml
+usct run straight_cgls \
+  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
+  --config configs/algorithms/cgls.yaml \
+  --out "$USCT_RUN_ROOT/single_cgls"
 ```
 
-For the A100 full-pipeline smoke path:
+SIRT:
 
 ```bash
-bash scripts/run_fwi_kwave_full_pipeline_smoke.sh
+usct run straight_sirt \
+  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
+  --config configs/algorithms/sirt.yaml \
+  --out "$USCT_RUN_ROOT/single_sirt"
 ```
 
-## Output Artifacts
+Bent-ray:
 
-Each successful algorithm/case run writes:
+```bash
+usct run bent_ray_gn \
+  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
+  --config configs/algorithms/bent_ray.yaml \
+  --out "$USCT_RUN_ROOT/single_bent_ray"
+```
+
+rWave adapter:
+
+```bash
+usct run rwave_adapter \
+  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
+  --config configs/algorithms/rwave.yaml \
+  --out "$USCT_RUN_ROOT/single_rwave"
+```
+
+FWI adapter:
+
+```bash
+usct run fwi_kwave_adapter \
+  --case "$USCT_WORKSPACE/data/openbreastus_demo/cases/example_case.h5" \
+  --config configs/algorithms/fwi_kwave.yaml \
+  --out "$USCT_RUN_ROOT/single_fwi"
+```
+
+For the FWI adapter, set `USCT_KWAVE_FWI_RESULT_PATH` when the config should ingest an existing reconstruction artifact.
+
+## Run Benchmarks
+
+```bash
+usct bench --suite configs/benchmarks/synthetic_demo.yaml
+usct bench --suite configs/benchmarks/nbpslice2d_demo.yaml
+usct bench --suite configs/benchmarks/openbreastus_demo.yaml
+usct bench --suite configs/benchmarks/fwi_kwave_demo.yaml
+```
+
+The demo suites use environment-variable defaults. Override the case globs and run roots when needed:
+
+```bash
+export USCT_SYNTHETIC_CASE_GLOB="$USCT_WORKSPACE/data/synthetic_demo/cases/*.h5"
+export USCT_NBPSLICE2D_CASE_GLOB="$USCT_WORKSPACE/data/nbpslice2d_demo/cases/*.h5"
+export USCT_OPENBREASTUS_CASE_GLOB="$USCT_WORKSPACE/data/openbreastus_demo/cases/*.h5"
+export USCT_FWI_CASE_GLOB="$USCT_WORKSPACE/data/fwi_demo/cases/*.h5"
+export USCT_RUN_ROOT="$USCT_WORKSPACE/runs/usctbench_runs"
+```
+
+## Output Files
+
+Single-algorithm runs write:
 
 ```text
-runs/<run_id>/<case_id>/<algorithm>/result.h5
-runs/<run_id>/<case_id>/<algorithm>/metrics.json
-runs/<run_id>/<case_id>/<algorithm>/metadata.yaml
-runs/<run_id>/<case_id>/<algorithm>/preview.png
+<out>/<case_id>/result.h5
+<out>/<case_id>/metrics.json
+<out>/<case_id>/metadata.yaml
+<out>/<case_id>/preview.png
 ```
 
-Benchmark-level outputs include `benchmark_summary.csv`,
-`benchmark_report.md`, `benchmark_run_checks.json`, and optional comparison
-panels under `comparison_artifacts/`.
+Benchmark suites write:
 
-## Example Figures
+```text
+<run_root>/<run_id>/<algorithm>/<case_id>/result.h5
+<run_root>/<run_id>/<algorithm>/<case_id>/metrics.json
+<run_root>/<run_id>/<algorithm>/<case_id>/metadata.yaml
+<run_root>/<run_id>/<algorithm>/<case_id>/preview.png
+<run_root>/<run_id>/benchmark_summary.csv
+<run_root>/<run_id>/benchmark_report.md
+```
+
+`metrics.json` contains per-case image and data-consistency metrics when ground truth and forward measurements are available. `metadata.yaml` records the algorithm, config path, case id, runtime, status, and measurement provenance.
+
+## Example Results
 
 OpenBreastUS four-class comparison:
 
-![OpenBreastUS FWI versus surrogate comparison](docs/assets/openbreastus_readme_fwi_vs_surrogate.png)
+![OpenBreastUS FWI and baseline comparison](docs/assets/openbreastus_readme_fwi_vs_surrogate.png)
 
 NBPslice2D, 2D Acoustic Numerical Breast Phantoms for USCT:
 
-![NBPslice2D FWI versus surrogate comparison](docs/assets/nbpslice2d_readme_fwi_vs_surrogate.png)
+![NBPslice2D FWI and baseline comparison](docs/assets/nbpslice2d_readme_fwi_vs_surrogate.png)
 
-In these README panels, CGLS/SIRT/SART, bent-ray, and rWave use travel-time
-surrogate measurements. FWI uses k-Wave full-wave data.
+Different algorithms use different measurement assumptions; interpret result panels together with the algorithm cards and case metadata.
 
-## Known Limitations
+## Troubleshooting
 
-- Travel-time surrogate benchmarks are useful for solver sanity and regression
-  testing, but they are generated from ground-truth property maps and carry
-  high inverse-crime risk.
-- NBPslice2D 2025 is property-map-only in this repository. Without built-in
-  wavefields, its traditional comparisons are surrogate benchmarks.
-- OpenBreastUS precomputed wavefield support should be preferred when official
-  channel data is available, but the release does not claim every OpenBreastUS
-  mirror contains such fields.
-- The rWave adapter is a v0.1 surrogate unless a future track validates an
-  official complex-wavefield reproduction.
-- The true-bent and k-Wave-derived ray/rWave prototypes are diagnostic-only and
-  not part of release ranking.
-- FWI depends on an external k-Wave/MATLAB/CUDA environment for full-pipeline
-  execution. Local tests cover ingestion, command construction, and artifact
-  handling.
+- `algorithm not found`: run `usct list-algorithms` and check the command name.
+- Missing `.h5` or `.mat` data: confirm the dataset conversion command completed and that the relevant environment variable points to an existing path.
+- FWI result path missing: set `USCT_KWAVE_FWI_RESULT_PATH` or edit `configs/algorithms/fwi_kwave.yaml` to point to the artifact you want to ingest.
+- NaN/Inf output: inspect `failure_report.md`, check the case units, and lower the iteration count or relaxation in the algorithm config.
+- No cases matched by glob: print the expanded `USCT_*_CASE_GLOB` value and verify that converted cases exist under `data/.../cases/`.
+- `matplotlib` or `scikit-image` missing: install the visualization extras with `pip install -e ".[viz]"`.
 
-## Diagnostic-Only Paths
+## Development
 
-Archived development suites live under `configs/benchmarks/archive/`, and
-experimental algorithm configs live under `configs/algorithms/experimental/`.
-They are retained to document observable-mismatch work, external MATLAB adapter
-experiments, and k-Wave unified feature diagnostics. They should not be mixed
-into the v0.1 main benchmark tables.
+```bash
+python -m compileall src tests
+pytest -q
+ruff check .
+black src tests
+bash scripts/run_smoke.sh
+```
 
-## License and Citations
+Release audit:
 
-This repository is released under the license declared in `pyproject.toml`.
-Dataset and external-code users must follow the licenses and citation
-requirements of OpenBreastUS, NBPslice2D, k-Wave, WaveformInversionUST, and any
-optional MATLAB toolboxes they install outside this repository. See
-`docs/EXTERNAL_SOURCES_AND_LICENSES.md` and `docs/references.bib`.
+```bash
+bash scripts/audit_release.py
+```
+
+## Citations / Datasets
+
+Please cite the datasets and external tools used in your experiments, including OpenBreastUS, NBPslice2D, k-Wave, and WaveformInversionUST when applicable. See `docs/references.bib` and `docs/EXTERNAL_SOURCES_AND_LICENSES.md` for project notes.

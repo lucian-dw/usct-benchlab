@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from usctbench.registry import Algorithm
+from usctbench.core.registry import Algorithm
 
 __all__ = ["Algorithm"]
 

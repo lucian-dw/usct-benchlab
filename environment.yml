@@ -5,10 +5,16 @@ dependencies:
   - python=3.10
   - pip
   - numpy
+  - scipy
   - h5py
   - pydantic
   - pyyaml
+  - matplotlib
+  - scikit-image
+  - pandas
   - pytest
+  - ruff
+  - black
+  - pillow
   - pip:
-      - -e .[dev]
-
+      - -e .[dev,viz]

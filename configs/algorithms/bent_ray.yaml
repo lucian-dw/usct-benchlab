@@ -1,0 +1,12 @@
+name: bent_ray_gn
+parameters:
+  outer_iterations: 4
+  inner_iterations: 24
+  step_length: 1.0
+  line_search: true
+  regularization: laplacian
+  regularization_lambda: 3.0e-5
+  smooth_sigma: 0.6
+  reference_sound_speed_mps: 1500.0
+  sound_speed_bounds_mps: [1300.0, 1700.0]
+  roi_update_only: true
