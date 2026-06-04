@@ -8,14 +8,21 @@ the classical baselines.
 
 The FWI objective is summarized as
 
-```math
+$$
 \min_c
-\frac{1}{2}\sum_{\omega,i,j}
-\|P_{\omega,i,j}^{obs}-P_{\omega,i,j}(c)\|_2^2
-+ \lambda R(c).
-```
+\frac{1}{2}
+\sum_{\omega,s,r}
+\left|
+\hat p_s(\omega,r;c)
+-
+\hat p_{sr}^{\mathrm{obs}}(\omega)
+\right|^2
++
+\lambda R(c).
+$$
 
-The pressure prediction `P(c)` is produced by an external full-wave solver.
+The pressure prediction $\hat p_s(\omega,r;c)$ is produced by an external
+full-wave solver.
 
 ## Configure an Existing Result
 

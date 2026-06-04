@@ -8,104 +8,138 @@ benchmark summaries for reproducible comparisons.
 
 ## What is USCT?
 
-Ultrasound computed tomography images tissue properties from waves transmitted
-through and scattered by the breast. A ring or partial-ring array emits
-ultrasound from one transducer and records pressure signals at other receivers.
-Reconstruction algorithms estimate acoustic property maps such as sound speed
-`c(x)`, density `rho(x)`, and attenuation `alpha(x)`.
+**Ultrasound computed tomography is a PDE-constrained inverse problem.** A
+source transducer emits an acoustic pulse, the pressure field propagates through
+the object according to an acoustic wave equation, and receiver transducers
+measure the resulting pressure traces. The inverse problem is to recover
+spatial acoustic properties from those measurements.
 
-In this package, every dataset is converted into a `USCTCase`, and every
-algorithm returns a `ReconstructionResult`. This keeps straight-ray methods,
-algebraic solvers, adapter-style baselines, and FWI outputs comparable through
-one artifact layout.
+The main v0.1 target is the sound-speed map $c(x)$. Related physical
+properties include density $\rho(x)$ and attenuation $\alpha(x)$. This package
+converts datasets to a common `USCTCase` schema and returns every algorithm
+output as a `ReconstructionResult`.
 
 ## Mathematical Formulation
 
-The general USCT inverse problem is written as
+For source $s$, a simple lossless acoustic pressure model is
 
-```math
-d = \mathcal{F}(c,\rho,\alpha;\theta) + \eta,
-```
+$$
+\frac{1}{c(x)^2}\partial_{tt}p_s(t,x)-\Delta p_s(t,x)=q_s(t,x).
+$$
 
-where `d` is receiver-array data or derived features, `theta` contains
-acquisition settings, and the primary v0.1 reconstruction target is the
-sound-speed map `c(x)`.
+A more general acoustic model can include density and attenuation:
 
-Straight-ray travel-time methods use
-
-```math
-\Delta t_{ij}
+$$
+\frac{1}{c(x)^2}\partial_{tt}p_s
+-
+\nabla\cdot\left(\frac{1}{\rho(x)}\nabla p_s\right)
++
+\mathcal A_\alpha[p_s]
 =
-\int_{\gamma_{ij}}
-\left(\frac{1}{c(x)}-\frac{1}{c_0}\right)\,ds,
-```
+q_s.
+$$
 
-which discretizes to
+Receiver $r$ observes the pressure through a measurement operator:
 
-```math
+$$
+d_{sr}(t)=\mathcal M_r p_s(t,\cdot)+\eta_{sr}(t).
+$$
+
+The USCT inverse problem is therefore
+
+$$
+\text{recover } c(x),\rho(x),\alpha(x)
+\quad
+\text{from}
+\quad
+\{d_{sr}(t)\}_{s,r}.
+$$
+
+In v0.1, the primary reconstructed field is $c(x)$.
+
+The straight-ray travel-time approximation uses a reference speed $c_0$ and
+ray path $\gamma_{sr}$:
+
+$$
+\Delta t_{sr}
+\approx
+\int_{\gamma_{sr}}
+\left(
+\frac{1}{c(x)}-\frac{1}{c_0}
+\right)d\ell.
+$$
+
+After discretization,
+
+$$
 A\delta s \approx b,
 \qquad
-\delta s = 1/c - 1/c_0.
-```
+\delta s = \frac{1}{c}-\frac{1}{c_0}.
+$$
 
-CGLS, SIRT, and SART solve regularized algebraic systems of the form
+CGLS, SIRT, and SART solve algebraic ray systems of the form
 
-```math
+$$
 \min_{\delta s}
-\|W(A\delta s-b)\|_2^2 + \lambda^2 R(\delta s).
-```
+\|W(A\delta s-b)\|_2^2+\lambda^2R(\delta s).
+$$
 
-CGLS is a Krylov least-squares solver. SIRT and SART are algebraic iterative solvers with different residual/update schedules.
+For bent-ray travel time, the eikonal model is
 
-Attenuation tomography uses the log-amplitude approximation
-
-```math
--\log |p/p_0| \approx \int_\gamma \alpha(x)\,ds.
-```
-
-Refraction-corrected travel-time methods replace fixed straight paths with a travel-time field:
-
-```math
-|\nabla T_i(x)| = 1/c(x),
+$$
+|\nabla T_s(x)| = \frac{1}{c(x)},
 \qquad
-t_{ij} \approx T_i(r_j).
-```
+t_{sr}\approx T_s(r).
+$$
 
-The v0.1 `bent_ray_gn` command is a regularized bent-ray-style travel-time baseline. It is not a full external eikonal solver.
+The v0.1 `bent_ray_gn` command is a regularized bent-ray-style travel-time
+baseline, not a full external eikonal solver.
 
-The weak-scattering ray-Born model can be written as
+A schematic weak-scattering ray-Born model is
 
-```math
-\delta p(\omega,r_i,r_j)
+$$
+\delta \hat p_{sr}(\omega)
 \approx
 \int_\Omega
-G_0(\omega,r_j,x)K_\omega(x)G_0(\omega,x,r_i)\delta m(x)\,dx.
-```
+G_0(\omega,r,x)
+K_\omega(x)
+G_0(\omega,x,s)
+\delta m(x)\,dx.
+$$
 
-Full ray-Born reconstruction requires complex frequency-domain pressure data. The v0.1 `rwave_adapter` command is an adapter-style baseline and does not claim full reproduction of an external rWave MATLAB package.
+The v0.1 `rwave_adapter` command is a ray-Born-inspired adapter baseline. It
+does not claim full reproduction of an external complex rWave solver.
 
-FWI minimizes waveform or frequency-domain pressure mismatch:
+FWI uses pressure data directly:
 
-```math
+$$
 \min_c
-\frac{1}{2}\sum_{\omega,i,j}
-\|P_{\omega,i,j}^{obs}-P_{\omega,i,j}(c)\|_2^2 + \lambda R(c).
-```
+\frac{1}{2}
+\sum_{\omega,s,r}
+\left|
+\hat p_s(\omega,r;c)
+-
+\hat p_{sr}^{\mathrm{obs}}(\omega)
+\right|^2
++
+\lambda R(c).
+$$
 
-The v0.1 FWI path is an adapter for high-fidelity external k-Wave/FWI results. For more details, see [docs/math_formulation.md](docs/math_formulation.md).
+The v0.1 FWI path is an adapter for high-fidelity external k-Wave/FWI results.
+For more detail, see [docs/math_formulation.md](docs/math_formulation.md).
 
 ## Supported Algorithms
 
-| Algorithm | Command name | Input requirement | Typical use | Config |
-| --- | --- | --- | --- | --- |
-| CGLS | `straight_cgls` | `USCTCase` with ring geometry and travel-time measurements | Fast straight-ray sound-speed baseline | `configs/algorithms/cgls.yaml` |
-| SIRT | `straight_sirt` | `USCTCase` with ring geometry and travel-time measurements | Robust iterative sound-speed baseline | `configs/algorithms/sirt.yaml` |
-| SART | `straight_sart` | `USCTCase` with ring geometry and travel-time measurements | Ordered-update straight-ray baseline | `configs/algorithms/sart.yaml` |
-| Attenuation SIRT | `attenuation_sirt` | `USCTCase` with log-amplitude measurements | Straight-ray attenuation baseline | `configs/algorithms/attenuation.yaml` |
-| Bent-ray | `bent_ray_gn` | `USCTCase` with travel-time measurements | Regularized bent-ray-style comparison | `configs/algorithms/bent_ray.yaml` |
-| rWave adapter | `rwave_adapter` | `USCTCase` with travel-time measurements | rWave/ray-Born-inspired adapter baseline | `configs/algorithms/rwave.yaml` |
-| FWI adapter | `fwi_kwave_adapter` | `USCTCase` plus external k-Wave/FWI artifact or command path | High-fidelity FWI result ingestion and reporting | `configs/algorithms/fwi_kwave.yaml` |
-| Tiny FWI sanity | `fwi_tiny` | Small synthetic sound-speed case | Local proof-of-life for waveform inversion plumbing | `configs/algorithms/fwi_tiny.yaml` |
+| Algorithm | Command name | Mathematical model | Input requirement | Typical use | Config |
+| --- | --- | --- | --- | --- | --- |
+| CGLS | `straight_cgls` | Straight-ray weighted least squares | `USCTCase` with ring geometry and travel-time measurements | Fast sound-speed baseline | `configs/algorithms/cgls.yaml` |
+| SIRT | `straight_sirt` | Simultaneous iterative ray tomography | `USCTCase` with ring geometry and travel-time measurements | Robust iterative sound-speed baseline | `configs/algorithms/sirt.yaml` |
+| SART | `straight_sart` | Ordered/subset algebraic ray update | `USCTCase` with ring geometry and travel-time measurements | Ordered-update straight-ray baseline | `configs/algorithms/sart.yaml` |
+| Attenuation SIRT | `attenuation_sirt` | Straight-ray log-amplitude tomography | `USCTCase` with log-amplitude measurements | Attenuation baseline | `configs/algorithms/attenuation.yaml` |
+| Bent-ray | `bent_ray_gn` | Regularized bent-ray-style travel-time baseline | `USCTCase` with travel-time measurements | Refraction-style comparison | `configs/algorithms/bent_ray.yaml` |
+| rWave adapter | `rwave_adapter` | Ray-Born-inspired adapter baseline | `USCTCase` with travel-time measurements | Wave-inspired adapter comparison | `configs/algorithms/rwave.yaml` |
+| FWI adapter | `fwi_kwave_adapter` | PDE-level full-wave inversion adapter | `USCTCase` plus external k-Wave/FWI artifact or command path | High-fidelity FWI reporting | `configs/algorithms/fwi_kwave.yaml` |
+| Tiny FWI sanity | `fwi_tiny` | Small waveform-inversion sanity model | Small synthetic sound-speed case | Local waveform-inversion plumbing test | `configs/algorithms/fwi_tiny.yaml` |
 
 More details are in [docs/algorithms.md](docs/algorithms.md).
 
@@ -198,7 +232,8 @@ usct data make-nbp-quality \
   --n-transducers 128
 ```
 
-See [docs/usage.md](docs/usage.md) and [docs/datasets.md](docs/datasets.md) for more complete workflows.
+See [docs/usage.md](docs/usage.md) and [docs/datasets.md](docs/datasets.md)
+for more complete workflows.
 
 ## Run One Algorithm
 
@@ -256,7 +291,8 @@ usct run fwi_kwave_adapter \
   --out runs/single_fwi
 ```
 
-For the FWI adapter, set `USCT_KWAVE_FWI_RESULT_PATH` when the config should ingest an existing reconstruction artifact.
+For the FWI adapter, set `USCT_KWAVE_FWI_RESULT_PATH` when the config should
+ingest an existing reconstruction artifact.
 
 ## Run Benchmarks
 
@@ -350,5 +386,4 @@ repository hygiene.
 
 Please cite the datasets and external tools used in your experiments, including
 OpenBreastUS, NBPslice2D, k-Wave, and WaveformInversionUST when applicable. See
-[docs/references.bib](docs/references.bib) and
-[docs/EXTERNAL_SOURCES_AND_LICENSES.md](docs/EXTERNAL_SOURCES_AND_LICENSES.md).
+[docs/references.bib](docs/references.bib).
