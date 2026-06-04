@@ -152,9 +152,13 @@ class MeasurementSpec(_ArrayModel):
     def _validate_measurement(self) -> "MeasurementSpec":
         if self.frequencies_hz is not None:
             if self.frequencies_hz.ndim != 1 or self.frequencies_hz.size == 0:
-                raise ValueError("measurement.frequencies_hz must be a non-empty 1-D array")
+                raise ValueError(
+                    "measurement.frequencies_hz must be a non-empty 1-D array"
+                )
             if np.any(self.frequencies_hz <= 0):
-                raise ValueError("measurement.frequencies_hz must be positive Hz values")
+                raise ValueError(
+                    "measurement.frequencies_hz must be positive Hz values"
+                )
         if self.domain == MeasurementDomain.FREQUENCY and self.freq_data is None:
             raise ValueError("frequency-domain measurements require freq_data")
         if self.domain == MeasurementDomain.TIME and self.time_data is None:
@@ -173,7 +177,9 @@ class MeasurementSpec(_ArrayModel):
                 )
             )
             if not has_feature:
-                raise ValueError("feature-domain measurements require tof_s, delta_tof_s, or log_amp")
+                raise ValueError(
+                    "feature-domain measurements require tof_s, delta_tof_s, or log_amp"
+                )
         return self
 
 
@@ -184,7 +190,9 @@ class GroundTruthSpec(_ArrayModel):
     attenuation_np_per_m: np.ndarray | None = None
     density_kg_per_m3: np.ndarray | None = None
 
-    @field_validator("sound_speed_mps", "attenuation_np_per_m", "density_kg_per_m3", mode="before")
+    @field_validator(
+        "sound_speed_mps", "attenuation_np_per_m", "density_kg_per_m3", mode="before"
+    )
     @classmethod
     def _coerce_ground_truth_arrays(cls, value: Any) -> np.ndarray | None:
         return _optional_array(value)

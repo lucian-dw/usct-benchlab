@@ -73,7 +73,9 @@ class AttenuationSIRTAlgorithm:
 
 
 def _is_surrogate_attenuation_case(case: USCTCase) -> bool:
-    text = " ".join(str(item) for item in case.metadata.get("measurement_limitations", []))
+    text = " ".join(
+        str(item) for item in case.metadata.get("measurement_limitations", [])
+    )
     text = f"{text} {case.metadata.get('attenuation_note', '')} {case.metadata.get('feature_provenance', '')}".lower()
     return "zero surrogate" in text or "surrogate" in text and "log_amp" in text
 

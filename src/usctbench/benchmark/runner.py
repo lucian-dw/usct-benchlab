@@ -23,7 +23,12 @@ from usctbench.benchmark.report import write_failure_report
 from usctbench.core.io import read_case_hdf5, write_result_hdf5
 from usctbench.core.provenance import case_measurement_metadata
 from usctbench.core.registry import get_algorithm
-from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
+from usctbench.core.schema import (
+    AlgorithmConfig,
+    ReconstructionResult,
+    ResultStatus,
+    USCTCase,
+)
 from usctbench.viz import write_preview_png
 
 _ENV_DEFAULT_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}")
@@ -111,7 +116,9 @@ def run_algorithm_case(
     return out_dir
 
 
-def evaluate_run(run_dir: str | Path, protocol_path: str | Path | None = None) -> dict[str, Any]:
+def evaluate_run(
+    run_dir: str | Path, protocol_path: str | Path | None = None
+) -> dict[str, Any]:
     """Aggregate per-case metrics into CSV and markdown reports."""
 
     run_path = Path(run_dir)
@@ -137,21 +144,41 @@ def evaluate_run(run_dir: str | Path, protocol_path: str | Path | None = None) -
             "failure_report_present": (case_dir / "failure_report.md").exists(),
         }
         record.update(metrics)
-        record["artifacts_complete"], artifact_reasons = _artifact_check(case_dir, record)
-        record["pass"], pass_reasons, fail_reasons = _assess_record(record, protocol, artifact_reasons)
+        record["artifacts_complete"], artifact_reasons = _artifact_check(
+            case_dir, record
+        )
+        record["pass"], pass_reasons, fail_reasons = _assess_record(
+            record, protocol, artifact_reasons
+        )
         record["pass_reasons"] = "; ".join(pass_reasons)
         record["fail_reasons"] = "; ".join(fail_reasons)
         records.append(record)
 
     run_pass_reasons, run_fail_reasons = _assess_run_records(records, protocol)
-    run_checks = {"passed": not run_fail_reasons, "pass_reasons": run_pass_reasons, "fail_reasons": run_fail_reasons}
+    run_checks = {
+        "passed": not run_fail_reasons,
+        "pass_reasons": run_pass_reasons,
+        "fail_reasons": run_fail_reasons,
+    }
     run_checks_json = run_path / "benchmark_run_checks.json"
-    run_checks_json.write_text(json.dumps(run_checks, indent=2, sort_keys=True), encoding="utf-8")
+    run_checks_json.write_text(
+        json.dumps(run_checks, indent=2, sort_keys=True), encoding="utf-8"
+    )
     summary_csv = run_path / "benchmark_summary.csv"
     _write_summary_csv(records, summary_csv)
     report_md = run_path / "benchmark_report.md"
-    provenance = _load_yaml(run_path / "run_metadata.yaml") if (run_path / "run_metadata.yaml").exists() else _collect_run_provenance(run_path)
-    _write_benchmark_report(records, report_md, protocol=protocol, run_checks=run_checks, provenance=provenance)
+    provenance = (
+        _load_yaml(run_path / "run_metadata.yaml")
+        if (run_path / "run_metadata.yaml").exists()
+        else _collect_run_provenance(run_path)
+    )
+    _write_benchmark_report(
+        records,
+        report_md,
+        protocol=protocol,
+        run_checks=run_checks,
+        provenance=provenance,
+    )
     return {
         "records": records,
         "run_checks": run_checks,
@@ -171,11 +198,18 @@ def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
     suite_cases = sorted(Path(path) for path in glob.glob(case_glob, recursive=True))
     if not suite_cases and not bool(suite.get("allow_empty", False)):
         raise ValueError(f"benchmark suite matched no cases: {case_glob}")
-    output_root = Path(_expand(str(suite.get("outputs", {}).get("root", "runs/usctbench_runs"))))
-    run_id = suite.get("run_id") or f"{suite_name}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    output_root = Path(
+        _expand(str(suite.get("outputs", {}).get("root", "runs/usctbench_runs")))
+    )
+    run_id = (
+        suite.get("run_id")
+        or f"{suite_name}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    )
     run_root = output_root / run_id
     run_root.mkdir(parents=True, exist_ok=True)
-    _write_run_metadata(run_root / "run_metadata.yaml", suite_file=suite_file, suite=suite)
+    _write_run_metadata(
+        run_root / "run_metadata.yaml", suite_file=suite_file, suite=suite
+    )
 
     algorithms = suite.get("algorithms", [])
     if not isinstance(algorithms, list) or not algorithms:
@@ -185,16 +219,28 @@ def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
         algorithm_name = algorithm["name"]
         config_path = Path(_expand(str(algorithm["config"])))
         if not config_path.is_absolute():
-            config_path = suite_file.parent.parent.parent / config_path if suite_file.parent.name == "benchmarks" else Path.cwd() / config_path
+            config_path = (
+                suite_file.parent.parent.parent / config_path
+                if suite_file.parent.name == "benchmarks"
+                else Path.cwd() / config_path
+            )
         algorithm_case_glob = algorithm.get("case_glob")
         cases = suite_cases
         if algorithm_case_glob:
             expanded_glob = _expand(str(algorithm_case_glob))
-            cases = sorted(Path(path) for path in glob.glob(expanded_glob, recursive=True))
-            if not cases and not bool(algorithm.get("allow_empty", suite.get("allow_empty", False))):
-                raise ValueError(f"benchmark suite algorithm {algorithm_name} matched no cases: {expanded_glob}")
+            cases = sorted(
+                Path(path) for path in glob.glob(expanded_glob, recursive=True)
+            )
+            if not cases and not bool(
+                algorithm.get("allow_empty", suite.get("allow_empty", False))
+            ):
+                raise ValueError(
+                    f"benchmark suite algorithm {algorithm_name} matched no cases: {expanded_glob}"
+                )
         for case_path in cases:
-            run_algorithm_case(algorithm_name, case_path, config_path, run_root / algorithm_name)
+            run_algorithm_case(
+                algorithm_name, case_path, config_path, run_root / algorithm_name
+            )
 
     evaluation = evaluate_run(run_root, suite_file)
     return {"run_root": str(run_root), "num_cases": len(suite_cases), **evaluation}
@@ -208,24 +254,40 @@ def _write_result_artifacts(
     peak_memory_mb: float,
     case: USCTCase | None = None,
 ) -> None:
-    preview_image = result.sound_speed_mps if result.sound_speed_mps is not None else result.attenuation_np_per_m
+    preview_image = (
+        result.sound_speed_mps
+        if result.sound_speed_mps is not None
+        else result.attenuation_np_per_m
+    )
     if preview_image is not None:
         preview_path = write_preview_png(preview_image, out_dir / "preview.png")
         result.artifacts.setdefault("preview", str(preview_path))
     _write_straight_ray_diagnostics(result, case, out_dir)
 
     result_path = write_result_hdf5(result, out_dir / "result.h5")
-    (out_dir / "metrics.json").write_text(json.dumps(result.metrics, indent=2, sort_keys=True), encoding="utf-8")
-    measurement_metadata = case_measurement_metadata(case.metadata) if case is not None else {}
+    (out_dir / "metrics.json").write_text(
+        json.dumps(result.metrics, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    measurement_metadata = (
+        case_measurement_metadata(case.metadata) if case is not None else {}
+    )
     (out_dir / "metadata.yaml").write_text(
         yaml.safe_dump(
             {
                 "algorithm": result.algorithm,
                 "case_id": result.case_id,
-                "case_type": (case.metadata.get("case_type") if case is not None else None),
-                "benchmark_type": (case.metadata.get("benchmark_type") if case is not None else None),
-                "feature_qc_passed": (case.metadata.get("feature_qc_passed") if case is not None else None),
-                "feature_failed_qc": (case.metadata.get("feature_failed_qc") if case is not None else None),
+                "case_type": (
+                    case.metadata.get("case_type") if case is not None else None
+                ),
+                "benchmark_type": (
+                    case.metadata.get("benchmark_type") if case is not None else None
+                ),
+                "feature_qc_passed": (
+                    case.metadata.get("feature_qc_passed") if case is not None else None
+                ),
+                "feature_failed_qc": (
+                    case.metadata.get("feature_failed_qc") if case is not None else None
+                ),
                 **measurement_metadata,
                 "config": config,
                 "error_type": _classify_failure(result.failure_reason),
@@ -247,8 +309,16 @@ def _write_result_artifacts(
             config=config,
             error_type=_classify_failure(result.failure_reason),
             symptom=result.failure_reason or "algorithm did not report success",
-            likely_causes=["schema mismatch", "data/geometry mismatch", "numerical instability"],
-            actions=["inspect case metadata", "inspect sinogram/features", "lower relaxation or iterations"],
+            likely_causes=[
+                "schema mismatch",
+                "data/geometry mismatch",
+                "numerical instability",
+            ],
+            actions=[
+                "inspect case metadata",
+                "inspect sinogram/features",
+                "lower relaxation or iterations",
+            ],
         )
     else:
         stale_failure_report = out_dir / "failure_report.md"
@@ -256,12 +326,21 @@ def _write_result_artifacts(
             stale_failure_report.unlink()
 
 
-def _write_straight_ray_diagnostics(result: ReconstructionResult, case: USCTCase | None, out_dir: Path) -> None:
+def _write_straight_ray_diagnostics(
+    result: ReconstructionResult, case: USCTCase | None, out_dir: Path
+) -> None:
     ray_diagnostic_algorithms = {"bent_ray_gn", "rwave_adapter"}
-    if case is None or (not str(result.algorithm).startswith("straight_") and str(result.algorithm) not in ray_diagnostic_algorithms):
+    if case is None or (
+        not str(result.algorithm).startswith("straight_")
+        and str(result.algorithm) not in ray_diagnostic_algorithms
+    ):
         return
     try:
-        from usctbench.algorithms.ray import StraightRayProjector, ray_weights, valid_ray_mask
+        from usctbench.algorithms.ray import (
+            StraightRayProjector,
+            ray_weights,
+            valid_ray_mask,
+        )
     except Exception:
         return
 
@@ -280,15 +359,22 @@ def _write_straight_ray_diagnostics(result: ReconstructionResult, case: USCTCase
         "total_ray_count": int(mask.size),
         "valid_ray_fraction": float(np.mean(mask)) if mask.size else 0.0,
         "ray_weight_mean": float(np.mean(weights[mask])) if np.any(mask) else 0.0,
-        "ray_weight_nonzero_fraction": float(np.mean(weights[mask] > 0.0)) if np.any(mask) else 0.0,
+        "ray_weight_nonzero_fraction": (
+            float(np.mean(weights[mask] > 0.0)) if np.any(mask) else 0.0
+        ),
         "coverage": _array_stats(coverage),
         "coverage_nonzero_fraction": float(np.mean(coverage > 0.0)),
         "row_norm_l1": _array_stats(row_norm_l1[mask] if np.any(mask) else row_norm_l1),
         "row_norm_l2": _array_stats(row_norm_l2[mask] if np.any(mask) else row_norm_l2),
         "col_norm_l1": _array_stats(col_norm_l1),
     }
-    if result.sound_speed_mps is not None and case.ground_truth.sound_speed_mps is not None:
-        error = np.asarray(result.sound_speed_mps, dtype=float) - np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
+    if (
+        result.sound_speed_mps is not None
+        and case.ground_truth.sound_speed_mps is not None
+    ):
+        error = np.asarray(result.sound_speed_mps, dtype=float) - np.asarray(
+            case.ground_truth.sound_speed_mps, dtype=float
+        )
         stats["abs_error_coverage_corr"] = _finite_corr(np.abs(error), coverage)
         stats["ring_artifact_index"] = _radial_artifact_index(error, case.grid.roi_mask)
         result.metrics["coverage_abs_error_corr"] = stats["abs_error_coverage_corr"]
@@ -296,7 +382,9 @@ def _write_straight_ray_diagnostics(result: ReconstructionResult, case: USCTCase
     result.metrics["coverage_nonzero_fraction"] = stats["coverage_nonzero_fraction"]
     result.metrics["valid_ray_fraction"] = stats["valid_ray_fraction"]
     result.metrics.setdefault("ray_weight_mean", stats["ray_weight_mean"])
-    result.metrics.setdefault("ray_weight_nonzero_fraction", stats["ray_weight_nonzero_fraction"])
+    result.metrics.setdefault(
+        "ray_weight_nonzero_fraction", stats["ray_weight_nonzero_fraction"]
+    )
     result.metrics["row_norm_l1_min"] = stats["row_norm_l1"]["min"]
     result.metrics["row_norm_l1_max"] = stats["row_norm_l1"]["max"]
     result.metrics["col_norm_l1_min"] = stats["col_norm_l1"]["min"]
@@ -307,7 +395,9 @@ def _write_straight_ray_diagnostics(result: ReconstructionResult, case: USCTCase
     result.artifacts.setdefault("coverage_stats", str(stats_path))
     if "residual_curve" in result.metrics:
         curve_path = out_dir / "residual_curve.json"
-        curve_path.write_text(json.dumps(result.metrics["residual_curve"], indent=2), encoding="utf-8")
+        curve_path.write_text(
+            json.dumps(result.metrics["residual_curve"], indent=2), encoding="utf-8"
+        )
         result.artifacts.setdefault("residual_curve", str(curve_path))
 
 
@@ -427,11 +517,15 @@ def _assess_record(
 
     algorithm_name = str(record.get("algorithm", ""))
 
-    for key in _required_metrics_for_algorithm(protocol.get("required_metrics", []), algorithm_name):
+    for key in _required_metrics_for_algorithm(
+        protocol.get("required_metrics", []), algorithm_name
+    ):
         if key not in record or not _is_number(record[key]):
             fail_reasons.append(f"missing required metric {key}")
 
-    thresholds = _metric_limits_for_algorithm(protocol.get("thresholds", {}), algorithm_name)
+    thresholds = _metric_limits_for_algorithm(
+        protocol.get("thresholds", {}), algorithm_name
+    )
     if isinstance(thresholds, dict):
         for key, limit in thresholds.items():
             if key not in record or not _is_number(record[key]):
@@ -443,7 +537,9 @@ def _assess_record(
             else:
                 pass_reasons.append(f"{key}={value:g} <= {float(limit):g}")
 
-    minimums = _metric_limits_for_algorithm(protocol.get("minimums", {}), algorithm_name)
+    minimums = _metric_limits_for_algorithm(
+        protocol.get("minimums", {}), algorithm_name
+    )
     if isinstance(minimums, dict):
         for key, limit in minimums.items():
             if key not in record or not _is_number(record[key]):
@@ -458,7 +554,9 @@ def _assess_record(
     return not fail_reasons, pass_reasons, fail_reasons
 
 
-def _assess_run_records(records: list[dict[str, Any]], protocol: dict[str, Any]) -> tuple[list[str], list[str]]:
+def _assess_run_records(
+    records: list[dict[str, Any]], protocol: dict[str, Any]
+) -> tuple[list[str], list[str]]:
     pass_reasons: list[str] = []
     fail_reasons: list[str] = []
 
@@ -470,7 +568,9 @@ def _assess_run_records(records: list[dict[str, Any]], protocol: dict[str, Any])
     min_records = protocol.get("min_records")
     if min_records is not None:
         if len(records) < int(min_records):
-            fail_reasons.append(f"record count {len(records)} below required {int(min_records)}")
+            fail_reasons.append(
+                f"record count {len(records)} below required {int(min_records)}"
+            )
         else:
             pass_reasons.append(f"record count {len(records)} >= {int(min_records)}")
 
@@ -487,12 +587,21 @@ def _assess_run_records(records: list[dict[str, Any]], protocol: dict[str, Any])
     min_cases = protocol.get("min_cases")
     if min_cases is not None:
         if len(observed_cases) < int(min_cases):
-            fail_reasons.append(f"case count {len(observed_cases)} below required {int(min_cases)}")
+            fail_reasons.append(
+                f"case count {len(observed_cases)} below required {int(min_cases)}"
+            )
         else:
             pass_reasons.append(f"case count {len(observed_cases)} >= {int(min_cases)}")
 
-    if expected_algorithms and observed_cases and bool(protocol.get("require_algorithm_case_matrix", True)):
-        observed_pairs = {(str(record.get("algorithm", "")), str(record.get("case_id", ""))) for record in records}
+    if (
+        expected_algorithms
+        and observed_cases
+        and bool(protocol.get("require_algorithm_case_matrix", True))
+    ):
+        observed_pairs = {
+            (str(record.get("algorithm", "")), str(record.get("case_id", "")))
+            for record in records
+        }
         missing_pairs = [
             f"{algorithm}/{case_id}"
             for algorithm in sorted(expected_algorithms)
@@ -500,7 +609,9 @@ def _assess_run_records(records: list[dict[str, Any]], protocol: dict[str, Any])
             if (algorithm, case_id) not in observed_pairs
         ]
         if missing_pairs:
-            fail_reasons.append(f"missing algorithm-case records: {', '.join(missing_pairs)}")
+            fail_reasons.append(
+                f"missing algorithm-case records: {', '.join(missing_pairs)}"
+            )
         else:
             pass_reasons.append("complete algorithm-case matrix present")
 
@@ -526,7 +637,11 @@ def _expected_algorithms(protocol: dict[str, Any]) -> set[str]:
         return {str(value) for value in explicit}
     algorithms = protocol.get("algorithms", [])
     if isinstance(algorithms, list):
-        return {str(entry.get("name")) for entry in algorithms if isinstance(entry, dict) and entry.get("name")}
+        return {
+            str(entry.get("name"))
+            for entry in algorithms
+            if isinstance(entry, dict) and entry.get("name")
+        }
     return set()
 
 
@@ -568,9 +683,15 @@ def _artifact_check(case_dir: Path, record: dict[str, Any]) -> tuple[bool, list[
     for label, path in required.items():
         if not path.exists():
             reasons.append(f"missing {label}")
-    if str(record.get("status", "")).lower() == "success" and not (case_dir / "preview.png").exists():
+    if (
+        str(record.get("status", "")).lower() == "success"
+        and not (case_dir / "preview.png").exists()
+    ):
         reasons.append("missing preview.png for successful run")
-    if str(record.get("status", "")).lower() != "success" and not (case_dir / "failure_report.md").exists():
+    if (
+        str(record.get("status", "")).lower() != "success"
+        and not (case_dir / "failure_report.md").exists()
+    ):
         reasons.append("missing failure_report.md for non-success run")
     return not reasons, reasons
 
@@ -608,8 +729,16 @@ def _write_benchmark_report(
     provenance: dict[str, Any],
 ) -> None:
     passed = sum(1 for record in records if record.get("pass"))
-    runtimes = [float(record["runtime_s"]) for record in records if _is_number(record.get("runtime_s"))]
-    memory_values = [float(record["peak_memory_mb"]) for record in records if _is_number(record.get("peak_memory_mb"))]
+    runtimes = [
+        float(record["runtime_s"])
+        for record in records
+        if _is_number(record.get("runtime_s"))
+    ]
+    memory_values = [
+        float(record["peak_memory_mb"])
+        for record in records
+        if _is_number(record.get("peak_memory_mb"))
+    ]
     lines = [
         "# Benchmark report",
         "",
@@ -625,9 +754,21 @@ def _write_benchmark_report(
         f"- USCT_DATA_ROOT: {provenance.get('environment', {}).get('USCT_DATA_ROOT', '')}",
         f"- USCT_SAMPLE_ROOT: {provenance.get('environment', {}).get('USCT_SAMPLE_ROOT', '')}",
         f"- USCT_RUN_ROOT: {provenance.get('environment', {}).get('USCT_RUN_ROOT', '')}",
-        f"- Runtime total seconds: {sum(runtimes):.6g}" if runtimes else "- Runtime total seconds:",
-        f"- Runtime max seconds: {max(runtimes):.6g}" if runtimes else "- Runtime max seconds:",
-        f"- Peak memory max MB: {max(memory_values):.6g}" if memory_values else "- Peak memory max MB:",
+        (
+            f"- Runtime total seconds: {sum(runtimes):.6g}"
+            if runtimes
+            else "- Runtime total seconds:"
+        ),
+        (
+            f"- Runtime max seconds: {max(runtimes):.6g}"
+            if runtimes
+            else "- Runtime max seconds:"
+        ),
+        (
+            f"- Peak memory max MB: {max(memory_values):.6g}"
+            if memory_values
+            else "- Peak memory max MB:"
+        ),
         "",
         "## Run checks",
         "",
@@ -660,7 +801,11 @@ def _write_run_metadata(path: Path, *, suite_file: Path, suite: dict[str, Any]) 
         "path": str(suite_file),
         "name": suite.get("name", suite_file.stem),
         "case_glob": suite.get("case_glob"),
-        "algorithms": [entry.get("name") for entry in suite.get("algorithms", []) if isinstance(entry, dict)],
+        "algorithms": [
+            entry.get("name")
+            for entry in suite.get("algorithms", [])
+            if isinstance(entry, dict)
+        ],
     }
     path.write_text(yaml.safe_dump(metadata, sort_keys=True), encoding="utf-8")
 
@@ -684,11 +829,23 @@ def _collect_run_provenance(run_path: Path) -> dict[str, Any]:
         },
         "environment": {
             key: os.environ.get(key, "")
-            for key in ("USCT_WORKSPACE", "USCT_DATA_ROOT", "USCT_SAMPLE_ROOT", "USCT_RUN_ROOT")
+            for key in (
+                "USCT_WORKSPACE",
+                "USCT_DATA_ROOT",
+                "USCT_SAMPLE_ROOT",
+                "USCT_RUN_ROOT",
+            )
         },
         "runtime": {
             "torch": _torch_info(),
-            "nvidia_smi": _run_text(["nvidia-smi", "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"], timeout_s=5),
+            "nvidia_smi": _run_text(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=name,driver_version,memory.total",
+                    "--format=csv,noheader",
+                ],
+                timeout_s=5,
+            ),
         },
     }
 
@@ -724,15 +881,53 @@ def _run_text(command: list[str], *, timeout_s: int = 2) -> str:
 
 def _classify_failure(reason: str | None) -> str:
     text = (reason or "").lower()
-    if any(token in text for token in ("matlab", "dependency", "modulenotfounderror", "importerror", "not installed", "executable")):
+    if any(
+        token in text
+        for token in (
+            "matlab",
+            "dependency",
+            "modulenotfounderror",
+            "importerror",
+            "not installed",
+            "executable",
+        )
+    ):
         return "external-dependency"
-    if any(token in text for token in ("pydantic", "validation", "schema", "model", "field required")):
+    if any(
+        token in text
+        for token in ("pydantic", "validation", "schema", "model", "field required")
+    ):
         return "schema"
-    if any(token in text for token in ("hdf5", "h5py", "file not found", "no such file", "case", "dataset", "path")):
+    if any(
+        token in text
+        for token in (
+            "hdf5",
+            "h5py",
+            "file not found",
+            "no such file",
+            "case",
+            "dataset",
+            "path",
+        )
+    ):
         return "data"
-    if any(token in text for token in ("nan", "inf", "singular", "overflow", "underflow", "ill-conditioned", "non-finite")):
+    if any(
+        token in text
+        for token in (
+            "nan",
+            "inf",
+            "singular",
+            "overflow",
+            "underflow",
+            "ill-conditioned",
+            "non-finite",
+        )
+    ):
         return "numerical"
-    if any(token in text for token in ("converge", "diverge", "residual increased", "line search")):
+    if any(
+        token in text
+        for token in ("converge", "diverge", "residual increased", "line search")
+    ):
         return "convergence"
     return "unknown"
 

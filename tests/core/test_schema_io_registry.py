@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from usctbench.core.io import read_case_hdf5, read_result_hdf5, write_result_hdf5
-from usctbench.core.registry import clear_registry, get_algorithm, list_algorithms, register_algorithm
+from usctbench.core.registry import (
+    clear_registry,
+    get_algorithm,
+    list_algorithms,
+    register_algorithm,
+)
 from usctbench.core.schema import AlgorithmConfig, ReconstructionResult
 
 
@@ -9,7 +14,9 @@ class DummyAlgorithm:
     name = "dummy"
 
     def run(self, case, config):
-        return ReconstructionResult(algorithm=self.name, case_id=case.case_id, metrics={"ok": True})
+        return ReconstructionResult(
+            algorithm=self.name, case_id=case.case_id, metrics={"ok": True}
+        )
 
 
 def test_case_and_result_hdf5_roundtrip(written_case, tmp_path):

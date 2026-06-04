@@ -48,4 +48,3 @@ def _format_list(values: list[str]) -> str:
     if not values:
         return ""
     return "; ".join(values)
-

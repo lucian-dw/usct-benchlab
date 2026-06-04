@@ -26,7 +26,10 @@ class RWaveAdapter:
                 default_regularization_lambda=1.0e-5,
                 default_smooth_sigma=0.35,
                 extra_metrics={
-                    "ray_born_linearization": True,
+                    "ray_born_inspired": True,
+                    "adapter_style": True,
+                    "full_ray_born_solver": False,
+                    "v0_1_backend": "adapter_style_travel_time_baseline",
                     "surrogate_travel_time_backend": True,
                     "external_reference": "ray-Born/rWave literature",
                 },

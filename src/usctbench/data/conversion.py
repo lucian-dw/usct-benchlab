@@ -14,8 +14,13 @@ from usctbench.algorithms.ray import StraightRayProjector
 from usctbench.data.synthetic import make_grid, make_ring_geometry
 from usctbench.core.io import write_case_hdf5
 from usctbench.core.provenance import MeasurementProvenance, stamp_measurement_metadata
-from usctbench.core.schema import GeometrySpec, GridSpec, GroundTruthSpec, MeasurementSpec, USCTCase
-
+from usctbench.core.schema import (
+    GeometrySpec,
+    GridSpec,
+    GroundTruthSpec,
+    MeasurementSpec,
+    USCTCase,
+)
 
 NBP_PIXEL_SPACING_M = 1.0e-4
 NBP_DEFAULT_ATTENUATION_FREQUENCY_MHZ = 1.0
@@ -61,7 +66,9 @@ def convert_speed_mat_volume(
         dataset = speed_volume["dataset"]
         shape = tuple(int(value) for value in dataset.shape)
         if len(shape) != 3:
-            raise ValueError(f"speed dataset must be 3-D [ny, nx, n_cases] or [n_cases,ny,nx], got {shape}")
+            raise ValueError(
+                f"speed dataset must be 3-D [ny, nx, n_cases] or [n_cases,ny,nx], got {shape}"
+            )
         sample_axis = _infer_speed_volume_sample_axis(shape)
         case_count = shape[sample_axis]
         selected_indices = indices if indices is not None else [0]
@@ -69,11 +76,17 @@ def convert_speed_mat_volume(
             if index < 0 or index >= case_count:
                 raise IndexError(f"case index {index} outside dataset shape {shape}")
             extra_metadata = dict((index_metadata or {}).get(index, {}))
-            sound_speed = np.asarray(_read_speed_volume_slice(dataset, index, sample_axis), dtype=float)
+            sound_speed = np.asarray(
+                _read_speed_volume_slice(dataset, index, sample_axis), dtype=float
+            )
             sound_speed = _downsample_mean(sound_speed, output_shape)
             case_id_suffix = extra_metadata.pop("case_id_suffix", None)
             prefix = case_id_prefix or source.stem
-            case_id = f"{prefix}_{case_id_suffix}" if case_id_suffix else f"{prefix}_{index:06d}"
+            case_id = (
+                f"{prefix}_{case_id_suffix}"
+                if case_id_suffix
+                else f"{prefix}_{index:06d}"
+            )
             case = _speed_array_to_case(
                 sound_speed,
                 case_id=case_id,
@@ -86,7 +99,9 @@ def convert_speed_mat_volume(
                 reference_sound_speed_mps=reference_sound_speed_mps,
             )
             if extra_metadata:
-                case = case.model_copy(update={"metadata": {**case.metadata, **extra_metadata}})
+                case = case.model_copy(
+                    update={"metadata": {**case.metadata, **extra_metadata}}
+                )
             case_path = out_path / f"{case_id}.h5"
             write_case_hdf5(case, case_path)
             record = {
@@ -122,7 +137,11 @@ def speed_mat_metadata(mat_path: str | Path) -> dict[str, Any] | None:
                 "dataset": str(speed_volume["name"]),
                 "shape": list(shape),
                 "dtype": str(dataset.dtype),
-                "sample_axis": int(_infer_speed_volume_sample_axis(shape)) if len(shape) == 3 else None,
+                "sample_axis": (
+                    int(_infer_speed_volume_sample_axis(shape))
+                    if len(shape) == 3
+                    else None
+                ),
                 "mat_format": str(speed_volume["format"]),
             }
     except Exception:
@@ -162,11 +181,23 @@ def convert_kwave_channel_mat(
         positions_xy = np.asarray(handle["transducerPositionsXY"][()], dtype=float)
         time_s = np.asarray(handle["time"][()], dtype=float).reshape(-1)
         full_shape = tuple(int(v) for v in handle["full_dataset"].shape)
-        source_label = _decode_matlab_chars(handle.get("sim_metadata/sim_label")) or source.stem
-        source_npy_path = _decode_matlab_chars(handle.get("sim_metadata/source_npy_path"))
+        source_label = (
+            _decode_matlab_chars(handle.get("sim_metadata/sim_label")) or source.stem
+        )
+        source_npy_path = _decode_matlab_chars(
+            handle.get("sim_metadata/source_npy_path")
+        )
         frequency_hz = _read_scalar(handle.get("sim_metadata/f_tx"))
-        xi = np.asarray(handle["xi_orig"][()], dtype=float).reshape(-1) if "xi_orig" in handle else None
-        yi = np.asarray(handle["yi_orig"][()], dtype=float).reshape(-1) if "yi_orig" in handle else None
+        xi = (
+            np.asarray(handle["xi_orig"][()], dtype=float).reshape(-1)
+            if "xi_orig" in handle
+            else None
+        )
+        yi = (
+            np.asarray(handle["yi_orig"][()], dtype=float).reshape(-1)
+            if "yi_orig" in handle
+            else None
+        )
 
     sound_speed_small = _downsample_mean(sound_speed, output_shape)
     attenuation_small = _downsample_mean(attenuation, output_shape)
@@ -279,7 +310,9 @@ def convert_nbp_slice2d_zip(
     records: list[dict[str, Any]] = []
 
     with zipfile.ZipFile(source) as archive:
-        selected = _select_nbp_zip_members(archive.namelist(), cases_per_type=cases_per_type)
+        selected = _select_nbp_zip_members(
+            archive.namelist(), cases_per_type=cases_per_type
+        )
         for member in selected:
             data = archive.read(member)
             with h5py.File(io.BytesIO(data), "r") as handle:
@@ -324,8 +357,12 @@ def _speed_array_to_case(
     n_transducers: int,
     reference_sound_speed_mps: float,
 ) -> USCTCase:
-    grid = make_grid(shape=tuple(int(v) for v in sound_speed_mps.shape), spacing_m=spacing_m)
-    radius_m = 0.6 * max(grid.shape[0] * grid.spacing_m[0], grid.shape[1] * grid.spacing_m[1])
+    grid = make_grid(
+        shape=tuple(int(v) for v in sound_speed_mps.shape), spacing_m=spacing_m
+    )
+    radius_m = 0.6 * max(
+        grid.shape[0] * grid.spacing_m[0], grid.shape[1] * grid.spacing_m[1]
+    )
     geometry = make_ring_geometry(n_transducers=n_transducers, radius_m=radius_m)
     projector = StraightRayProjector.from_grid_geometry(grid, geometry)
     delta_slowness = (1.0 / sound_speed_mps) - (1.0 / reference_sound_speed_mps)
@@ -345,24 +382,24 @@ def _speed_array_to_case(
         ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed_mps),
         metadata=stamp_measurement_metadata(
             {
-            "source_dataset": "OpenBreastUS",
-            "case_type": "openbreastus_speedmap_surrogate",
-            "source_path": str(source),
-            "source_mat_dataset": dataset_name,
-            "source_index": source_index,
-            "source_shape": list(source_shape),
-            "conversion": "speed_map_to_straight_ray_surrogate",
-            "feature_provenance": "surrogate_delta_tof_from_ground_truth_sound_speed",
-            "measurement_domain": "features",
-            "measurement_limitations": [
-                "source file contains sound-speed maps only",
-                "delta_tof_s was generated with a straight-ray projector",
-                "log_amp is a zero surrogate and must not be interpreted as measured attenuation",
-                "synthetic ring geometry was generated because measured transducer geometry was unavailable",
-            ],
-            "reference_sound_speed_mps": reference_sound_speed_mps,
-            "spacing_m_assumption": list(spacing_m),
-            "attenuation_note": "log_amp is a zero surrogate because this source file contains speed maps only.",
+                "source_dataset": "OpenBreastUS",
+                "case_type": "openbreastus_speedmap_surrogate",
+                "source_path": str(source),
+                "source_mat_dataset": dataset_name,
+                "source_index": source_index,
+                "source_shape": list(source_shape),
+                "conversion": "speed_map_to_straight_ray_surrogate",
+                "feature_provenance": "surrogate_delta_tof_from_ground_truth_sound_speed",
+                "measurement_domain": "features",
+                "measurement_limitations": [
+                    "source file contains sound-speed maps only",
+                    "delta_tof_s was generated with a straight-ray projector",
+                    "log_amp is a zero surrogate and must not be interpreted as measured attenuation",
+                    "synthetic ring geometry was generated because measured transducer geometry was unavailable",
+                ],
+                "reference_sound_speed_mps": reference_sound_speed_mps,
+                "spacing_m_assumption": list(spacing_m),
+                "attenuation_note": "log_amp is a zero surrogate because this source file contains speed maps only.",
             },
             measurement_provenance=MeasurementProvenance.SPEEDMAP_TRAVEL_TIME_SURROGATE,
             benchmark_type="speedmap_travel_time_surrogate",
@@ -394,35 +431,41 @@ def _kwave_arrays_to_case(
     c0 = float(np.nanmedian(sound_speed_mps))
     delta_slowness = (1.0 / sound_speed_mps) - (1.0 / c0)
     delta_tof_s = projector.forward(delta_slowness).reshape(projector.ray_shape)
-    attenuation_integral = projector.forward(attenuation_np_per_m).reshape(projector.ray_shape)
+    attenuation_integral = projector.forward(attenuation_np_per_m).reshape(
+        projector.ray_shape
+    )
     valid_mask = ~np.eye(projector.ray_shape[0], projector.ray_shape[1], dtype=bool)
     metadata = stamp_measurement_metadata(
         {
-        "source_dataset": "kWave_USCT_simulation",
-        "case_type": "openbreastus_wavefield",
-        "source_path": str(source),
-        "source_label": source_label,
-        "source_npy_path": source_npy_path,
-        "source_shape": list(source_shape),
-        "internal_shape": list(sound_speed_mps.shape),
-        "array_axis_convention_raw": "[x,y]",
-        "array_axis_convention_internal": "[row=y,col=x]",
-        "array_axis_conversion": "transpose_external_xy_to_internal_yx",
-        "full_dataset_shape": list(full_dataset_shape),
-        "conversion": "kwave_channel_mat_to_feature_case",
-        "feature_provenance": "surrogate_delta_tof_from_sound_speed_and_attenuation_line_integral_from_simulated_ground_truth",
-        "measurement_domain": "features",
-        "measurement_limitations": [
-            "source file is a k-Wave simulation MAT, not raw OpenBreastUS measured RF data",
-            "delta_tof_s was generated with a straight-ray projector from the simulated sound-speed map",
-            "log_amp was generated as a straight-ray line integral from the simulated attenuation map",
-            "source channel waveforms are present but are not copied into the standard smoke HDF5 case",
-        ],
-        "reference_sound_speed_mps": c0,
-        "attenuation_evidence": "simulated_ground_truth_line_integral",
-        "has_simulated_attenuation": True,
-        "time_range_s": [float(np.nanmin(time_s)), float(np.nanmax(time_s))] if time_s.size else None,
-        "frequency_hz": frequency_hz,
+            "source_dataset": "kWave_USCT_simulation",
+            "case_type": "openbreastus_wavefield",
+            "source_path": str(source),
+            "source_label": source_label,
+            "source_npy_path": source_npy_path,
+            "source_shape": list(source_shape),
+            "internal_shape": list(sound_speed_mps.shape),
+            "array_axis_convention_raw": "[x,y]",
+            "array_axis_convention_internal": "[row=y,col=x]",
+            "array_axis_conversion": "transpose_external_xy_to_internal_yx",
+            "full_dataset_shape": list(full_dataset_shape),
+            "conversion": "kwave_channel_mat_to_feature_case",
+            "feature_provenance": "surrogate_delta_tof_from_sound_speed_and_attenuation_line_integral_from_simulated_ground_truth",
+            "measurement_domain": "features",
+            "measurement_limitations": [
+                "source file is a k-Wave simulation MAT, not raw OpenBreastUS measured RF data",
+                "delta_tof_s was generated with a straight-ray projector from the simulated sound-speed map",
+                "log_amp was generated as a straight-ray line integral from the simulated attenuation map",
+                "source channel waveforms are present but are not copied into the standard smoke HDF5 case",
+            ],
+            "reference_sound_speed_mps": c0,
+            "attenuation_evidence": "simulated_ground_truth_line_integral",
+            "has_simulated_attenuation": True,
+            "time_range_s": (
+                [float(np.nanmin(time_s)), float(np.nanmax(time_s))]
+                if time_s.size
+                else None
+            ),
+            "frequency_hz": frequency_hz,
         },
         measurement_provenance=MeasurementProvenance.SPEEDMAP_TRAVEL_TIME_SURROGATE,
         benchmark_type="speedmap_travel_time_surrogate",
@@ -435,12 +478,18 @@ def _kwave_arrays_to_case(
         geometry=geometry,
         measurement=MeasurementSpec(
             domain="features",
-            frequencies_hz=np.asarray([frequency_hz], dtype=float) if frequency_hz and frequency_hz > 0 else None,
+            frequencies_hz=(
+                np.asarray([frequency_hz], dtype=float)
+                if frequency_hz and frequency_hz > 0
+                else None
+            ),
             delta_tof_s=delta_tof_s,
             log_amp=-attenuation_integral,
             valid_mask=valid_mask,
         ),
-        ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed_mps, attenuation_np_per_m=attenuation_np_per_m),
+        ground_truth=GroundTruthSpec(
+            sound_speed_mps=sound_speed_mps, attenuation_np_per_m=attenuation_np_per_m
+        ),
         metadata=metadata,
     )
 
@@ -474,10 +523,12 @@ def _nbp_handle_to_case_record(
     density_label = chr(type_code) if 0 <= type_code <= 255 else str(type_code)
     density_class = NBP_DENSITY_CLASSES.get(density_label, "unknown")
 
-    sos_mps_crop, attenuation_np_per_m_crop, label_crop, crop_info = _fit_nbp_field_of_view(
-        sos_mps_raw,
-        attenuation_np_per_m_raw,
-        label_raw,
+    sos_mps_crop, attenuation_np_per_m_crop, label_crop, crop_info = (
+        _fit_nbp_field_of_view(
+            sos_mps_raw,
+            attenuation_np_per_m_raw,
+            label_raw,
+        )
     )
 
     sound_speed_mps = _downsample_mean(sos_mps_crop, output_shape)
@@ -493,13 +544,17 @@ def _nbp_handle_to_case_record(
     )
     grid = make_grid(shape=output_shape, spacing_m=spacing_m)
     grid = grid.model_copy(update={"roi_mask": roi_mask})
-    radius_m = 0.6 * max(grid.shape[0] * grid.spacing_m[0], grid.shape[1] * grid.spacing_m[1])
+    radius_m = 0.6 * max(
+        grid.shape[0] * grid.spacing_m[0], grid.shape[1] * grid.spacing_m[1]
+    )
     geometry = make_ring_geometry(n_transducers=n_transducers, radius_m=radius_m)
     projector = StraightRayProjector.from_grid_geometry(grid, geometry)
 
     delta_slowness = (1.0 / sound_speed_mps) - (1.0 / reference_sound_speed_mps)
     delta_tof_s = projector.forward(delta_slowness).reshape(projector.ray_shape)
-    attenuation_integral = projector.forward(attenuation_np_per_m).reshape(projector.ray_shape)
+    attenuation_integral = projector.forward(attenuation_np_per_m).reshape(
+        projector.ray_shape
+    )
     valid_mask = ~np.eye(projector.ray_shape[0], projector.ray_shape[1], dtype=bool)
 
     source_ref = f"{source_path}!{source_member}" if source_member else source_path
@@ -514,42 +569,46 @@ def _nbp_handle_to_case_record(
             log_amp=-attenuation_integral,
             valid_mask=valid_mask,
         ),
-        ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed_mps, attenuation_np_per_m=attenuation_np_per_m),
+        ground_truth=GroundTruthSpec(
+            sound_speed_mps=sound_speed_mps, attenuation_np_per_m=attenuation_np_per_m
+        ),
         metadata=stamp_measurement_metadata(
             {
-            "source_dataset": "NBPslices2D",
-            "case_type": "nbpslice2d_property_map_surrogate",
-            "source_path": source_path,
-            "source_member": source_member,
-            "source_ref": source_ref,
-            "source_shape": list(sos_mps_raw.shape),
-            "fitted_source_shape": list(sos_mps_crop.shape),
-            "roi_fit": crop_info,
-            "conversion": "nbpslice2d_to_feature_case",
-            "feature_provenance": "surrogate_delta_tof_from_nbp_sound_speed_and_attenuation_line_integral_from_nbp_ground_truth",
-            "measurement_domain": "features",
-            "measurement_limitations": [
-                "NBPslices2D contains acoustic property maps, not measured RF or pressure wavefields",
-                "delta_tof_s was generated with a straight-ray projector from the sound-speed map",
-                "log_amp was generated as a straight-ray line integral from the attenuation map",
-                "synthetic ring geometry was generated because acquisition geometry is not included in the slice files",
-            ],
-            "reference_sound_speed_mps": reference_sound_speed_mps,
-            "density_class": density_class,
-            "density_label": density_label,
-            "nbp_type_code": type_code,
-            "attenuation_frequency_mhz": attenuation_frequency_mhz,
-            "attenuation_power_law_exponent": y_power,
-            "attenuation_source_units": "dB/(MHz^y mm)",
-            "attenuation_conversion": "Np/m = att_dB_per_MHz_y_mm * frequency_mhz**y * ln(10)/20 * 1000",
-            "density_source_units": "g/mm^3",
-            "density_kg_per_m3_min": float(np.nanmin(density_raw) * 1.0e9),
-            "density_kg_per_m3_max": float(np.nanmax(density_raw) * 1.0e9),
-            "label_values": [int(value) for value in sorted(np.unique(label_raw).tolist())],
-            "pixel_spacing_m_assumption": NBP_PIXEL_SPACING_M,
-            "effective_spacing_m": list(spacing_m),
-            "has_simulated_attenuation": True,
-            "attenuation_evidence": "nbp_numerical_phantom_ground_truth_line_integral",
+                "source_dataset": "NBPslices2D",
+                "case_type": "nbpslice2d_property_map_surrogate",
+                "source_path": source_path,
+                "source_member": source_member,
+                "source_ref": source_ref,
+                "source_shape": list(sos_mps_raw.shape),
+                "fitted_source_shape": list(sos_mps_crop.shape),
+                "roi_fit": crop_info,
+                "conversion": "nbpslice2d_to_feature_case",
+                "feature_provenance": "surrogate_delta_tof_from_nbp_sound_speed_and_attenuation_line_integral_from_nbp_ground_truth",
+                "measurement_domain": "features",
+                "measurement_limitations": [
+                    "NBPslices2D contains acoustic property maps, not measured RF or pressure wavefields",
+                    "delta_tof_s was generated with a straight-ray projector from the sound-speed map",
+                    "log_amp was generated as a straight-ray line integral from the attenuation map",
+                    "synthetic ring geometry was generated because acquisition geometry is not included in the slice files",
+                ],
+                "reference_sound_speed_mps": reference_sound_speed_mps,
+                "density_class": density_class,
+                "density_label": density_label,
+                "nbp_type_code": type_code,
+                "attenuation_frequency_mhz": attenuation_frequency_mhz,
+                "attenuation_power_law_exponent": y_power,
+                "attenuation_source_units": "dB/(MHz^y mm)",
+                "attenuation_conversion": "Np/m = att_dB_per_MHz_y_mm * frequency_mhz**y * ln(10)/20 * 1000",
+                "density_source_units": "g/mm^3",
+                "density_kg_per_m3_min": float(np.nanmin(density_raw) * 1.0e9),
+                "density_kg_per_m3_max": float(np.nanmax(density_raw) * 1.0e9),
+                "label_values": [
+                    int(value) for value in sorted(np.unique(label_raw).tolist())
+                ],
+                "pixel_spacing_m_assumption": NBP_PIXEL_SPACING_M,
+                "effective_spacing_m": list(spacing_m),
+                "has_simulated_attenuation": True,
+                "attenuation_evidence": "nbp_numerical_phantom_ground_truth_line_integral",
             },
             measurement_provenance=MeasurementProvenance.SPEEDMAP_TRAVEL_TIME_SURROGATE,
             benchmark_type="speedmap_travel_time_surrogate",
@@ -615,7 +674,9 @@ def _external_xy_image_to_internal_yx(image: np.ndarray) -> np.ndarray:
 
     array = np.asarray(image, dtype=float).squeeze()
     if array.ndim != 2:
-        raise ValueError(f"external k-Wave image arrays must be 2-D [x,y], got {array.shape}")
+        raise ValueError(
+            f"external k-Wave image arrays must be 2-D [x,y], got {array.shape}"
+        )
     return np.ascontiguousarray(array.T)
 
 
@@ -691,34 +752,54 @@ def _downsample_label(label: np.ndarray, output_shape: tuple[int, int]) -> np.nd
     return cropped.reshape(out_y, block_y, out_x, block_x).max(axis=(1, 3))
 
 
-def _nbp_attenuation_to_np_per_m(att_dB_per_mhz_y_mm: np.ndarray, *, power_law_exponent: float, frequency_mhz: float) -> np.ndarray:
+def _nbp_attenuation_to_np_per_m(
+    att_dB_per_mhz_y_mm: np.ndarray, *, power_law_exponent: float, frequency_mhz: float
+) -> np.ndarray:
     if frequency_mhz <= 0:
         raise ValueError("attenuation_frequency_mhz must be positive")
-    dB_per_mm = np.asarray(att_dB_per_mhz_y_mm, dtype=float) * (float(frequency_mhz) ** float(power_law_exponent))
+    dB_per_mm = np.asarray(att_dB_per_mhz_y_mm, dtype=float) * (
+        float(frequency_mhz) ** float(power_law_exponent)
+    )
     return dB_per_mm * (np.log(10.0) / 20.0) * 1000.0
 
 
-def _grid_from_coordinates(shape: tuple[int, int], *, xi: np.ndarray | None, yi: np.ndarray | None) -> GridSpec:
+def _grid_from_coordinates(
+    shape: tuple[int, int], *, xi: np.ndarray | None, yi: np.ndarray | None
+) -> GridSpec:
     if xi is not None and yi is not None and xi.size > 1 and yi.size > 1:
         x_min, x_max = float(np.nanmin(xi)), float(np.nanmax(xi))
         y_min, y_max = float(np.nanmin(yi)), float(np.nanmax(yi))
         dy = (y_max - y_min) / float(shape[0])
         dx = (x_max - x_min) / float(shape[1])
         if dy > 0.0 and dx > 0.0:
-            return GridSpec(shape=shape, spacing_m=(dy, dx), origin_m=(y_min, x_min), roi_mask=np.ones(shape, dtype=bool))
+            return GridSpec(
+                shape=shape,
+                spacing_m=(dy, dx),
+                origin_m=(y_min, x_min),
+                roi_mask=np.ones(shape, dtype=bool),
+            )
     return make_grid(shape=shape, spacing_m=(1.0e-3, 1.0e-3))
 
 
-def _geometry_from_xy_positions(positions_xy: np.ndarray, *, n_transducers: int) -> GeometrySpec:
+def _geometry_from_xy_positions(
+    positions_xy: np.ndarray, *, n_transducers: int
+) -> GeometrySpec:
     positions_xy = np.asarray(positions_xy, dtype=float)
     if positions_xy.ndim != 2 or positions_xy.shape[1] != 2:
         raise ValueError("transducerPositionsXY must have shape (n, 2)")
     if n_transducers <= 0 or n_transducers > positions_xy.shape[0]:
         n_transducers = positions_xy.shape[0]
-    indices = np.linspace(0, positions_xy.shape[0] - 1, n_transducers).round().astype(int)
+    indices = (
+        np.linspace(0, positions_xy.shape[0] - 1, n_transducers).round().astype(int)
+    )
     positions_yx = positions_xy[indices][:, [1, 0]]
     radius_m = float(np.median(np.linalg.norm(positions_yx, axis=1)))
-    return GeometrySpec(type="ring", tx_pos_m=positions_yx, rx_pos_m=positions_yx.copy(), radius_m=radius_m)
+    return GeometrySpec(
+        type="ring",
+        tx_pos_m=positions_yx,
+        rx_pos_m=positions_yx.copy(),
+        radius_m=radius_m,
+    )
 
 
 def _kwave_channel_metadata_from_handle(handle: Any) -> dict[str, Any] | None:
@@ -754,10 +835,19 @@ def _nbp_metadata_from_handle(handle: Any) -> dict[str, Any] | None:
     att_shape = tuple(int(v) for v in handle["att"].shape)
     den_shape = tuple(int(v) for v in handle["den"].shape)
     label_shape = tuple(int(v) for v in handle["label"].shape)
-    if len(sos_shape) != 2 or att_shape != sos_shape or den_shape != sos_shape or label_shape != sos_shape:
+    if (
+        len(sos_shape) != 2
+        or att_shape != sos_shape
+        or den_shape != sos_shape
+        or label_shape != sos_shape
+    ):
         return None
     type_code = _read_scalar(handle.get("type"))
-    density_label = chr(int(type_code)) if type_code is not None and 0 <= int(type_code) <= 255 else None
+    density_label = (
+        chr(int(type_code))
+        if type_code is not None and 0 <= int(type_code) <= 255
+        else None
+    )
     return {
         "format": "nbpslice2d-mat",
         "sound_speed_dataset": "sos",
@@ -847,7 +937,9 @@ def _open_speed_volume(path: Path, *, dataset_name: str | None = None):
     try:
         from scipy.io import loadmat
     except ModuleNotFoundError as exc:
-        raise RuntimeError(f"{path} is not HDF5; scipy is required to read MATLAB v5 MAT speed volumes") from exc
+        raise RuntimeError(
+            f"{path} is not HDF5; scipy is required to read MATLAB v5 MAT speed volumes"
+        ) from exc
 
     data = loadmat(path)
     name = dataset_name or _largest_3d_array_name(data)
@@ -861,7 +953,9 @@ def _largest_3d_array_name(data: dict[str, Any]) -> str:
     candidates = [
         (int(np.prod(value.shape)), name)
         for name, value in data.items()
-        if not name.startswith("__") and hasattr(value, "shape") and len(value.shape) == 3
+        if not name.startswith("__")
+        and hasattr(value, "shape")
+        and len(value.shape) == 3
     ]
     if not candidates:
         keys = [key for key in data if not key.startswith("__")]

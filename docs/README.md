@@ -1,25 +1,20 @@
-# usct-benchlab Documentation
+# Documentation
 
-This directory separates release documentation from historical experiments.
+User-facing v0.1 documentation:
 
-## Release Docs
+- [Mathematical formulation](math_formulation.md)
+- [Usage guide](usage.md)
+- [Algorithms](algorithms.md)
+- [Datasets](datasets.md)
+- [FWI adapter](fwi.md)
+- [Development and release checks](development.md)
+- [External sources and licenses](EXTERNAL_SOURCES_AND_LICENSES.md)
+- [References](references.bib)
 
-- `project/BENCHMARK_TIERS.md`: v0.1 benchmark tracks and what is ranked.
-- `project/MEASUREMENT_PROVENANCE.md`: accepted provenance labels.
-- `project/SIMULATION_QC.md`: k-Wave simulation QC contract.
-- `project/STAGE_SUMMARY.md`: release-stage summary.
-- `project/OBSERVABLE_MISMATCH.md`: why k-Wave-derived ray/rWave paths are
-  diagnostic-only in v0.1.
-- `algorithm_cards/`: release-facing algorithm cards.
-- `algorithms/`: implementation notes for selected algorithms.
+Historical stage notes, old setup notes, algorithm-card drafts, and internal
+planning material are kept under `internal/`. They are not required for normal
+package usage.
 
-## Historical Experiments
-
-`experiments/` contains notes from exploratory work and A100 alignment. These
-files may mention local example paths or historical run IDs, but they should
-not define the release mainline.
-
-## Assets
-
-`assets/` contains small README-ready figures only. Raw runs, `.mat`, `.h5`,
-`.npy`, checkpoints, and external code remain outside Git.
+Small README-ready images live in `assets/`. Raw datasets, generated runs,
+checkpoints, external repositories, and large scientific arrays remain outside
+Git.

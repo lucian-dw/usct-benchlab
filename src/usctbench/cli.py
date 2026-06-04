@@ -3,13 +3,25 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from usctbench.benchmark.runner import evaluate_run, run_algorithm_case, run_benchmark_suite
-from usctbench.data.nbpslice2d import inspect_nbp_slice2d_zip, make_nbp_slice2d_quality_subset, make_nbp_slice2d_smoke_subset
-from usctbench.data.openbreastus import inspect_openbreastus, make_quality_subset, make_smoke_subset, write_schema_report
+from usctbench.benchmark.runner import (
+    evaluate_run,
+    run_algorithm_case,
+    run_benchmark_suite,
+)
+from usctbench.data.nbpslice2d import (
+    inspect_nbp_slice2d_zip,
+    make_nbp_slice2d_quality_subset,
+    make_nbp_slice2d_smoke_subset,
+)
+from usctbench.data.openbreastus import (
+    inspect_openbreastus,
+    make_quality_subset,
+    make_smoke_subset,
+    write_schema_report,
+)
 from usctbench.data.synthetic import make_synthetic_smoke_subset
 from usctbench.core.registry import list_algorithms
 
@@ -31,75 +43,197 @@ def register_builtin_algorithms() -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="usct", description="USCT benchmark command-line interface.")
+    parser = argparse.ArgumentParser(
+        prog="usct", description="USCT benchmark command-line interface."
+    )
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("list-algorithms", help="List registered reconstruction algorithms.")
+    subparsers.add_parser(
+        "list-algorithms", help="List registered reconstruction algorithms."
+    )
 
-    data_parser = subparsers.add_parser("data", help="Data inspection and subset commands.")
+    data_parser = subparsers.add_parser(
+        "data", help="Data inspection and subset commands."
+    )
     data_subparsers = data_parser.add_subparsers(dest="data_command")
 
-    inspect_parser = data_subparsers.add_parser("inspect-openbreastus", help="Inspect a local OpenBreastUS tree.")
+    inspect_parser = data_subparsers.add_parser(
+        "inspect-openbreastus", help="Inspect a local OpenBreastUS tree."
+    )
     inspect_parser.add_argument("--root", required=True, help="OpenBreastUS data root.")
-    inspect_parser.add_argument("--out", default="openbreastus_index.json", help="Output index JSON path.")
+    inspect_parser.add_argument(
+        "--out", default="openbreastus_index.json", help="Output index JSON path."
+    )
 
-    smoke_parser = data_subparsers.add_parser("make-smoke", help="Create a smoke benchmark subset.")
+    smoke_parser = data_subparsers.add_parser(
+        "make-smoke", help="Create a smoke benchmark subset."
+    )
     smoke_parser.add_argument("--root", required=True, help="OpenBreastUS data root.")
     smoke_parser.add_argument("--out", required=True, help="Output smoke subset root.")
     smoke_parser.add_argument("--cases-per-density", type=int, default=1)
-    smoke_parser.add_argument("--converted-shape", type=int, default=64, help="Square image size for converted speed-map cases.")
-    smoke_parser.add_argument("--n-transducers", type=int, default=32, help="Synthetic ring transducers for converted speed-map cases.")
-    smoke_parser.add_argument("--spacing-m", type=float, default=1.0e-3, help="Assumed pixel spacing for converted speed-map cases.")
-    smoke_parser.add_argument("--no-convert-speed-mat", action="store_true", help="Only write the manifest; do not create HDF5 cases.")
+    smoke_parser.add_argument(
+        "--converted-shape",
+        type=int,
+        default=64,
+        help="Square image size for converted speed-map cases.",
+    )
+    smoke_parser.add_argument(
+        "--n-transducers",
+        type=int,
+        default=32,
+        help="Synthetic ring transducers for converted speed-map cases.",
+    )
+    smoke_parser.add_argument(
+        "--spacing-m",
+        type=float,
+        default=1.0e-3,
+        help="Assumed pixel spacing for converted speed-map cases.",
+    )
+    smoke_parser.add_argument(
+        "--no-convert-speed-mat",
+        action="store_true",
+        help="Only write the manifest; do not create HDF5 cases.",
+    )
 
-    quality_parser = data_subparsers.add_parser("make-quality", help="Create 256x256 OpenBreastUS quality-comparison cases.")
+    quality_parser = data_subparsers.add_parser(
+        "make-quality", help="Create 256x256 OpenBreastUS quality-comparison cases."
+    )
     quality_parser.add_argument("--root", required=True, help="OpenBreastUS data root.")
-    quality_parser.add_argument("--out", required=True, help="Output quality subset root.")
+    quality_parser.add_argument(
+        "--out", required=True, help="Output quality subset root."
+    )
     quality_parser.add_argument("--cases-per-density", type=int, default=1)
-    quality_parser.add_argument("--converted-shape", type=int, default=256, help="Square image size for quality comparison.")
-    quality_parser.add_argument("--n-transducers", type=int, default=128, help="Synthetic ring transducers for quality comparison.")
-    quality_parser.add_argument("--spacing-m", type=float, default=1.0e-3, help="Assumed pixel spacing for converted speed-map cases.")
-    quality_parser.add_argument("--no-convert-speed-mat", action="store_true", help="Only write the manifest; do not create HDF5 cases.")
+    quality_parser.add_argument(
+        "--converted-shape",
+        type=int,
+        default=256,
+        help="Square image size for quality comparison.",
+    )
+    quality_parser.add_argument(
+        "--n-transducers",
+        type=int,
+        default=128,
+        help="Synthetic ring transducers for quality comparison.",
+    )
+    quality_parser.add_argument(
+        "--spacing-m",
+        type=float,
+        default=1.0e-3,
+        help="Assumed pixel spacing for converted speed-map cases.",
+    )
+    quality_parser.add_argument(
+        "--no-convert-speed-mat",
+        action="store_true",
+        help="Only write the manifest; do not create HDF5 cases.",
+    )
 
-    nbp_inspect_parser = data_subparsers.add_parser("inspect-nbpslice2d", help="Inspect an NBPslices2D ZIP archive.")
-    nbp_inspect_parser.add_argument("--zip", required=True, help="NBPslices2D ZIP path.")
-    nbp_inspect_parser.add_argument("--out", default="nbpslice2d_index.json", help="Output index JSON path.")
+    nbp_inspect_parser = data_subparsers.add_parser(
+        "inspect-nbpslice2d", help="Inspect an NBPslices2D ZIP archive."
+    )
+    nbp_inspect_parser.add_argument(
+        "--zip", required=True, help="NBPslices2D ZIP path."
+    )
+    nbp_inspect_parser.add_argument(
+        "--out", default="nbpslice2d_index.json", help="Output index JSON path."
+    )
 
-    nbp_smoke_parser = data_subparsers.add_parser("make-nbp-smoke", help="Create an NBPslices2D smoke benchmark subset.")
+    nbp_smoke_parser = data_subparsers.add_parser(
+        "make-nbp-smoke", help="Create an NBPslices2D smoke benchmark subset."
+    )
     nbp_smoke_parser.add_argument("--zip", required=True, help="NBPslices2D ZIP path.")
-    nbp_smoke_parser.add_argument("--out", required=True, help="Output smoke subset root.")
-    nbp_smoke_parser.add_argument("--cases-per-type", type=int, default=1, help="Cases to convert for each A/B/C/D density label.")
-    nbp_smoke_parser.add_argument("--converted-shape", type=int, default=64, help="Square image size for converted cases.")
-    nbp_smoke_parser.add_argument("--n-transducers", type=int, default=32, help="Synthetic ring transducers for converted cases.")
-    nbp_smoke_parser.add_argument("--reference-sound-speed-mps", type=float, default=1500.0)
-    nbp_smoke_parser.add_argument("--attenuation-frequency-mhz", type=float, default=1.0)
+    nbp_smoke_parser.add_argument(
+        "--out", required=True, help="Output smoke subset root."
+    )
+    nbp_smoke_parser.add_argument(
+        "--cases-per-type",
+        type=int,
+        default=1,
+        help="Cases to convert for each A/B/C/D density label.",
+    )
+    nbp_smoke_parser.add_argument(
+        "--converted-shape",
+        type=int,
+        default=64,
+        help="Square image size for converted cases.",
+    )
+    nbp_smoke_parser.add_argument(
+        "--n-transducers",
+        type=int,
+        default=32,
+        help="Synthetic ring transducers for converted cases.",
+    )
+    nbp_smoke_parser.add_argument(
+        "--reference-sound-speed-mps", type=float, default=1500.0
+    )
+    nbp_smoke_parser.add_argument(
+        "--attenuation-frequency-mhz", type=float, default=1.0
+    )
 
-    nbp_quality_parser = data_subparsers.add_parser("make-nbp-quality", help="Create 256x256 NBPslice2D quality-comparison cases.")
-    nbp_quality_parser.add_argument("--zip", required=True, help="NBPslices2D ZIP path.")
-    nbp_quality_parser.add_argument("--out", required=True, help="Output quality subset root.")
-    nbp_quality_parser.add_argument("--cases-per-type", type=int, default=1, help="Cases to convert for each A/B/C/D density label.")
-    nbp_quality_parser.add_argument("--converted-shape", type=int, default=256, help="Square image size for quality comparison.")
-    nbp_quality_parser.add_argument("--n-transducers", type=int, default=128, help="Synthetic ring transducers for quality comparison.")
-    nbp_quality_parser.add_argument("--reference-sound-speed-mps", type=float, default=1500.0)
-    nbp_quality_parser.add_argument("--attenuation-frequency-mhz", type=float, default=1.0)
+    nbp_quality_parser = data_subparsers.add_parser(
+        "make-nbp-quality", help="Create 256x256 NBPslice2D quality-comparison cases."
+    )
+    nbp_quality_parser.add_argument(
+        "--zip", required=True, help="NBPslices2D ZIP path."
+    )
+    nbp_quality_parser.add_argument(
+        "--out", required=True, help="Output quality subset root."
+    )
+    nbp_quality_parser.add_argument(
+        "--cases-per-type",
+        type=int,
+        default=1,
+        help="Cases to convert for each A/B/C/D density label.",
+    )
+    nbp_quality_parser.add_argument(
+        "--converted-shape",
+        type=int,
+        default=256,
+        help="Square image size for quality comparison.",
+    )
+    nbp_quality_parser.add_argument(
+        "--n-transducers",
+        type=int,
+        default=128,
+        help="Synthetic ring transducers for quality comparison.",
+    )
+    nbp_quality_parser.add_argument(
+        "--reference-sound-speed-mps", type=float, default=1500.0
+    )
+    nbp_quality_parser.add_argument(
+        "--attenuation-frequency-mhz", type=float, default=1.0
+    )
 
-    synthetic_smoke_parser = data_subparsers.add_parser("make-synthetic-smoke", help="Create deterministic local synthetic smoke cases.")
-    synthetic_smoke_parser.add_argument("--out", default="data/synthetic_smoke", help="Output synthetic smoke subset root.")
-    synthetic_smoke_parser.add_argument("--shape", type=int, default=24, help="Square image size.")
+    synthetic_smoke_parser = data_subparsers.add_parser(
+        "make-synthetic-smoke", help="Create deterministic local synthetic smoke cases."
+    )
+    synthetic_smoke_parser.add_argument(
+        "--out",
+        default="data/synthetic_smoke",
+        help="Output synthetic smoke subset root.",
+    )
+    synthetic_smoke_parser.add_argument(
+        "--shape", type=int, default=24, help="Square image size."
+    )
     synthetic_smoke_parser.add_argument("--n-transducers", type=int, default=24)
 
     run_parser = subparsers.add_parser("run", help="Run one algorithm on one case.")
     run_parser.add_argument("algorithm", help="Registered algorithm name.")
     run_parser.add_argument("--case", required=True, help="Input case HDF5 path.")
-    run_parser.add_argument("--config", required=True, help="Algorithm YAML config path.")
+    run_parser.add_argument(
+        "--config", required=True, help="Algorithm YAML config path."
+    )
     run_parser.add_argument("--out", required=True, help="Output run directory.")
 
     eval_parser = subparsers.add_parser("eval", help="Evaluate one run directory.")
     eval_parser.add_argument("--run", required=True, help="Run directory.")
-    eval_parser.add_argument("--protocol", required=True, help="Benchmark protocol YAML path.")
+    eval_parser.add_argument(
+        "--protocol", required=True, help="Benchmark protocol YAML path."
+    )
 
     bench_parser = subparsers.add_parser("bench", help="Run a benchmark suite.")
-    bench_parser.add_argument("--suite", required=True, help="Benchmark suite YAML path.")
+    bench_parser.add_argument(
+        "--suite", required=True, help="Benchmark suite YAML path."
+    )
 
     return parser
 
@@ -214,7 +348,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _benchmark_passed(result: dict) -> bool:
-    return bool(result["records"]) and all(record.get("pass") for record in result["records"]) and bool(result.get("run_checks", {}).get("passed"))
+    return (
+        bool(result["records"])
+        and all(record.get("pass") for record in result["records"])
+        and bool(result.get("run_checks", {}).get("passed"))
+    )
 
 
 if __name__ == "__main__":

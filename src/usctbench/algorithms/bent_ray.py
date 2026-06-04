@@ -25,7 +25,11 @@ from usctbench.algorithms.ray import (
 )
 from usctbench.core.registry import register_algorithm
 from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, USCTCase
-from usctbench.metrics import compute_baseline_improvement_metrics, compute_image_metrics
+from usctbench.metrics import (
+    compute_baseline_improvement_metrics,
+    compute_image_metrics,
+)
+
 
 def run_iterative_travel_time_solver(
     *,
@@ -54,11 +58,19 @@ def run_iterative_travel_time_solver(
     weights = configured_ray_weights(case, projector, mask, config)
     c0 = reference_sound_speed(case, config)
     bounds = speed_bounds(config)
-    outer_iterations = int(config.parameters.get("outer_iterations", default_outer_iterations))
-    inner_iterations = int(config.parameters.get("inner_iterations", default_inner_iterations))
+    outer_iterations = int(
+        config.parameters.get("outer_iterations", default_outer_iterations)
+    )
+    inner_iterations = int(
+        config.parameters.get("inner_iterations", default_inner_iterations)
+    )
     step_length = float(config.parameters.get("step_length", 1.0))
-    regularization = str(config.parameters.get("regularization", default_regularization))
-    lambda_value = float(config.parameters.get("regularization_lambda", default_regularization_lambda))
+    regularization = str(
+        config.parameters.get("regularization", default_regularization)
+    )
+    lambda_value = float(
+        config.parameters.get("regularization_lambda", default_regularization_lambda)
+    )
     damping = float(config.parameters.get("damping", lambda_value**2))
     smooth_sigma = float(config.parameters.get("smooth_sigma", default_smooth_sigma))
     roi_update_only = bool(config.parameters.get("roi_update_only", False))
@@ -69,7 +81,11 @@ def run_iterative_travel_time_solver(
     initial_norm = masked_norm(target, mask, weights)
     residual_curve = [initial_norm]
     update_norms: list[float] = []
-    roi_mask = np.asarray(case.grid.roi_mask, dtype=bool) if case.grid.roi_mask is not None and (roi_update_only or roi_laplacian) else None
+    roi_mask = (
+        np.asarray(case.grid.roi_mask, dtype=bool)
+        if case.grid.roi_mask is not None and (roi_update_only or roi_laplacian)
+        else None
+    )
 
     for _ in range(max(1, outer_iterations)):
         residual = target - projector.forward(delta_slowness)
@@ -106,7 +122,11 @@ def run_iterative_travel_time_solver(
             update,
             step_length=step_length,
             smooth_sigma=smooth_sigma,
-            roi_mask=np.asarray(case.grid.roi_mask, dtype=bool) if roi_update_only and case.grid.roi_mask is not None else None,
+            roi_mask=(
+                np.asarray(case.grid.roi_mask, dtype=bool)
+                if roi_update_only and case.grid.roi_mask is not None
+                else None
+            ),
             enabled=line_search,
         )
         delta_slowness = candidate
@@ -142,16 +162,26 @@ def run_iterative_travel_time_solver(
         metrics.update(extra_metrics)
     if case.ground_truth.sound_speed_mps is not None:
         truth = np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
-        metrics.update(compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask))
-        metrics.update(compute_baseline_improvement_metrics(sound_speed, truth, c0, mask=case.grid.roi_mask))
-        coverage = projector.adjoint(np.asarray(mask, dtype=float) * np.clip(weights, 0.0, 1.0))
+        metrics.update(
+            compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask)
+        )
+        metrics.update(
+            compute_baseline_improvement_metrics(
+                sound_speed, truth, c0, mask=case.grid.roi_mask
+            )
+        )
+        coverage = projector.adjoint(
+            np.asarray(mask, dtype=float) * np.clip(weights, 0.0, 1.0)
+        )
         metrics.update(
             image_diagnostic_metrics(
                 sound_speed,
                 truth,
                 roi_mask=case.grid.roi_mask,
                 coverage=coverage,
-                boundary_band_pixels=int(config.parameters.get("boundary_band_pixels", 4)),
+                boundary_band_pixels=int(
+                    config.parameters.get("boundary_band_pixels", 4)
+                ),
             )
         )
 
@@ -176,7 +206,11 @@ def _line_search_update(
     roi_mask: np.ndarray | None,
     enabled: bool,
 ) -> tuple[np.ndarray, float, float]:
-    current_norm = float(np.linalg.norm(apply_mask(target - projector.forward(current), mask, weights)[mask]))
+    current_norm = float(
+        np.linalg.norm(
+            apply_mask(target - projector.forward(current), mask, weights)[mask]
+        )
+    )
     steps = [float(step_length)]
     if enabled:
         steps.extend(float(step_length) * (0.5**idx) for idx in range(1, 8))
@@ -189,7 +223,11 @@ def _line_search_update(
             candidate = _gaussian_smooth(candidate, smooth_sigma)
         if roi_mask is not None:
             candidate = np.where(roi_mask, candidate, 0.0)
-        norm = float(np.linalg.norm(apply_mask(target - projector.forward(candidate), mask, weights)[mask]))
+        norm = float(
+            np.linalg.norm(
+                apply_mask(target - projector.forward(candidate), mask, weights)[mask]
+            )
+        )
         if (not enabled) or norm <= best_norm:
             return candidate, norm, step
         if norm < best_norm:
@@ -197,6 +235,7 @@ def _line_search_update(
             best_norm = norm
             best_step = step
     return best, best_norm, best_step
+
 
 class BentRayGNAdapter:
     """Regularized bent-ray-style travel-time baseline."""
@@ -217,6 +256,8 @@ class BentRayGNAdapter:
                 default_smooth_sigma=0.6,
                 extra_metrics={
                     "surrogate_travel_time_backend": True,
+                    "full_external_eikonal_solver": False,
+                    "v0_1_backend": "regularized_travel_time_baseline",
                     "external_reference": "refraction-corrected USCT literature",
                 },
             )
@@ -234,4 +275,8 @@ def register_bent_ray_algorithm(*, replace: bool = False) -> None:
     )
 
 
-__all__ = ["BentRayGNAdapter", "register_bent_ray_algorithm", "run_iterative_travel_time_solver"]
+__all__ = [
+    "BentRayGNAdapter",
+    "register_bent_ray_algorithm",
+    "run_iterative_travel_time_solver",
+]

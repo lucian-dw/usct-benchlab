@@ -6,7 +6,10 @@ import math
 
 import numpy as np
 
-def _masked_values(prediction: np.ndarray, target: np.ndarray, mask: np.ndarray | None) -> tuple[np.ndarray, np.ndarray]:
+
+def _masked_values(
+    prediction: np.ndarray, target: np.ndarray, mask: np.ndarray | None
+) -> tuple[np.ndarray, np.ndarray]:
     pred = np.asarray(prediction, dtype=float)
     truth = np.asarray(target, dtype=float)
     if pred.shape != truth.shape:
@@ -35,7 +38,9 @@ def compute_image_metrics(
     mae = float(np.mean(np.abs(error)))
     target_range = float(np.max(truth) - np.min(truth))
     nrmse = rmse / target_range if target_range > 0 else 0.0 if rmse == 0 else math.inf
-    data_range = target_range if target_range > 0 else max(float(np.max(np.abs(truth))), 1.0)
+    data_range = (
+        target_range if target_range > 0 else max(float(np.max(np.abs(truth))), 1.0)
+    )
     psnr = math.inf if mse == 0 else 20.0 * math.log10(data_range / math.sqrt(mse))
     return {
         f"{prefix}rmse": rmse,
@@ -78,7 +83,9 @@ def compute_baseline_improvement_metrics(
     }
 
 
-def _global_ssim(prediction: np.ndarray, target: np.ndarray, *, data_range: float) -> float:
+def _global_ssim(
+    prediction: np.ndarray, target: np.ndarray, *, data_range: float
+) -> float:
     """Compute a deterministic global SSIM approximation without SciPy."""
 
     pred = prediction.astype(float)
@@ -121,7 +128,9 @@ def residual_metrics(
     return {
         f"{prefix}residual_norm": norm,
         f"{prefix}observed_norm": observed_norm,
-        f"{prefix}relative_residual": norm / observed_norm if observed_norm > 0 else math.inf if norm > 0 else 0.0,
+        f"{prefix}relative_residual": (
+            norm / observed_norm if observed_norm > 0 else math.inf if norm > 0 else 0.0
+        ),
         f"{prefix}rmse": float(np.sqrt(np.mean(residual**2))),
         f"{prefix}mae": float(np.mean(np.abs(residual))),
         f"{prefix}num_samples": float(residual.size),

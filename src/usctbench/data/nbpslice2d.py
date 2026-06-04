@@ -12,7 +12,9 @@ from typing import Any
 from .conversion import NBP_DENSITY_CLASSES, convert_nbp_slice2d_zip
 
 
-def inspect_nbp_slice2d_zip(zip_path: str | Path, out: str | Path | None = None) -> dict[str, Any]:
+def inspect_nbp_slice2d_zip(
+    zip_path: str | Path, out: str | Path | None = None
+) -> dict[str, Any]:
     """Inspect a local NBPslices2D ZIP archive without extracting data."""
 
     source = Path(zip_path).expanduser().resolve()
@@ -33,7 +35,8 @@ def inspect_nbp_slice2d_zip(zip_path: str | Path, out: str | Path | None = None)
             "num_cases": len(members),
             "density_label_counts": dict(sorted(label_counts.items())),
             "density_class_counts": {
-                NBP_DENSITY_CLASSES.get(label, "unknown"): count for label, count in sorted(label_counts.items())
+                NBP_DENSITY_CLASSES.get(label, "unknown"): count
+                for label, count in sorted(label_counts.items())
             },
         },
         "cases": [
@@ -41,7 +44,9 @@ def inspect_nbp_slice2d_zip(zip_path: str | Path, out: str | Path | None = None)
                 "member": name,
                 "case_id": Path(name).stem,
                 "density_label": Path(name).stem[:1].upper(),
-                "density_class": NBP_DENSITY_CLASSES.get(Path(name).stem[:1].upper(), "unknown"),
+                "density_class": NBP_DENSITY_CLASSES.get(
+                    Path(name).stem[:1].upper(), "unknown"
+                ),
             }
             for name in sorted(members)
         ],
@@ -49,7 +54,9 @@ def inspect_nbp_slice2d_zip(zip_path: str | Path, out: str | Path | None = None)
     if out is not None:
         out_path = Path(out).expanduser()
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
+        out_path.write_text(
+            json.dumps(index, indent=2, sort_keys=True), encoding="utf-8"
+        )
     return index
 
 
@@ -100,7 +107,9 @@ def make_nbp_slice2d_smoke_subset(
         ],
     }
     manifest_path = out_path / "nbpslice2d_smoke_manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
+    )
     return manifest
 
 

@@ -11,15 +11,38 @@ from typing import Any
 
 import numpy as np
 
-from usctbench.metrics import compute_baseline_improvement_metrics, compute_image_metrics
-from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
+from usctbench.metrics import (
+    compute_baseline_improvement_metrics,
+    compute_image_metrics,
+)
+from usctbench.core.schema import (
+    AlgorithmConfig,
+    ReconstructionResult,
+    ResultStatus,
+    USCTCase,
+)
 
-
-_INVERT_EXISTING_DATASET_MODES = {"invert_existing_dataset", "dataset", "skip_simulation"}
+_INVERT_EXISTING_DATASET_MODES = {
+    "invert_existing_dataset",
+    "dataset",
+    "skip_simulation",
+}
 _FULL_PIPELINE_MODES = {"full_pipeline", "full_pipeline_from_speed_map", "speed_map"}
-_TRAVELTIME_WARM_START_BUILDERS = {"traveltime", "rf_traveltime", "travel_time", "rf_travel_time"}
-_BULK_SUPPORT_WARM_START_BUILDERS = {"bulk_support", "bulk-support", "bulk", "support_bulk"}
-_SUPPORTED_WARM_START_BUILDERS = _TRAVELTIME_WARM_START_BUILDERS | _BULK_SUPPORT_WARM_START_BUILDERS
+_TRAVELTIME_WARM_START_BUILDERS = {
+    "traveltime",
+    "rf_traveltime",
+    "travel_time",
+    "rf_travel_time",
+}
+_BULK_SUPPORT_WARM_START_BUILDERS = {
+    "bulk_support",
+    "bulk-support",
+    "bulk",
+    "support_bulk",
+}
+_SUPPORTED_WARM_START_BUILDERS = (
+    _TRAVELTIME_WARM_START_BUILDERS | _BULK_SUPPORT_WARM_START_BUILDERS
+)
 _CLI_PARAMS = {
     "mat_path": "--mat-path",
     "mat_key": "--mat-key",
@@ -136,9 +159,18 @@ class KWaveFWIAdapterAlgorithm:
                 failure_reason=f"failed to read k-Wave FWI result: {type(exc).__name__}: {exc}",
             )
 
-        selected_iteration, selection_metrics = _configured_iteration(config, external, case)
-        sound_speed, attenuation = _selected_result_images(external, selected_iteration, case.grid.shape)
-        c0 = float(config.parameters.get("baseline_sound_speed_mps", case.metadata.get("reference_sound_speed_mps", 1500.0)))
+        selected_iteration, selection_metrics = _configured_iteration(
+            config, external, case
+        )
+        sound_speed, attenuation = _selected_result_images(
+            external, selected_iteration, case.grid.shape
+        )
+        c0 = float(
+            config.parameters.get(
+                "baseline_sound_speed_mps",
+                case.metadata.get("reference_sound_speed_mps", 1500.0),
+            )
+        )
         metrics = _base_result_metrics(
             config,
             external,
@@ -147,11 +179,16 @@ class KWaveFWIAdapterAlgorithm:
         )
         metrics.update(selection_metrics)
         if "best_iteration" not in metrics or "final_iteration_rmse" not in metrics:
-            _best_iteration, diagnostic_metrics = _best_iteration_by_rmse(external, case)
+            _best_iteration, diagnostic_metrics = _best_iteration_by_rmse(
+                external, case
+            )
             metrics.update(diagnostic_metrics)
         _add_case_ground_truth_metrics(metrics, sound_speed, external, case, c0)
         _add_kwave_ground_truth_metrics(metrics, sound_speed, external, case, c0)
-        if attenuation is not None and case.ground_truth.attenuation_np_per_m is not None:
+        if (
+            attenuation is not None
+            and case.ground_truth.attenuation_np_per_m is not None
+        ):
             metrics.update(
                 compute_image_metrics(
                     attenuation,
@@ -170,11 +207,25 @@ class KWaveFWIAdapterAlgorithm:
             artifacts=artifacts,
         )
 
-def _selected_result_images(external: dict[str, Any], selected_iteration: int | None, shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray | None]:
-    selected_sound_speed = _select_iteration_image(external, "sound_speed_iter_mps", "sound_speed_mps", selected_iteration)
-    selected_attenuation = _select_iteration_image(external, "attenuation_iter_np_per_m", "attenuation_np_per_m", selected_iteration)
+
+def _selected_result_images(
+    external: dict[str, Any], selected_iteration: int | None, shape: tuple[int, int]
+) -> tuple[np.ndarray, np.ndarray | None]:
+    selected_sound_speed = _select_iteration_image(
+        external, "sound_speed_iter_mps", "sound_speed_mps", selected_iteration
+    )
+    selected_attenuation = _select_iteration_image(
+        external,
+        "attenuation_iter_np_per_m",
+        "attenuation_np_per_m",
+        selected_iteration,
+    )
     sound_speed = _resize_to_shape(selected_sound_speed, shape)
-    attenuation = _resize_to_shape(external["attenuation_np_per_m"], shape) if external.get("attenuation_np_per_m") is not None else None
+    attenuation = (
+        _resize_to_shape(external["attenuation_np_per_m"], shape)
+        if external.get("attenuation_np_per_m") is not None
+        else None
+    )
     if selected_attenuation is not None:
         attenuation = _resize_to_shape(selected_attenuation, shape)
     return sound_speed, attenuation
@@ -195,7 +246,8 @@ def _base_result_metrics(
     return {
         "external_result_loaded": True,
         "external_result_path": str(result_path),
-        "external_dataset_path": external.get("dataset_path") or (str(configured_dataset_path) if configured_dataset_path else ""),
+        "external_dataset_path": external.get("dataset_path")
+        or (str(configured_dataset_path) if configured_dataset_path else ""),
         "external_execution_mode": _external_execution_mode(config),
         "external_log_path": str(log_path) if log_path else "",
         "iterations": int(external.get("iterations", 0)),
@@ -208,9 +260,15 @@ def _base_result_metrics(
         "kwave_native_ssim": ssim_value,
         "matlab_psnr_value": psnr_value,
         "matlab_ssim_value": ssim_value,
-        "warm_start_builder": _expand_text(config.parameters.get("warm_start_builder", "")),
+        "warm_start_builder": _expand_text(
+            config.parameters.get("warm_start_builder", "")
+        ),
         "warm_start_module": _warm_start_module_for_builder(config),
-        "warm_start_path": str(_configured_path(config, "warm_start_path") or _configured_path(config, "warm_start_result") or ""),
+        "warm_start_path": str(
+            _configured_path(config, "warm_start_path")
+            or _configured_path(config, "warm_start_result")
+            or ""
+        ),
     }
 
 
@@ -225,10 +283,19 @@ def _add_case_ground_truth_metrics(
         return
     truth = np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
     metrics.update(compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask))
-    metrics.update(compute_baseline_improvement_metrics(sound_speed, truth, baseline_sound_speed_mps, mask=case.grid.roi_mask))
+    metrics.update(
+        compute_baseline_improvement_metrics(
+            sound_speed, truth, baseline_sound_speed_mps, mask=case.grid.roi_mask
+        )
+    )
     if external.get("initial_sound_speed_mps") is not None:
-        init = _resize_to_shape(np.asarray(external["initial_sound_speed_mps"], dtype=float), case.grid.shape)
-        metrics.update(compute_image_metrics(init, truth, mask=case.grid.roi_mask, prefix="init_"))
+        init = _resize_to_shape(
+            np.asarray(external["initial_sound_speed_mps"], dtype=float),
+            case.grid.shape,
+        )
+        metrics.update(
+            compute_image_metrics(init, truth, mask=case.grid.roi_mask, prefix="init_")
+        )
         metrics.update(
             compute_baseline_improvement_metrics(
                 init,
@@ -249,8 +316,14 @@ def _add_kwave_ground_truth_metrics(
 ) -> None:
     if external.get("ground_truth_sound_speed_mps") is None:
         return
-    kwave_truth = _resize_to_shape(external["ground_truth_sound_speed_mps"], case.grid.shape)
-    metrics.update(compute_image_metrics(sound_speed, kwave_truth, mask=case.grid.roi_mask, prefix="kwave_gt_"))
+    kwave_truth = _resize_to_shape(
+        external["ground_truth_sound_speed_mps"], case.grid.shape
+    )
+    metrics.update(
+        compute_image_metrics(
+            sound_speed, kwave_truth, mask=case.grid.roi_mask, prefix="kwave_gt_"
+        )
+    )
     metrics.update(
         compute_baseline_improvement_metrics(
             sound_speed,
@@ -261,8 +334,18 @@ def _add_kwave_ground_truth_metrics(
         )
     )
     if external.get("initial_sound_speed_mps") is not None:
-        kwave_init = _resize_to_shape(np.asarray(external["initial_sound_speed_mps"], dtype=float), case.grid.shape)
-        metrics.update(compute_image_metrics(kwave_init, kwave_truth, mask=case.grid.roi_mask, prefix="kwave_gt_init_"))
+        kwave_init = _resize_to_shape(
+            np.asarray(external["initial_sound_speed_mps"], dtype=float),
+            case.grid.shape,
+        )
+        metrics.update(
+            compute_image_metrics(
+                kwave_init,
+                kwave_truth,
+                mask=case.grid.roi_mask,
+                prefix="kwave_gt_init_",
+            )
+        )
         metrics.update(
             compute_baseline_improvement_metrics(
                 kwave_init,
@@ -284,22 +367,29 @@ def _add_kwave_iteration_improvement_metrics(metrics: dict[str, Any]) -> None:
     if _is_finite_number(final_rmse):
         final = float(final_rmse)
         metrics["kwave_gt_final_absolute_rmse_improvement"] = initial - final
-        metrics["kwave_gt_final_relative_rmse_improvement"] = (initial - final) / initial if initial > 0.0 else 0.0
+        metrics["kwave_gt_final_relative_rmse_improvement"] = (
+            (initial - final) / initial if initial > 0.0 else 0.0
+        )
         metrics["kwave_gt_final_improved"] = final < initial
     selected_rmse = metrics.get("kwave_gt_rmse")
     if _is_finite_number(selected_rmse):
         selected = float(selected_rmse)
         metrics["kwave_gt_selected_absolute_rmse_improvement"] = initial - selected
-        metrics["kwave_gt_selected_relative_rmse_improvement"] = (initial - selected) / initial if initial > 0.0 else 0.0
+        metrics["kwave_gt_selected_relative_rmse_improvement"] = (
+            (initial - selected) / initial if initial > 0.0 else 0.0
+        )
         metrics["kwave_gt_selected_improved"] = selected < initial
 
 
-def _external_artifacts(config: AlgorithmConfig, external: dict[str, Any], result_path: Path) -> dict[str, str]:
+def _external_artifacts(
+    config: AlgorithmConfig, external: dict[str, Any], result_path: Path
+) -> dict[str, str]:
     log_path = _configured_path(config, "external_log_path")
     configured_dataset_path = _configured_path(config, "dataset_path")
     return {
         "external_result_path": str(result_path),
-        "external_dataset_path": external.get("dataset_path") or (str(configured_dataset_path) if configured_dataset_path else ""),
+        "external_dataset_path": external.get("dataset_path")
+        or (str(configured_dataset_path) if configured_dataset_path else ""),
         "external_log_path": str(log_path) if log_path else "",
     }
 
@@ -316,24 +406,44 @@ def read_kwave_fwi_result(path: str | Path) -> dict[str, Any]:
         losses = _read_vector(handle, "LOSS_ITER")
         return {
             "sound_speed_mps": np.asarray(sound_speed, dtype=float),
-            "attenuation_np_per_m": np.asarray(attenuation, dtype=float) if attenuation is not None else None,
-            "ground_truth_sound_speed_mps": np.asarray(ground_truth, dtype=float) if ground_truth is not None else None,
-            "sound_speed_iter_mps": np.asarray(sound_speed_iter, dtype=float) if sound_speed_iter is not None else None,
-            "attenuation_iter_np_per_m": np.asarray(attenuation_iter, dtype=float) if attenuation_iter is not None else None,
+            "attenuation_np_per_m": (
+                np.asarray(attenuation, dtype=float)
+                if attenuation is not None
+                else None
+            ),
+            "ground_truth_sound_speed_mps": (
+                np.asarray(ground_truth, dtype=float)
+                if ground_truth is not None
+                else None
+            ),
+            "sound_speed_iter_mps": (
+                np.asarray(sound_speed_iter, dtype=float)
+                if sound_speed_iter is not None
+                else None
+            ),
+            "attenuation_iter_np_per_m": (
+                np.asarray(attenuation_iter, dtype=float)
+                if attenuation_iter is not None
+                else None
+            ),
             "initial_sound_speed_mps": _read_dataset(handle, "VEL_INIT"),
             "initial_attenuation_np_per_m": _read_dataset(handle, "ATTEN_INIT_USED"),
             "losses": losses.tolist(),
             "iterations": int(losses.size),
             "initial_loss": float(losses[0]) if losses.size else None,
             "final_loss": float(losses[-1]) if losses.size else None,
-            "loss_decreased": bool(losses[-1] < losses[0]) if losses.size >= 2 else None,
+            "loss_decreased": (
+                bool(losses[-1] < losses[0]) if losses.size >= 2 else None
+            ),
             "psnr_value": _read_scalar(handle, "psnr_value"),
             "ssim_value": _read_scalar(handle, "ssim_value"),
             "dataset_path": _read_matlab_string(handle, "datasetPath"),
         }
 
 
-def _run_external_pipeline(case: USCTCase, config: AlgorithmConfig, result_path: Path) -> ReconstructionResult:
+def _run_external_pipeline(
+    case: USCTCase, config: AlgorithmConfig, result_path: Path
+) -> ReconstructionResult:
     build = _build_external_pipeline_command(case, config, result_path)
     if build["error"]:
         return ReconstructionResult(
@@ -344,11 +454,17 @@ def _run_external_pipeline(case: USCTCase, config: AlgorithmConfig, result_path:
         )
 
     usct_kwave_root = Path(
-        _expand_text(config.parameters.get("usct_kwave_root", os.environ.get("USCT_KWAVE_ROOT", "$HOME/USCT_kwave")))
+        _expand_text(
+            config.parameters.get(
+                "usct_kwave_root", os.environ.get("USCT_KWAVE_ROOT", "$HOME/USCT_kwave")
+            )
+        )
     ).expanduser()
     commands = [list(command) for command in build["commands"]]
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(usct_kwave_root) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    env["PYTHONPATH"] = str(usct_kwave_root) + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+    )
     log_path = _configured_path(config, "external_log_path")
     timeout_s = float(config.parameters.get("timeout_s", 3600.0))
     result_path.parent.mkdir(parents=True, exist_ok=True)
@@ -401,15 +517,23 @@ def _run_external_pipeline(case: USCTCase, config: AlgorithmConfig, result_path:
                 status=ResultStatus.FAILED,
                 failure_reason=f"external k-Wave FWI step {step_index} returned {proc.returncode}{detail}",
             )
-    return ReconstructionResult(algorithm=KWaveFWIAdapterAlgorithm.name, case_id=case.case_id)
+    return ReconstructionResult(
+        algorithm=KWaveFWIAdapterAlgorithm.name, case_id=case.case_id
+    )
 
 
-def _build_external_pipeline_command(case: USCTCase, config: AlgorithmConfig, result_path: Path) -> dict[str, Any]:
+def _build_external_pipeline_command(
+    case: USCTCase, config: AlgorithmConfig, result_path: Path
+) -> dict[str, Any]:
     mode = _external_execution_mode(config)
     dataset_path = _configured_path(config, "dataset_path")
     if mode in _INVERT_EXISTING_DATASET_MODES and dataset_path is None:
         dataset_from_case = case.metadata.get("source_path")
-        dataset_path = Path(_expand_text(dataset_from_case)).expanduser() if dataset_from_case else None
+        dataset_path = (
+            Path(_expand_text(dataset_from_case)).expanduser()
+            if dataset_from_case
+            else None
+        )
     if mode in _INVERT_EXISTING_DATASET_MODES and dataset_path is None:
         return {
             "commands": [],
@@ -426,7 +550,11 @@ def _build_external_pipeline_command(case: USCTCase, config: AlgorithmConfig, re
         }
 
     python_bin = _expand_text(config.parameters.get("python_bin", sys.executable))
-    module = _expand_text(config.parameters.get("pipeline_module", "openbreastus_diffusion.kwave_dps.run_full_pipeline"))
+    module = _expand_text(
+        config.parameters.get(
+            "pipeline_module", "openbreastus_diffusion.kwave_dps.run_full_pipeline"
+        )
+    )
     command = [python_bin, "-m", module]
     if mode in _INVERT_EXISTING_DATASET_MODES:
         command.extend(["--skip-siminfo", "--skip-rf", "--skip-assemble"])
@@ -451,9 +579,22 @@ def _build_external_pipeline_command(case: USCTCase, config: AlgorithmConfig, re
         if _as_bool(config.parameters.get(key, False)):
             command.append(flag)
 
-    command.extend(_expand_text(value) for value in config.parameters.get("pipeline_args", []))
-    commands = _with_optional_warm_start_steps(command, mode=mode, dataset_path=dataset_path, result_path=result_path, config=config)
-    return {"commands": commands, "dataset_path": dataset_path, "mode": mode, "error": None}
+    command.extend(
+        _expand_text(value) for value in config.parameters.get("pipeline_args", [])
+    )
+    commands = _with_optional_warm_start_steps(
+        command,
+        mode=mode,
+        dataset_path=dataset_path,
+        result_path=result_path,
+        config=config,
+    )
+    return {
+        "commands": commands,
+        "dataset_path": dataset_path,
+        "mode": mode,
+        "error": None,
+    }
 
 
 def _with_optional_warm_start_steps(
@@ -464,16 +605,28 @@ def _with_optional_warm_start_steps(
     result_path: Path,
     config: AlgorithmConfig,
 ) -> list[list[str]]:
-    builder = _expand_text(config.parameters.get("warm_start_builder", "")).strip().lower()
+    builder = (
+        _expand_text(config.parameters.get("warm_start_builder", "")).strip().lower()
+    )
     if builder not in _SUPPORTED_WARM_START_BUILDERS:
         return [inversion_command]
     if dataset_path is None:
         raise ValueError("warm_start_builder requires parameters.dataset_path")
 
-    suffix = "_bulk_support_init.mat" if builder in _BULK_SUPPORT_WARM_START_BUILDERS else "_traveltime_init.mat"
-    warm_start_path = _configured_path(config, "warm_start_path") or result_path.with_name(result_path.stem + suffix)
-    warm_start_summary_path = _configured_path(config, "warm_start_summary_path") or warm_start_path.with_suffix(".json")
-    diagnostic_prefix = _configured_path(config, "warm_start_diagnostic_prefix") or warm_start_path.with_suffix("")
+    suffix = (
+        "_bulk_support_init.mat"
+        if builder in _BULK_SUPPORT_WARM_START_BUILDERS
+        else "_traveltime_init.mat"
+    )
+    warm_start_path = _configured_path(
+        config, "warm_start_path"
+    ) or result_path.with_name(result_path.stem + suffix)
+    warm_start_summary_path = _configured_path(
+        config, "warm_start_summary_path"
+    ) or warm_start_path.with_suffix(".json")
+    diagnostic_prefix = _configured_path(
+        config, "warm_start_diagnostic_prefix"
+    ) or warm_start_path.with_suffix("")
     python_bin = _expand_text(config.parameters.get("python_bin", sys.executable))
     warm_module = _warm_start_module_for_builder(config)
     warm_command = [
@@ -489,13 +642,17 @@ def _with_optional_warm_start_steps(
         "--diagnostic-prefix",
         str(diagnostic_prefix),
     ]
-    warm_command.extend(_expand_text(value) for value in config.parameters.get("warm_start_args", []))
+    warm_command.extend(
+        _expand_text(value) for value in config.parameters.get("warm_start_args", [])
+    )
 
     final_inversion_command = list(inversion_command)
     if mode in _FULL_PIPELINE_MODES:
         generation_command = list(inversion_command)
         generation_command.append("--skip-inversion")
-        final_inversion_command.extend(["--skip-siminfo", "--skip-rf", "--skip-assemble"])
+        final_inversion_command.extend(
+            ["--skip-siminfo", "--skip-rf", "--skip-assemble"]
+        )
     else:
         generation_command = None
     final_inversion_command.extend(["--warm-start-result", str(warm_start_path)])
@@ -512,7 +669,9 @@ def _warm_start_module_for_builder(config: AlgorithmConfig) -> str:
     configured = config.parameters.get("warm_start_module")
     if configured:
         return _expand_text(configured)
-    builder = _expand_text(config.parameters.get("warm_start_builder", "")).strip().lower()
+    builder = (
+        _expand_text(config.parameters.get("warm_start_builder", "")).strip().lower()
+    )
     if builder in _BULK_SUPPORT_WARM_START_BUILDERS:
         return "openbreastus_diffusion.kwave_dps.make_bulk_support_init"
     return "openbreastus_diffusion.kwave_dps.make_traveltime_init"
@@ -525,7 +684,9 @@ def _configured_path(config: AlgorithmConfig, key: str) -> Path | None:
     return Path(_expand_text(value)).expanduser()
 
 
-def _configured_iteration(config: AlgorithmConfig, external: dict[str, Any], case: USCTCase) -> tuple[int | None, dict[str, Any]]:
+def _configured_iteration(
+    config: AlgorithmConfig, external: dict[str, Any], case: USCTCase
+) -> tuple[int | None, dict[str, Any]]:
     value = config.parameters.get("reconstruction_iteration")
     if value in (None, "", "final", "last"):
         return None, {"selection_mode": "final"}
@@ -549,7 +710,9 @@ def _configured_iteration(config: AlgorithmConfig, external: dict[str, Any], cas
     return iteration, {"selection_mode": "configured_iteration"}
 
 
-def _best_iteration_by_rmse(external: dict[str, Any], case: USCTCase) -> tuple[int | None, dict[str, Any]]:
+def _best_iteration_by_rmse(
+    external: dict[str, Any], case: USCTCase
+) -> tuple[int | None, dict[str, Any]]:
     stack = external.get("sound_speed_iter_mps")
     if stack is None:
         return None, {"best_iteration_reason": "missing_sound_speed_iter"}
@@ -568,7 +731,11 @@ def _best_iteration_by_rmse(external: dict[str, Any], case: USCTCase) -> tuple[i
     finite = np.isfinite(target)
     if not np.any(finite):
         return None, {"best_iteration_reason": "nonfinite_ground_truth"}
-    mask = np.asarray(case.grid.roi_mask, dtype=bool) if case.grid.roi_mask is not None else None
+    mask = (
+        np.asarray(case.grid.roi_mask, dtype=bool)
+        if case.grid.roi_mask is not None
+        else None
+    )
 
     rmses: list[float] = []
     ssims: list[float] = []
@@ -590,7 +757,9 @@ def _best_iteration_by_rmse(external: dict[str, Any], case: USCTCase) -> tuple[i
     }
 
 
-def _select_iteration_image(external: dict[str, Any], iter_key: str, final_key: str, iteration: int | None) -> np.ndarray | None:
+def _select_iteration_image(
+    external: dict[str, Any], iter_key: str, final_key: str, iteration: int | None
+) -> np.ndarray | None:
     if iteration is None:
         value = external.get(final_key)
         return np.asarray(value, dtype=float) if value is not None else None
@@ -626,7 +795,11 @@ def _loss_at_iteration(losses: Any, iteration: int | None) -> float | None:
 
 
 def _external_execution_mode(config: AlgorithmConfig) -> str:
-    return _expand_text(config.parameters.get("execution_mode", "invert_existing_dataset")).strip().lower()
+    return (
+        _expand_text(config.parameters.get("execution_mode", "invert_existing_dataset"))
+        .strip()
+        .lower()
+    )
 
 
 def _expand_text(value: Any) -> str:
@@ -715,5 +888,7 @@ def _h5py():
     try:
         import h5py
     except ModuleNotFoundError as exc:
-        raise RuntimeError("h5py is required to read MATLAB v7.3 FWI result files") from exc
+        raise RuntimeError(
+            "h5py is required to read MATLAB v7.3 FWI result files"
+        ) from exc
     return h5py

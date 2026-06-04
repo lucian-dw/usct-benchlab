@@ -17,8 +17,10 @@ from usctbench.core.schema import (
     ResultStatus,
     USCTCase,
 )
-from usctbench.metrics import compute_baseline_improvement_metrics, compute_image_metrics
-
+from usctbench.metrics import (
+    compute_baseline_improvement_metrics,
+    compute_image_metrics,
+)
 
 
 @dataclass(frozen=True)
@@ -39,7 +41,9 @@ class StraightRayProjector:
         return cls.from_grid_geometry(case.grid, case.geometry)
 
     @classmethod
-    def from_grid_geometry(cls, grid: GridSpec, geometry: GeometrySpec) -> "StraightRayProjector":
+    def from_grid_geometry(
+        cls, grid: GridSpec, geometry: GeometrySpec
+    ) -> "StraightRayProjector":
         indices: list[np.ndarray] = []
         lengths: list[np.ndarray] = []
         for tx in geometry.tx_pos_m:
@@ -75,7 +79,9 @@ class StraightRayProjector:
         if flat.size != self.n_pixels:
             raise ValueError(f"image has {flat.size} pixels, expected {self.n_pixels}")
         out = np.zeros(self.n_rays, dtype=float)
-        for ray_id, (indices, lengths) in enumerate(zip(self.indices_by_ray, self.lengths_by_ray_m, strict=True)):
+        for ray_id, (indices, lengths) in enumerate(
+            zip(self.indices_by_ray, self.lengths_by_ray_m, strict=True)
+        ):
             if indices.size:
                 out[ray_id] = float(np.dot(lengths, flat[indices]))
         return out
@@ -85,9 +91,13 @@ class StraightRayProjector:
 
         values = np.asarray(ray_values, dtype=float).reshape(-1)
         if values.size != self.n_rays:
-            raise ValueError(f"ray_values has {values.size} entries, expected {self.n_rays}")
+            raise ValueError(
+                f"ray_values has {values.size} entries, expected {self.n_rays}"
+            )
         flat = np.zeros(self.n_pixels, dtype=float)
-        for value, indices, lengths in zip(values, self.indices_by_ray, self.lengths_by_ray_m, strict=True):
+        for value, indices, lengths in zip(
+            values, self.indices_by_ray, self.lengths_by_ray_m, strict=True
+        ):
             if indices.size:
                 np.add.at(flat, indices, value * lengths)
         return flat.reshape(self.grid.shape)
@@ -95,19 +105,25 @@ class StraightRayProjector:
     def row_norms(self, power: int = 2) -> np.ndarray:
         """Return per-ray sums of path lengths raised to `power`."""
 
-        return np.array([float(np.sum(lengths**power)) for lengths in self.lengths_by_ray_m])
+        return np.array(
+            [float(np.sum(lengths**power)) for lengths in self.lengths_by_ray_m]
+        )
 
     def col_norms(self, power: int = 2) -> np.ndarray:
         """Return per-pixel sums of path lengths raised to `power`."""
 
         flat = np.zeros(self.n_pixels, dtype=float)
-        for indices, lengths in zip(self.indices_by_ray, self.lengths_by_ray_m, strict=True):
+        for indices, lengths in zip(
+            self.indices_by_ray, self.lengths_by_ray_m, strict=True
+        ):
             if indices.size:
                 np.add.at(flat, indices, lengths**power)
         return flat.reshape(self.grid.shape)
 
 
-def _trace_ray(grid: GridSpec, tx_yx: np.ndarray, rx_yx: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _trace_ray(
+    grid: GridSpec, tx_yx: np.ndarray, rx_yx: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
     """Trace one segment through the grid and return flat cell indices plus lengths."""
 
     y0, x0 = (float(tx_yx[0]), float(tx_yx[1]))
@@ -159,7 +175,11 @@ def parameter(config: AlgorithmConfig, key: str, default: Any) -> Any:
 
 
 def reference_sound_speed(case: USCTCase, config: AlgorithmConfig) -> float:
-    value = parameter(config, "reference_sound_speed_mps", case.metadata.get("reference_sound_speed_mps", 1500.0))
+    value = parameter(
+        config,
+        "reference_sound_speed_mps",
+        case.metadata.get("reference_sound_speed_mps", 1500.0),
+    )
     value = float(value)
     if value <= 0:
         raise ValueError("reference_sound_speed_mps must be positive")
@@ -179,7 +199,9 @@ def valid_ray_mask(case: USCTCase, projector: StraightRayProjector) -> np.ndarra
         return np.ones(projector.n_rays, dtype=bool)
     mask = np.asarray(case.measurement.valid_mask, dtype=bool).reshape(-1)
     if mask.size != projector.n_rays:
-        raise ValueError("measurement.valid_mask shape must match transmitter/receiver ray shape")
+        raise ValueError(
+            "measurement.valid_mask shape must match transmitter/receiver ray shape"
+        )
     return mask
 
 
@@ -194,7 +216,9 @@ def configured_ray_weights(
     threshold = float(
         config.parameters.get(
             "min_ray_weight",
-            config.parameters.get("ray_weight_min", config.parameters.get("ray_weight_threshold", 0.0)),
+            config.parameters.get(
+                "ray_weight_min", config.parameters.get("ray_weight_threshold", 0.0)
+            ),
         )
     )
     power = float(config.parameters.get("ray_weight_power", 1.0))
@@ -229,7 +253,9 @@ def ray_weights(
     else:
         weights = np.asarray(source, dtype=float).reshape(-1)
         if weights.size != projector.n_rays:
-            raise ValueError("measurement.ray_weights/feature_quality shape must match transmitter/receiver ray shape")
+            raise ValueError(
+                "measurement.ray_weights/feature_quality shape must match transmitter/receiver ray shape"
+            )
         weights = np.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0)
         weights = np.clip(weights, 0.0, 1.0)
     if min_weight > 0.0:
@@ -241,7 +267,9 @@ def ray_weights(
     return weights
 
 
-def ray_weight_metrics(weights: np.ndarray, mask: np.ndarray, config: AlgorithmConfig) -> dict[str, float]:
+def ray_weight_metrics(
+    weights: np.ndarray, mask: np.ndarray, config: AlgorithmConfig
+) -> dict[str, float]:
     """Summarize transformed ray weights used by a reconstruction."""
 
     valid = np.asarray(mask, dtype=bool).reshape(-1)
@@ -256,7 +284,10 @@ def ray_weight_metrics(weights: np.ndarray, mask: np.ndarray, config: AlgorithmC
             "min_ray_weight": float(
                 config.parameters.get(
                     "min_ray_weight",
-                    config.parameters.get("ray_weight_min", config.parameters.get("ray_weight_threshold", 0.0)),
+                    config.parameters.get(
+                        "ray_weight_min",
+                        config.parameters.get("ray_weight_threshold", 0.0),
+                    ),
                 )
             ),
             "ray_weight_power": float(config.parameters.get("ray_weight_power", 1.0)),
@@ -271,7 +302,9 @@ def ray_weight_metrics(weights: np.ndarray, mask: np.ndarray, config: AlgorithmC
         "min_ray_weight": float(
             config.parameters.get(
                 "min_ray_weight",
-                config.parameters.get("ray_weight_min", config.parameters.get("ray_weight_threshold", 0.0)),
+                config.parameters.get(
+                    "ray_weight_min", config.parameters.get("ray_weight_threshold", 0.0)
+                ),
             )
         ),
         "ray_weight_power": float(config.parameters.get("ray_weight_power", 1.0)),
@@ -292,16 +325,26 @@ def coverage_preconditioner(
 
     ray_values = np.asarray(mask, dtype=float).reshape(-1)
     if weights is not None:
-        ray_values = ray_values * np.clip(np.asarray(weights, dtype=float).reshape(-1), 0.0, 1.0)
+        ray_values = ray_values * np.clip(
+            np.asarray(weights, dtype=float).reshape(-1), 0.0, 1.0
+        )
     coverage = projector.adjoint(ray_values)
     preconditioner = 1.0 / np.sqrt(np.maximum(coverage, 0.0) + max(float(eps), 0.0))
-    roi = np.ones(projector.grid.shape, dtype=bool) if roi_mask is None else np.asarray(roi_mask, dtype=bool)
+    roi = (
+        np.ones(projector.grid.shape, dtype=bool)
+        if roi_mask is None
+        else np.asarray(roi_mask, dtype=bool)
+    )
     finite_roi = roi & np.isfinite(preconditioner) & (coverage > 0.0)
     if normalize and np.any(finite_roi):
         median = float(np.median(preconditioner[finite_roi]))
         if median > 0.0:
             preconditioner = preconditioner / median
-    preconditioner = np.clip(np.nan_to_num(preconditioner, nan=0.0, posinf=0.0, neginf=0.0), 0.0, float(max_scale))
+    preconditioner = np.clip(
+        np.nan_to_num(preconditioner, nan=0.0, posinf=0.0, neginf=0.0),
+        0.0,
+        float(max_scale),
+    )
     if roi_mask is not None:
         preconditioner = np.where(roi, preconditioner, 0.0)
     return preconditioner, coverage
@@ -319,7 +362,11 @@ def image_diagnostic_metrics(
 
     pred = np.asarray(prediction, dtype=float)
     target = np.asarray(truth, dtype=float)
-    roi = np.ones(pred.shape, dtype=bool) if roi_mask is None else np.asarray(roi_mask, dtype=bool)
+    roi = (
+        np.ones(pred.shape, dtype=bool)
+        if roi_mask is None
+        else np.asarray(roi_mask, dtype=bool)
+    )
     finite = roi & np.isfinite(pred) & np.isfinite(target)
     error = np.abs(pred - target)
     metrics: dict[str, float] = {}
@@ -331,9 +378,13 @@ def image_diagnostic_metrics(
     boundary = boundary_band_mask(roi, pixels=boundary_band_pixels)
     boundary_finite = boundary & np.isfinite(pred) & np.isfinite(target)
     metrics["boundary_band_pixels"] = float(boundary_band_pixels)
-    metrics["boundary_band_fraction"] = float(np.sum(boundary_finite) / max(1, int(np.sum(finite))))
+    metrics["boundary_band_fraction"] = float(
+        np.sum(boundary_finite) / max(1, int(np.sum(finite)))
+    )
     if np.any(boundary_finite):
-        metrics["boundary_band_rmse"] = float(np.sqrt(np.mean((pred[boundary_finite] - target[boundary_finite]) ** 2)))
+        metrics["boundary_band_rmse"] = float(
+            np.sqrt(np.mean((pred[boundary_finite] - target[boundary_finite]) ** 2))
+        )
         metrics["boundary_band_mae"] = float(np.mean(error[boundary_finite]))
     else:
         metrics["boundary_band_rmse"] = float("nan")
@@ -347,7 +398,9 @@ def boundary_band_mask(roi_mask: np.ndarray, *, pixels: int) -> np.ndarray:
         return np.zeros_like(roi, dtype=bool)
     eroded = roi.copy()
     for _ in range(int(pixels)):
-        padded = np.pad(eroded, ((1, 1), (1, 1)), mode="constant", constant_values=False)
+        padded = np.pad(
+            eroded, ((1, 1), (1, 1)), mode="constant", constant_values=False
+        )
         eroded = (
             padded[1:-1, 1:-1]
             & padded[:-2, 1:-1]
@@ -358,18 +411,26 @@ def boundary_band_mask(roi_mask: np.ndarray, *, pixels: int) -> np.ndarray:
     return roi & ~eroded
 
 
-def target_delta_tof(case: USCTCase, projector: StraightRayProjector) -> tuple[np.ndarray, np.ndarray]:
+def target_delta_tof(
+    case: USCTCase, projector: StraightRayProjector
+) -> tuple[np.ndarray, np.ndarray]:
     if case.measurement.delta_tof_s is None:
-        raise ValueError("straight-ray sound-speed reconstruction requires measurement.delta_tof_s")
+        raise ValueError(
+            "straight-ray sound-speed reconstruction requires measurement.delta_tof_s"
+        )
     target = np.asarray(case.measurement.delta_tof_s, dtype=float).reshape(-1)
     if target.size != projector.n_rays:
-        raise ValueError("measurement.delta_tof_s shape must match transmitter/receiver ray shape")
+        raise ValueError(
+            "measurement.delta_tof_s shape must match transmitter/receiver ray shape"
+        )
     mask = valid_ray_mask(case, projector) & np.isfinite(target)
     target = np.where(mask, target, 0.0)
     return target, mask
 
 
-def target_attenuation_integral(case: USCTCase, projector: StraightRayProjector) -> tuple[np.ndarray, np.ndarray]:
+def target_attenuation_integral(
+    case: USCTCase, projector: StraightRayProjector
+) -> tuple[np.ndarray, np.ndarray]:
     if case.measurement.log_amp is None:
         raise ValueError("attenuation reconstruction requires measurement.log_amp")
     log_amp = np.asarray(case.measurement.log_amp, dtype=float)
@@ -377,31 +438,47 @@ def target_attenuation_integral(case: USCTCase, projector: StraightRayProjector)
         log_amp = np.nanmean(log_amp, axis=0)
     target = -log_amp.reshape(-1)
     if target.size != projector.n_rays:
-        raise ValueError("measurement.log_amp shape must match transmitter/receiver ray shape")
+        raise ValueError(
+            "measurement.log_amp shape must match transmitter/receiver ray shape"
+        )
     mask = valid_ray_mask(case, projector) & np.isfinite(target)
     target = np.where(mask, target, 0.0)
     return target, mask
 
 
-def apply_mask(values: np.ndarray, mask: np.ndarray, weights: np.ndarray | None = None, *, sqrt_weights: bool = True) -> np.ndarray:
+def apply_mask(
+    values: np.ndarray,
+    mask: np.ndarray,
+    weights: np.ndarray | None = None,
+    *,
+    sqrt_weights: bool = True,
+) -> np.ndarray:
     out = np.asarray(values, dtype=float).reshape(-1).copy()
     out[~mask] = 0.0
     if weights is not None:
         weight_values = np.asarray(weights, dtype=float).reshape(-1)
         if weight_values.size != out.size:
             raise ValueError("weights shape must match values")
-        multiplier = np.sqrt(np.clip(weight_values, 0.0, 1.0)) if sqrt_weights else np.clip(weight_values, 0.0, 1.0)
+        multiplier = (
+            np.sqrt(np.clip(weight_values, 0.0, 1.0))
+            if sqrt_weights
+            else np.clip(weight_values, 0.0, 1.0)
+        )
         out *= multiplier
     return out
 
 
-def masked_norm(values: np.ndarray, mask: np.ndarray, weights: np.ndarray | None = None) -> float:
+def masked_norm(
+    values: np.ndarray, mask: np.ndarray, weights: np.ndarray | None = None
+) -> float:
     values = np.asarray(values, dtype=float).reshape(-1)
     finite_mask = np.asarray(mask, dtype=bool) & np.isfinite(values)
     if weights is None:
         return float(np.linalg.norm(values[finite_mask]))
     weight_values = np.asarray(weights, dtype=float).reshape(-1)
-    weighted = values[finite_mask] * np.sqrt(np.clip(weight_values[finite_mask], 0.0, 1.0))
+    weighted = values[finite_mask] * np.sqrt(
+        np.clip(weight_values[finite_mask], 0.0, 1.0)
+    )
     return float(np.linalg.norm(weighted))
 
 
@@ -420,7 +497,9 @@ def residual_metrics(initial_norm: float, final_norm: float) -> dict[str, float]
     }
 
 
-def slowness_to_sound_speed(delta_slowness: np.ndarray, c0: float, bounds_mps: tuple[float, float]) -> np.ndarray:
+def slowness_to_sound_speed(
+    delta_slowness: np.ndarray, c0: float, bounds_mps: tuple[float, float]
+) -> np.ndarray:
     low, high = bounds_mps
     min_slowness = 1.0 / high
     max_slowness = 1.0 / low
@@ -443,7 +522,11 @@ def cgls_solve(
 ) -> tuple[np.ndarray, list[float]]:
     """Solve a masked least-squares system with CGLS."""
 
-    d = np.ones(projector.grid.shape, dtype=float) if preconditioner is None else np.asarray(preconditioner, dtype=float)
+    d = (
+        np.ones(projector.grid.shape, dtype=float)
+        if preconditioner is None
+        else np.asarray(preconditioner, dtype=float)
+    )
     if d.shape != projector.grid.shape:
         raise ValueError("preconditioner must match projector grid shape")
     if roi_mask is not None:
@@ -454,12 +537,16 @@ def cgls_solve(
         initial = np.asarray(initial_image, dtype=float)
         if initial.shape != projector.grid.shape:
             raise ValueError("initial_image must match projector grid shape")
-        z = np.divide(initial, d, out=np.zeros_like(initial, dtype=float), where=d > 0.0)
+        z = np.divide(
+            initial, d, out=np.zeros_like(initial, dtype=float), where=d > 0.0
+        )
     x = d * z
     residual = apply_mask(target - projector.forward(x), mask, weights)
     s = d * projector.adjoint(apply_mask(residual, mask, weights))
     if damping > 0:
-        s = s - d * damping * _regularization_normal(x, regularization, roi_mask=roi_mask)
+        s = s - d * damping * _regularization_normal(
+            x, regularization, roi_mask=roi_mask
+        )
     p = s.copy()
     gamma = float(np.vdot(s, s))
     residual_norms = [float(np.linalg.norm(residual[mask]))]
@@ -480,7 +567,9 @@ def cgls_solve(
         residual = residual - alpha * q
         s_next = d * projector.adjoint(apply_mask(residual, mask, weights))
         if damping > 0:
-            s_next = s_next - d * damping * _regularization_normal(x, regularization, roi_mask=roi_mask)
+            s_next = s_next - d * damping * _regularization_normal(
+                x, regularization, roi_mask=roi_mask
+            )
         gamma_next = float(np.vdot(s_next, s_next))
         residual_norms.append(float(np.linalg.norm(residual[mask])))
         if gamma_next <= 1.0e-30:
@@ -508,10 +597,16 @@ def huber_irls_cgls_solve(
 ) -> tuple[np.ndarray, list[float]]:
     """Solve with Huber-style IRLS residual down-weighting."""
 
-    base_weights = np.ones(projector.n_rays, dtype=float) if weights is None else np.clip(np.asarray(weights, dtype=float).reshape(-1), 0.0, 1.0)
+    base_weights = (
+        np.ones(projector.n_rays, dtype=float)
+        if weights is None
+        else np.clip(np.asarray(weights, dtype=float).reshape(-1), 0.0, 1.0)
+    )
     robust_weights = np.ones(projector.n_rays, dtype=float)
     x = np.zeros(projector.grid.shape, dtype=float)
-    residual_curve = [masked_norm(np.asarray(target, dtype=float).reshape(-1), mask, base_weights)]
+    residual_curve = [
+        masked_norm(np.asarray(target, dtype=float).reshape(-1), mask, base_weights)
+    ]
     delta = max(float(huber_delta), 1.0e-15)
     for _ in range(max(1, int(irls_iterations))):
         effective_weights = base_weights * robust_weights
@@ -527,17 +622,25 @@ def huber_irls_cgls_solve(
             roi_mask=roi_mask,
             initial_image=x,
         )
-        raw_residual = np.asarray(target, dtype=float).reshape(-1) - projector.forward(x)
+        raw_residual = np.asarray(target, dtype=float).reshape(-1) - projector.forward(
+            x
+        )
         abs_residual = np.abs(raw_residual)
-        robust_weights = np.where(abs_residual <= delta, 1.0, delta / np.maximum(abs_residual, delta))
+        robust_weights = np.where(
+            abs_residual <= delta, 1.0, delta / np.maximum(abs_residual, delta)
+        )
         robust_weights = np.where(np.asarray(mask, dtype=bool), robust_weights, 0.0)
         if inner_curve:
             residual_curve.extend(inner_curve[1:])
-        residual_curve.append(masked_norm(raw_residual, mask, base_weights * robust_weights))
+        residual_curve.append(
+            masked_norm(raw_residual, mask, base_weights * robust_weights)
+        )
     return x, residual_curve
 
 
-def _regularization_forward(image: np.ndarray, kind: str, *, roi_mask: np.ndarray | None = None) -> np.ndarray:
+def _regularization_forward(
+    image: np.ndarray, kind: str, *, roi_mask: np.ndarray | None = None
+) -> np.ndarray:
     kind_normalized = str(kind).lower()
     array = _roi_regularization_image(image, roi_mask)
     if kind_normalized in ("identity", "l2"):
@@ -547,7 +650,9 @@ def _regularization_forward(image: np.ndarray, kind: str, *, roi_mask: np.ndarra
     raise ValueError("regularization must be 'identity' or 'laplacian'")
 
 
-def _regularization_normal(image: np.ndarray, kind: str, *, roi_mask: np.ndarray | None = None) -> np.ndarray:
+def _regularization_normal(
+    image: np.ndarray, kind: str, *, roi_mask: np.ndarray | None = None
+) -> np.ndarray:
     kind_normalized = str(kind).lower()
     roi = None if roi_mask is None else np.asarray(roi_mask, dtype=bool)
     array = _roi_regularization_image(image, roi)
@@ -560,7 +665,9 @@ def _regularization_normal(image: np.ndarray, kind: str, *, roi_mask: np.ndarray
     raise ValueError("regularization must be 'identity' or 'laplacian'")
 
 
-def _roi_regularization_image(image: np.ndarray, roi_mask: np.ndarray | None) -> np.ndarray:
+def _roi_regularization_image(
+    image: np.ndarray, roi_mask: np.ndarray | None
+) -> np.ndarray:
     array = np.asarray(image, dtype=float)
     if roi_mask is None:
         return array
@@ -599,17 +706,31 @@ def sirt_solve(
     row_norm[row_norm <= 0.0] = 1.0
     col_norm = projector.col_norms(power=1)
     if weights is not None:
-        col_norm = projector.adjoint(np.clip(np.asarray(weights, dtype=float).reshape(-1), 0.0, 1.0) * np.asarray(mask, dtype=float).reshape(-1))
+        col_norm = projector.adjoint(
+            np.clip(np.asarray(weights, dtype=float).reshape(-1), 0.0, 1.0)
+            * np.asarray(mask, dtype=float).reshape(-1)
+        )
     col_norm[col_norm <= 0.0] = 1.0
     residual_norms: list[float] = []
     for _ in range(max(0, int(iterations))):
-        residual_raw = np.asarray(target, dtype=float).reshape(-1) - projector.forward(x)
+        residual_raw = np.asarray(target, dtype=float).reshape(-1) - projector.forward(
+            x
+        )
         residual = apply_mask(residual_raw, mask, weights)
         residual_norms.append(float(np.linalg.norm(residual[mask])))
-        update_values = apply_mask(residual_raw / row_norm, mask, weights, sqrt_weights=False)
+        update_values = apply_mask(
+            residual_raw / row_norm, mask, weights, sqrt_weights=False
+        )
         update = projector.adjoint(update_values) / col_norm
         x = x + float(relaxation) * update
-        x = _post_update(x, iteration_index=_ + 1, nonnegative=nonnegative, smooth_sigma=smooth_sigma, smooth_every=smooth_every, roi_mask=roi_mask)
+        x = _post_update(
+            x,
+            iteration_index=_ + 1,
+            nonnegative=nonnegative,
+            smooth_sigma=smooth_sigma,
+            smooth_every=smooth_every,
+            roi_mask=roi_mask,
+        )
     residual = apply_mask(target - projector.forward(x), mask, weights)
     residual_norms.append(float(np.linalg.norm(residual[mask])))
     return x, residual_norms
@@ -632,7 +753,11 @@ def sart_solve(
 
     x = np.zeros(projector.grid.shape, dtype=float)
     target = np.asarray(target, dtype=float).reshape(-1)
-    weight_values = np.ones(projector.n_rays, dtype=float) if weights is None else np.clip(np.asarray(weights, dtype=float).reshape(-1), 0.0, 1.0)
+    weight_values = (
+        np.ones(projector.n_rays, dtype=float)
+        if weights is None
+        else np.clip(np.asarray(weights, dtype=float).reshape(-1), 0.0, 1.0)
+    )
     row_norm = projector.row_norms(power=1)
     row_norm[row_norm <= 0.0] = 1.0
     ray_ids = np.flatnonzero(np.asarray(mask, dtype=bool))
@@ -649,10 +774,19 @@ def sart_solve(
             residual = apply_mask(residual_raw, subset_mask, weight_values)
             col_norm = projector.adjoint(subset_mask.astype(float) * weight_values)
             col_norm[col_norm <= 0.0] = 1.0
-            update_values = apply_mask(residual_raw / row_norm, subset_mask, weight_values, sqrt_weights=False)
+            update_values = apply_mask(
+                residual_raw / row_norm, subset_mask, weight_values, sqrt_weights=False
+            )
             update = projector.adjoint(update_values) / col_norm
             x = x + float(relaxation) * update
-            x = _post_update(x, iteration_index=_ + 1, nonnegative=False, smooth_sigma=smooth_sigma, smooth_every=smooth_every, roi_mask=roi_mask)
+            x = _post_update(
+                x,
+                iteration_index=_ + 1,
+                nonnegative=False,
+                smooth_sigma=smooth_sigma,
+                smooth_every=smooth_every,
+                roi_mask=roi_mask,
+            )
         residual = apply_mask(target - projector.forward(x), mask, weight_values)
         residual_norms.append(float(np.linalg.norm(residual[mask])))
     return x, residual_norms
@@ -670,7 +804,11 @@ def _post_update(
     updated = np.asarray(image, dtype=float)
     if roi_mask is not None:
         updated = np.where(np.asarray(roi_mask, dtype=bool), updated, 0.0)
-    if smooth_sigma > 0.0 and smooth_every > 0 and iteration_index % int(smooth_every) == 0:
+    if (
+        smooth_sigma > 0.0
+        and smooth_every > 0
+        and iteration_index % int(smooth_every) == 0
+    ):
         updated = _gaussian_smooth(updated, float(smooth_sigma))
         if roi_mask is not None:
             updated = np.where(np.asarray(roi_mask, dtype=bool), updated, 0.0)
@@ -684,7 +822,9 @@ def _gaussian_smooth(image: np.ndarray, sigma: float) -> np.ndarray:
         from scipy.ndimage import gaussian_filter
     except ModuleNotFoundError:
         return image
-    return np.asarray(gaussian_filter(image, sigma=float(sigma), mode="nearest"), dtype=float)
+    return np.asarray(
+        gaussian_filter(image, sigma=float(sigma), mode="nearest"), dtype=float
+    )
 
 
 def _corr(a: np.ndarray, b: np.ndarray) -> float:
@@ -710,11 +850,15 @@ def _masked_mean(values: np.ndarray, mask: np.ndarray) -> float:
     return float(np.mean(np.asarray(values, dtype=float)[finite]))
 
 
-def _masked_percentile(values: np.ndarray, mask: np.ndarray, percentile: float) -> float:
+def _masked_percentile(
+    values: np.ndarray, mask: np.ndarray, percentile: float
+) -> float:
     finite = np.asarray(mask, dtype=bool) & np.isfinite(values)
     if not np.any(finite):
         return float("nan")
-    return float(np.percentile(np.asarray(values, dtype=float)[finite], float(percentile)))
+    return float(
+        np.percentile(np.asarray(values, dtype=float)[finite], float(percentile))
+    )
 
 
 def run_with_failure_capture(
@@ -725,7 +869,9 @@ def run_with_failure_capture(
     started = time.perf_counter()
     try:
         result = func()
-    except Exception as exc:  # pragma: no cover - exercised through CLI/integration failures.
+    except (
+        Exception
+    ) as exc:  # pragma: no cover - exercised through CLI/integration failures.
         return ReconstructionResult(
             algorithm=algorithm,
             case_id=case.case_id,
@@ -747,26 +893,52 @@ class StraightRayCGLSAlgorithm:
             weights = configured_ray_weights(case, projector, mask, config)
             iterations = int(config.parameters.get("iterations", 30))
             regularization = str(config.parameters.get("regularization", "identity"))
-            lambda_value = float(config.parameters.get("lambda", config.parameters.get("regularization_lambda", 0.0)))
+            lambda_value = float(
+                config.parameters.get(
+                    "lambda", config.parameters.get("regularization_lambda", 0.0)
+                )
+            )
             damping = float(config.parameters.get("damping", lambda_value**2))
             roi_update_only = bool(config.parameters.get("roi_update_only", False))
-            roi_laplacian = bool(config.parameters.get("roi_laplacian", config.parameters.get("roi_aware_laplacian", False)))
-            use_coverage_preconditioning = bool(config.parameters.get("coverage_preconditioning", False))
+            roi_laplacian = bool(
+                config.parameters.get(
+                    "roi_laplacian", config.parameters.get("roi_aware_laplacian", False)
+                )
+            )
+            use_coverage_preconditioning = bool(
+                config.parameters.get("coverage_preconditioning", False)
+            )
             robust_loss = str(config.parameters.get("robust_loss", "none")).lower()
             c0 = reference_sound_speed(case, config)
             initial_norm = masked_norm(target, mask, weights)
-            roi_mask = np.asarray(case.grid.roi_mask, dtype=bool) if case.grid.roi_mask is not None and (roi_update_only or roi_laplacian) else None
+            roi_mask = (
+                np.asarray(case.grid.roi_mask, dtype=bool)
+                if case.grid.roi_mask is not None and (roi_update_only or roi_laplacian)
+                else None
+            )
             preconditioner = None
-            coverage = projector.adjoint(np.asarray(mask, dtype=float) * np.clip(weights, 0.0, 1.0))
+            coverage = projector.adjoint(
+                np.asarray(mask, dtype=float) * np.clip(weights, 0.0, 1.0)
+            )
             if use_coverage_preconditioning:
                 preconditioner, coverage = coverage_preconditioner(
                     projector,
                     mask,
                     weights,
-                    roi_mask=np.asarray(case.grid.roi_mask, dtype=bool) if case.grid.roi_mask is not None and roi_update_only else None,
-                    eps=float(config.parameters.get("coverage_preconditioner_eps", 1.0e-12)),
-                    max_scale=float(config.parameters.get("coverage_preconditioner_max_scale", 10.0)),
-                    normalize=bool(config.parameters.get("coverage_preconditioner_normalize", True)),
+                    roi_mask=(
+                        np.asarray(case.grid.roi_mask, dtype=bool)
+                        if case.grid.roi_mask is not None and roi_update_only
+                        else None
+                    ),
+                    eps=float(
+                        config.parameters.get("coverage_preconditioner_eps", 1.0e-12)
+                    ),
+                    max_scale=float(
+                        config.parameters.get("coverage_preconditioner_max_scale", 10.0)
+                    ),
+                    normalize=bool(
+                        config.parameters.get("coverage_preconditioner_normalize", True)
+                    ),
                 )
             if robust_loss in {"huber", "irls", "huber_irls"}:
                 delta_slowness, residual_norms = huber_irls_cgls_solve(
@@ -795,8 +967,12 @@ class StraightRayCGLSAlgorithm:
                     roi_mask=roi_mask,
                 )
             if roi_update_only and case.grid.roi_mask is not None:
-                delta_slowness = np.where(np.asarray(case.grid.roi_mask, dtype=bool), delta_slowness, 0.0)
-            sound_speed = slowness_to_sound_speed(delta_slowness, c0, speed_bounds(config))
+                delta_slowness = np.where(
+                    np.asarray(case.grid.roi_mask, dtype=bool), delta_slowness, 0.0
+                )
+            sound_speed = slowness_to_sound_speed(
+                delta_slowness, c0, speed_bounds(config)
+            )
             final_norm = residual_norms[-1] if residual_norms else initial_norm
             metrics = {
                 **residual_metrics(initial_norm, final_norm),
@@ -809,7 +985,12 @@ class StraightRayCGLSAlgorithm:
                 "roi_update_only": roi_update_only,
                 "robust_loss": robust_loss,
                 "huber_delta_s": float(config.parameters.get("huber_delta_s", 5.0e-7)),
-                "irls_iterations": int(config.parameters.get("irls_iterations", 0 if robust_loss not in {"huber", "irls", "huber_irls"} else 3)),
+                "irls_iterations": int(
+                    config.parameters.get(
+                        "irls_iterations",
+                        0 if robust_loss not in {"huber", "irls", "huber_irls"} else 3,
+                    )
+                ),
                 "residual_curve": residual_norms,
                 **ray_weight_metrics(weights, mask, config),
             }
@@ -835,7 +1016,9 @@ class StraightRayCGLSAlgorithm:
                         np.asarray(case.ground_truth.sound_speed_mps, dtype=float),
                         roi_mask=case.grid.roi_mask,
                         coverage=coverage,
-                        boundary_band_pixels=int(config.parameters.get("boundary_band_pixels", 4)),
+                        boundary_band_pixels=int(
+                            config.parameters.get("boundary_band_pixels", 4)
+                        ),
                     )
                 )
             return ReconstructionResult(
@@ -874,7 +1057,9 @@ class StraightRaySIRTAlgorithm:
                 roi_mask=case.grid.roi_mask if roi_update_only else None,
                 weights=weights,
             )
-            sound_speed = slowness_to_sound_speed(delta_slowness, c0, speed_bounds(config))
+            sound_speed = slowness_to_sound_speed(
+                delta_slowness, c0, speed_bounds(config)
+            )
             final_norm = residual_norms[-1] if residual_norms else initial_norm
             metrics = {
                 **residual_metrics(initial_norm, final_norm),
@@ -940,7 +1125,9 @@ class StraightRaySARTAlgorithm:
                 roi_mask=case.grid.roi_mask if roi_update_only else None,
                 weights=weights,
             )
-            sound_speed = slowness_to_sound_speed(delta_slowness, c0, speed_bounds(config))
+            sound_speed = slowness_to_sound_speed(
+                delta_slowness, c0, speed_bounds(config)
+            )
             final_norm = residual_norms[-1] if residual_norms else initial_norm
             metrics = {
                 **residual_metrics(initial_norm, final_norm),
@@ -977,8 +1164,6 @@ class StraightRaySARTAlgorithm:
             )
 
         return run_with_failure_capture(self.name, case, _run)
-
-
 
 
 def register_ray_algorithms(*, replace: bool = False) -> None:

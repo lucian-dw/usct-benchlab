@@ -10,7 +10,13 @@ import numpy as np
 from usctbench.algorithms.ray import StraightRayProjector
 from usctbench.core.io import write_case_hdf5
 from usctbench.core.provenance import MeasurementProvenance, stamp_measurement_metadata
-from usctbench.core.schema import GeometrySpec, GridSpec, GroundTruthSpec, MeasurementSpec, USCTCase
+from usctbench.core.schema import (
+    GeometrySpec,
+    GridSpec,
+    GroundTruthSpec,
+    MeasurementSpec,
+    USCTCase,
+)
 
 
 def make_grid(
@@ -22,7 +28,12 @@ def make_grid(
     ny, nx = shape
     dy, dx = spacing_m
     origin_m = (-(ny * dy) / 2.0, -(nx * dx) / 2.0)
-    return GridSpec(shape=shape, spacing_m=spacing_m, origin_m=origin_m, roi_mask=np.ones(shape, dtype=bool))
+    return GridSpec(
+        shape=shape,
+        spacing_m=spacing_m,
+        origin_m=origin_m,
+        roi_mask=np.ones(shape, dtype=bool),
+    )
 
 
 def make_ring_geometry(n_transducers: int = 32, radius_m: float = 0.03) -> GeometrySpec:
@@ -32,7 +43,9 @@ def make_ring_geometry(n_transducers: int = 32, radius_m: float = 0.03) -> Geome
         raise ValueError("n_transducers must be at least 4")
     angles = np.linspace(0.0, 2.0 * np.pi, n_transducers, endpoint=False)
     positions = np.column_stack((radius_m * np.sin(angles), radius_m * np.cos(angles)))
-    return GeometrySpec(type="ring", tx_pos_m=positions, rx_pos_m=positions.copy(), radius_m=radius_m)
+    return GeometrySpec(
+        type="ring", tx_pos_m=positions, rx_pos_m=positions.copy(), radius_m=radius_m
+    )
 
 
 def circular_sound_speed(
@@ -102,13 +115,17 @@ def make_sound_speed_case(
     )
     projector = StraightRayProjector.from_grid_geometry(grid, geometry)
     delta_slowness = (1.0 / sound_speed) - (1.0 / background_mps)
-    delta_tof_s = projector.forward(delta_slowness).reshape((n_transducers, n_transducers))
+    delta_tof_s = projector.forward(delta_slowness).reshape(
+        (n_transducers, n_transducers)
+    )
     valid_mask = ~np.eye(n_transducers, dtype=bool)
     return USCTCase(
         case_id=case_id,
         grid=grid,
         geometry=geometry,
-        measurement=MeasurementSpec(domain="features", delta_tof_s=delta_tof_s, valid_mask=valid_mask),
+        measurement=MeasurementSpec(
+            domain="features", delta_tof_s=delta_tof_s, valid_mask=valid_mask
+        ),
         ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed),
         metadata=stamp_measurement_metadata(
             {
@@ -117,7 +134,9 @@ def make_sound_speed_case(
                 "feature_provenance": "oracle_straight_ray_forward_from_ground_truth_sound_speed",
                 "reference_sound_speed_mps": background_mps,
                 "synthetic_inclusion_radius_m": float(inclusion_radius_m),
-                "synthetic_inclusion_center_m": [float(value) for value in inclusion_center_m],
+                "synthetic_inclusion_center_m": [
+                    float(value) for value in inclusion_center_m
+                ],
             },
             measurement_provenance=MeasurementProvenance.ORACLE_TRAVEL_TIME,
             benchmark_type="oracle_travel_time",
@@ -146,13 +165,17 @@ def make_attenuation_case(
     geometry = make_ring_geometry(n_transducers=n_transducers)
     attenuation = circular_attenuation(grid)
     projector = StraightRayProjector.from_grid_geometry(grid, geometry)
-    line_integral = projector.forward(attenuation).reshape((n_transducers, n_transducers))
+    line_integral = projector.forward(attenuation).reshape(
+        (n_transducers, n_transducers)
+    )
     valid_mask = ~np.eye(n_transducers, dtype=bool)
     return USCTCase(
         case_id=case_id,
         grid=grid,
         geometry=geometry,
-        measurement=MeasurementSpec(domain="features", log_amp=-line_integral, valid_mask=valid_mask),
+        measurement=MeasurementSpec(
+            domain="features", log_amp=-line_integral, valid_mask=valid_mask
+        ),
         ground_truth=GroundTruthSpec(attenuation_np_per_m=attenuation),
         metadata=stamp_measurement_metadata(
             {
@@ -210,11 +233,15 @@ def make_synthetic_smoke_subset(
                 "case_id": case.case_id,
                 "path": str(path),
                 "case_type": case.metadata.get("case_type", "synthetic_oracle"),
-                "benchmark_type": case.metadata.get("benchmark_type", "synthetic_oracle"),
+                "benchmark_type": case.metadata.get(
+                    "benchmark_type", "synthetic_oracle"
+                ),
                 "shape": list(case.grid.shape),
                 "n_transducers": int(case.geometry.tx_pos_m.shape[0]),
                 "feature_provenance": case.metadata.get("feature_provenance", ""),
             }
         )
-    (root / "manifest.json").write_text(json.dumps({"cases": records}, indent=2, sort_keys=True), encoding="utf-8")
+    (root / "manifest.json").write_text(
+        json.dumps({"cases": records}, indent=2, sort_keys=True), encoding="utf-8"
+    )
     return records

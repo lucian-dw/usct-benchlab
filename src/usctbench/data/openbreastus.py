@@ -22,11 +22,24 @@ from .conversion import convert_kwave_channel_mat, convert_speed_mat_volume
 from .conversion import kwave_channel_mat_metadata, speed_mat_metadata
 
 INSPECTOR_VERSION = "0.1"
-SUPPORTED_SUFFIXES = {".h5", ".hdf5", ".mat", ".npy", ".npz", ".json", ".yaml", ".yml", ".txt", ".csv"}
+SUPPORTED_SUFFIXES = {
+    ".h5",
+    ".hdf5",
+    ".mat",
+    ".npy",
+    ".npz",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".txt",
+    ".csv",
+}
 DATA_SUFFIXES = {".h5", ".hdf5", ".mat", ".npy", ".npz"}
 
 
-def inspect_openbreastus(root: str | Path, out: str | Path | None = None) -> dict[str, Any]:
+def inspect_openbreastus(
+    root: str | Path, out: str | Path | None = None
+) -> dict[str, Any]:
     """Inspect a local OpenBreastUS tree and optionally write an index JSON."""
 
     root_path = Path(root).expanduser().resolve()
@@ -40,7 +53,10 @@ def inspect_openbreastus(root: str | Path, out: str | Path | None = None) -> dic
     for file_path in files:
         grouped[_case_id(root_path, file_path)].append(file_path)
 
-    cases = [_case_record(root_path, case_id, paths) for case_id, paths in sorted(grouped.items())]
+    cases = [
+        _case_record(root_path, case_id, paths)
+        for case_id, paths in sorted(grouped.items())
+    ]
     density_counts: dict[str, int] = defaultdict(int)
     suffix_counts: dict[str, int] = defaultdict(int)
     role_counts: dict[str, int] = defaultdict(int)
@@ -57,9 +73,13 @@ def inspect_openbreastus(root: str | Path, out: str | Path | None = None) -> dic
 
     warnings = []
     if not cases:
-        warnings.append("No candidate OpenBreastUS data files were found under the root.")
+        warnings.append(
+            "No candidate OpenBreastUS data files were found under the root."
+        )
     if all(case["density_class"] == "unknown" for case in cases):
-        warnings.append("No density classes could be inferred from paths; smoke subset will use unknown density.")
+        warnings.append(
+            "No density classes could be inferred from paths; smoke subset will use unknown density."
+        )
 
     index = {
         "schema_version": INSPECTOR_VERSION,
@@ -80,7 +100,9 @@ def inspect_openbreastus(root: str | Path, out: str | Path | None = None) -> dic
     if out is not None:
         out_path = Path(out).expanduser()
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
+        out_path.write_text(
+            json.dumps(index, indent=2, sort_keys=True), encoding="utf-8"
+        )
     return index
 
 
@@ -121,7 +143,9 @@ def _candidate_files(root: Path) -> list[Path]:
     return sorted(
         path
         for path in root.rglob("*")
-        if path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES and not _is_hidden(path, root)
+        if path.is_file()
+        and path.suffix.lower() in SUPPORTED_SUFFIXES
+        and not _is_hidden(path, root)
     )
 
 
@@ -177,7 +201,9 @@ def _case_capabilities(files: list[dict[str, Any]]) -> dict[str, Any]:
     has_reference = "reference" in roles
     has_geometry = "geometry" in roles
     has_mask = "mask" in roles
-    has_kwave_channel_mat = any(bool(file.get("schema", {}).get("kwave_channel_mat")) for file in files)
+    has_kwave_channel_mat = any(
+        bool(file.get("schema", {}).get("kwave_channel_mat")) for file in files
+    )
     has_speed_mat_volume = any(
         "sound_speed" in file["roles"]
         and file["suffix"] == ".mat"
@@ -210,16 +236,29 @@ def _case_capabilities(files: list[dict[str, Any]]) -> dict[str, Any]:
 def _case_limitations(capabilities: dict[str, Any]) -> list[str]:
     limitations = []
     modes = set(capabilities.get("conversion_modes", []))
-    if "speed_map_to_straight_ray_surrogate" in modes and "frequency_reference_features" not in modes:
-        limitations.append("speed-map-only case: conversion uses surrogate straight-ray travel-time features, not measured RF/wavefield data")
+    if (
+        "speed_map_to_straight_ray_surrogate" in modes
+        and "frequency_reference_features" not in modes
+    ):
+        limitations.append(
+            "speed-map-only case: conversion uses surrogate straight-ray travel-time features, not measured RF/wavefield data"
+        )
     if "kwave_channel_mat_to_feature_case" in modes:
-        limitations.append("k-Wave simulation case: attenuation evidence is simulated, not raw measured OpenBreastUS RF data")
+        limitations.append(
+            "k-Wave simulation case: attenuation evidence is simulated, not raw measured OpenBreastUS RF data"
+        )
     if capabilities.get("has_wavefield") and not capabilities.get("has_reference"):
-        limitations.append("wavefield-like data found without an identified water/reference file")
+        limitations.append(
+            "wavefield-like data found without an identified water/reference file"
+        )
     if capabilities.get("has_wavefield") and not capabilities.get("has_geometry"):
-        limitations.append("wavefield-like data found without identified geometry/transducer metadata")
+        limitations.append(
+            "wavefield-like data found without identified geometry/transducer metadata"
+        )
     if not capabilities.get("convertible_to_usct_case"):
-        limitations.append("no supported automatic USCTCase conversion mode was identified")
+        limitations.append(
+            "no supported automatic USCTCase conversion mode was identified"
+        )
     return limitations
 
 
@@ -242,9 +281,22 @@ def _density_class(paths: list[Path]) -> str:
 
 def _split(paths: list[Path]) -> str:
     text = " ".join(path.as_posix().lower() for path in paths)
-    for split in ("train", "training", "val", "valid", "validation", "test", "mini", "smoke"):
+    for split in (
+        "train",
+        "training",
+        "val",
+        "valid",
+        "validation",
+        "test",
+        "mini",
+        "smoke",
+    ):
         if f"/{split}/" in text or f"_{split}_" in text:
-            return "val" if split in {"valid", "validation"} else "train" if split == "training" else split
+            return (
+                "val"
+                if split in {"valid", "validation"}
+                else "train" if split == "training" else split
+            )
     return "unknown"
 
 
@@ -253,13 +305,28 @@ def _roles(path: Path) -> list[str]:
     roles = []
     if any(token in text for token in ("reference", "water", "baseline", "background")):
         roles.append("reference")
-    if any(token in text for token in ("sound_speed", "soundspeed", "speed", "sos", "c0")):
+    if any(
+        token in text for token in ("sound_speed", "soundspeed", "speed", "sos", "c0")
+    ):
         roles.append("sound_speed")
     if any(token in text for token in ("attenuation", "atten", "alpha")):
         roles.append("attenuation")
-    if any(token in text for token in ("wavefield", "pressure", "rf", "signal", "sinogram", "measurement")):
+    if any(
+        token in text
+        for token in (
+            "wavefield",
+            "pressure",
+            "rf",
+            "signal",
+            "sinogram",
+            "measurement",
+        )
+    ):
         roles.append("wavefield")
-    if any(token in text for token in ("geometry", "transducer", "probe", "sensor", "receiver")):
+    if any(
+        token in text
+        for token in ("geometry", "transducer", "probe", "sensor", "receiver")
+    ):
         roles.append("geometry")
     if "mask" in text or "roi" in text:
         roles.append("mask")
@@ -286,7 +353,11 @@ def _schema(path: Path) -> dict[str, Any]:
     if suffix == ".npy":
         try:
             array = np.load(path, mmap_mode="r")
-            return {"format": "npy", "shape": list(array.shape), "dtype": str(array.dtype)}
+            return {
+                "format": "npy",
+                "shape": list(array.shape),
+                "dtype": str(array.dtype),
+            }
         except Exception as exc:
             return {"format": "npy", "read_error": f"{type(exc).__name__}: {exc}"}
     if suffix == ".npz":
@@ -294,7 +365,13 @@ def _schema(path: Path) -> dict[str, Any]:
             with np.load(path) as archive:
                 return {
                     "format": "npz",
-                    "arrays": {name: {"shape": list(archive[name].shape), "dtype": str(archive[name].dtype)} for name in archive.files},
+                    "arrays": {
+                        name: {
+                            "shape": list(archive[name].shape),
+                            "dtype": str(archive[name].dtype),
+                        }
+                        for name in archive.files
+                    },
                 }
         except Exception as exc:
             return {"format": "npz", "read_error": f"{type(exc).__name__}: {exc}"}
@@ -302,10 +379,14 @@ def _schema(path: Path) -> dict[str, Any]:
         try:
             import h5py
         except ModuleNotFoundError as exc:
-            return {"format": "hdf5" if suffix != ".mat" else "mat", "read_error": f"ModuleNotFoundError: {exc}"}
+            return {
+                "format": "hdf5" if suffix != ".mat" else "mat",
+                "read_error": f"ModuleNotFoundError: {exc}",
+            }
         try:
             datasets: dict[str, dict[str, Any]] = {}
             with h5py.File(path, "r") as handle:
+
                 def visitor(name: str, obj: Any) -> None:
                     if hasattr(obj, "shape") and obj.shape is not None:
                         datasets[name] = {
@@ -330,7 +411,10 @@ def _schema(path: Path) -> dict[str, Any]:
                 schema["kwave_channel_mat"] = None
             return schema
         except Exception as exc:
-            return {"format": "hdf5" if suffix != ".mat" else "mat_or_unsupported", "read_error": f"{type(exc).__name__}: {exc}"}
+            return {
+                "format": "hdf5" if suffix != ".mat" else "mat_or_unsupported",
+                "read_error": f"{type(exc).__name__}: {exc}",
+            }
     return {"format": suffix.lstrip(".") or "unknown"}
 
 
@@ -386,7 +470,9 @@ def make_smoke_subset(
     out_path.mkdir(parents=True, exist_ok=True)
 
     index = inspect_openbreastus(root_path, out_path / "openbreastus_index.json")
-    selected = _select_cases(index["cases"], cases_per_density=cases_per_density, subset_role=subset_role)
+    selected = _select_cases(
+        index["cases"], cases_per_density=cases_per_density, subset_role=subset_role
+    )
 
     source_root = out_path / "sources"
     if symlink_sources:
@@ -460,7 +546,9 @@ def make_smoke_subset(
         ],
     }
     manifest_path = out_path / "openbreastus_smoke_manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
+    )
     write_schema_report(index, out_path / "schema_inspection_report.md")
     return manifest
 
@@ -492,8 +580,16 @@ def make_quality_subset(
 
 
 def _capability_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
-    convertible = [case["case_id"] for case in cases if case.get("capabilities", {}).get("convertible_to_usct_case")]
-    limitations = {case["case_id"]: case.get("limitations", []) for case in cases if case.get("limitations")}
+    convertible = [
+        case["case_id"]
+        for case in cases
+        if case.get("capabilities", {}).get("convertible_to_usct_case")
+    ]
+    limitations = {
+        case["case_id"]: case.get("limitations", [])
+        for case in cases
+        if case.get("limitations")
+    }
     modes: dict[str, int] = defaultdict(int)
     for case in cases:
         for mode in case.get("capabilities", {}).get("conversion_modes", []):
@@ -505,7 +601,9 @@ def _capability_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _select_cases(cases: list[dict[str, Any]], *, cases_per_density: int, subset_role: str) -> list[dict[str, Any]]:
+def _select_cases(
+    cases: list[dict[str, Any]], *, cases_per_density: int, subset_role: str
+) -> list[dict[str, Any]]:
     by_density: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for case in sorted(cases, key=lambda item: item["case_id"]):
         by_density[case.get("density_class", "unknown")].append(case)
@@ -514,7 +612,10 @@ def _select_cases(cases: list[dict[str, Any]], *, cases_per_density: int, subset
     for density in sorted(by_density):
         ranked = sorted(
             by_density[density],
-            key=lambda item: (-_conversion_priority(item, subset_role=subset_role), item["case_id"]),
+            key=lambda item: (
+                -_conversion_priority(item, subset_role=subset_role),
+                item["case_id"],
+            ),
         )
         selected.extend(ranked[:cases_per_density])
     return selected
@@ -522,7 +623,10 @@ def _select_cases(cases: list[dict[str, Any]], *, cases_per_density: int, subset
 
 def _conversion_priority(case: dict[str, Any], *, subset_role: str) -> int:
     modes = set(case.get("capabilities", {}).get("conversion_modes", []))
-    if subset_role == "quality_comparison" and _has_canonical_openbreastus_class_volume(case):
+    if (
+        subset_role == "quality_comparison"
+        and _has_canonical_openbreastus_class_volume(case)
+    ):
         return 40
     if "kwave_channel_mat_to_feature_case" in modes:
         return 30
@@ -567,7 +671,9 @@ def _has_canonical_openbreastus_class_volume(case: dict[str, Any]) -> bool:
     )
 
 
-def _canonical_openbreastus_class_ranges(file_record: dict[str, Any]) -> list[tuple[int, int, int]] | None:
+def _canonical_openbreastus_class_ranges(
+    file_record: dict[str, Any],
+) -> list[tuple[int, int, int]] | None:
     """Infer OpenBreastUS four-class ranges for canonical train/test speed volumes.
 
     The public speed-map mirror is commonly stored as `breast_train_speed.mat`
@@ -592,7 +698,10 @@ def _canonical_openbreastus_class_ranges(file_record: dict[str, Any]) -> list[tu
     if case_count < 4 or case_count % 4 != 0:
         return None
     class_size = case_count // 4
-    return [(class_id, (class_id - 1) * class_size, class_id * class_size) for class_id in range(1, 5)]
+    return [
+        (class_id, (class_id - 1) * class_size, class_id * class_size)
+        for class_id in range(1, 5)
+    ]
 
 
 def _is_kwave_channel_mat(file_record: dict[str, Any]) -> bool:

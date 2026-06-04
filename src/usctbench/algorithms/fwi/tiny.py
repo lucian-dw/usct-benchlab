@@ -4,8 +4,16 @@ from __future__ import annotations
 
 import numpy as np
 
-from usctbench.metrics import compute_baseline_improvement_metrics, compute_image_metrics
-from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, ResultStatus, USCTCase
+from usctbench.metrics import (
+    compute_baseline_improvement_metrics,
+    compute_image_metrics,
+)
+from usctbench.core.schema import (
+    AlgorithmConfig,
+    ReconstructionResult,
+    ResultStatus,
+    USCTCase,
+)
 
 
 class TinyFWIAlgorithm:
@@ -28,9 +36,16 @@ class TinyFWIAlgorithm:
 
         truth = np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
         path_truth = _central_path(truth)
-        frequencies = np.asarray(config.parameters.get("frequencies_hz", [1.0e5, 1.5e5, 2.0e5]), dtype=float)
+        frequencies = np.asarray(
+            config.parameters.get("frequencies_hz", [1.0e5, 1.5e5, 2.0e5]), dtype=float
+        )
         spacing_m = float(config.parameters.get("spacing_m", case.grid.spacing_m[1]))
-        initial_speed = float(config.parameters.get("initial_sound_speed_mps", case.metadata.get("reference_sound_speed_mps", 1500.0)))
+        initial_speed = float(
+            config.parameters.get(
+                "initial_sound_speed_mps",
+                case.metadata.get("reference_sound_speed_mps", 1500.0),
+            )
+        )
         steps = int(config.parameters.get("steps", 20))
         learning_rate = float(config.parameters.get("learning_rate", 1.0e6))
         bounds = config.parameters.get("sound_speed_bounds_mps", [1300.0, 1700.0])
@@ -53,8 +68,14 @@ class TinyFWIAlgorithm:
             "loss_decreased": losses[-1] < losses[0],
             "iterations": steps,
         }
-        metrics.update(compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask))
-        metrics.update(compute_baseline_improvement_metrics(sound_speed, truth, initial_speed, mask=case.grid.roi_mask))
+        metrics.update(
+            compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask)
+        )
+        metrics.update(
+            compute_baseline_improvement_metrics(
+                sound_speed, truth, initial_speed, mask=case.grid.roi_mask
+            )
+        )
         return ReconstructionResult(
             algorithm=self.name,
             case_id=case.case_id,
@@ -80,7 +101,9 @@ def path_travel_time_s(sound_speed_mps: np.ndarray, spacing_m: float) -> float:
     return float(np.sum(spacing_m / speed))
 
 
-def waveform_from_speed(sound_speed_mps: np.ndarray, frequencies_hz: np.ndarray, spacing_m: float) -> np.ndarray:
+def waveform_from_speed(
+    sound_speed_mps: np.ndarray, frequencies_hz: np.ndarray, spacing_m: float
+) -> np.ndarray:
     frequencies = np.asarray(frequencies_hz, dtype=float)
     if frequencies.ndim != 1 or frequencies.size == 0:
         raise ValueError("frequencies_hz must be a non-empty 1-D array")
@@ -136,7 +159,9 @@ def gradient_descent(
         raise ValueError("bounds_mps must be positive and increasing")
     losses: list[float] = []
     for _ in range(max(0, int(steps))):
-        loss, grad = loss_and_gradient(speed, observed_waveform, frequencies_hz, spacing_m)
+        loss, grad = loss_and_gradient(
+            speed, observed_waveform, frequencies_hz, spacing_m
+        )
         losses.append(loss)
         speed = np.clip(speed - float(learning_rate) * grad, low, high)
     loss, _ = loss_and_gradient(speed, observed_waveform, frequencies_hz, spacing_m)

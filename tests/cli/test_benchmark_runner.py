@@ -12,9 +12,13 @@ def test_run_algorithm_case_writes_standard_artifacts(synthetic_case, tmp_path):
     case_path = tmp_path / "case.h5"
     config_path = tmp_path / "cgls.yaml"
     write_case_hdf5(synthetic_case, case_path)
-    config_path.write_text("name: straight_cgls\nparameters:\n  iterations: 2\n", encoding="utf-8")
+    config_path.write_text(
+        "name: straight_cgls\nparameters:\n  iterations: 2\n", encoding="utf-8"
+    )
 
-    out_dir = run_algorithm_case("straight_cgls", case_path, config_path, tmp_path / "runs")
+    out_dir = run_algorithm_case(
+        "straight_cgls", case_path, config_path, tmp_path / "runs"
+    )
 
     assert (out_dir / "result.h5").exists()
     assert (out_dir / "metrics.json").exists()
@@ -28,7 +32,9 @@ def test_benchmark_suite_runs_synthetic_case(synthetic_case, tmp_path):
     case_dir.mkdir()
     write_case_hdf5(synthetic_case, case_dir / "case.h5")
     config_path = tmp_path / "sirt.yaml"
-    config_path.write_text("name: straight_sirt\nparameters:\n  iterations: 2\n", encoding="utf-8")
+    config_path.write_text(
+        "name: straight_sirt\nparameters:\n  iterations: 2\n", encoding="utf-8"
+    )
     suite_path = tmp_path / "suite.yaml"
     suite_path.write_text(
         yaml.safe_dump(

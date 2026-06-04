@@ -1,81 +1,51 @@
-# External Sources And Licenses
+# External Sources and Licenses
 
-External USCT code must remain outside Git unless deliberately vendored after license review.
+External datasets, MATLAB packages, k-Wave environments, and generated
+benchmark outputs should stay outside this Git repository.
 
-## Policy
+## Repository Policy
 
-- Keep full external repositories under workspace-level `external/`, which is ignored by Git.
-- Prefer adapters and documented install steps over vendoring.
-- Save MATLAB input `.mat` files, logs, and outputs under the run directory, not under source control.
-- If an external dependency is unavailable, return `skipped` with a clear `failure_reason`.
+- Keep full external repositories under a workspace-level `external/` directory.
+- Keep raw datasets under `data/`.
+- Keep generated outputs under `runs/`.
+- Keep checkpoints or solver weights under `checkpoints/`.
+- Do not commit `.mat`, `.h5`, `.npy`, `.npz`, `.pt`, `.ckpt`, or raw run
+  artifacts.
+- Prefer small adapters and documented setup steps over vendoring third-party
+  code.
 
-## Optional Sources To Inspect
+## Optional External Sources
 
 | Purpose | Suggested source | Git policy |
-|---|---|---|
-| Straight-ray SART reference | `ust-sart` | external clone only |
-| Refraction-corrected GN | `rehmanali1994/refractionCorrectedUSCT.github.io` | external clone only |
-| Ray-Born / r-Wave | `Ash1362/ray-based-quantitative-ultrasound-tomography` | external clone only |
-| Waveform inversion references | `rehmanali1994/WaveformInversionUST` and A100 `$HOME/USCT_kwave` derivative scripts | external clone only |
-| Numerical breast phantoms | NBPslices2D archive from Illinois Data Bank / A100 `$HOME/USCT_kwave` mirror | data outside Git only |
+| --- | --- | --- |
+| Straight-ray references | USCT SART and algebraic tomography literature | cite only |
+| Refraction-corrected tomography | Refraction-corrected USCT papers and code | external checkout only |
+| Ray-Born / rWave references | Ray-based quantitative ultrasound tomography work | external checkout only |
+| Full waveform inversion | k-Wave and WaveformInversionUST-style workflows | external environment only |
+| OpenBreastUS | OpenBreastUS dataset distribution | data outside Git |
+| NBPslice2D | 2D Acoustic Numerical Breast Phantoms for USCT | data outside Git |
 
-The refraction-corrected GN reference paper describes slowness reconstruction
-as nonlinear least squares over travel times, solved by Gauss-Newton and
-conjugate gradients, with Laplacian regularization, Bayesian formulation, and
-resolution-filling gradients as stabilization options. The native
-`bent_ray_gn` backend currently implements the project-standard travel-time
-surrogate with Laplacian regularization and smoothing; the external MATLAB
-repository remains the reference for a fuller refraction-corrected path.
+## v0.1 Scope
 
-The r-Wave reference data package points to the GitHub project branch/folder
-`r-Wave #V1.1` and describes k-Wave-simulated transmission data for validating
-ray approximations to Green's functions. The native `rwave_adapter` backend is
-therefore treated as a benchmark-compatible ray-Born surrogate, not as a claim
-that the full external MATLAB workflow has been vendored.
+`usct-benchlab` v0.1 contains native Python baselines, dataset conversion
+helpers, a common benchmark harness, and an FWI result adapter. It does not
+vendor external MATLAB packages or full third-party repositories.
 
-## Current Repository State
+`bent_ray_gn` is a regularized bent-ray-style travel-time baseline in v0.1. The
+full external eikonal/refraction-corrected solver remains outside this package.
 
-The current repository contains native Python baselines plus optional adapter paths. It does not vendor external MATLAB packages or full third-party repositories.
+`rwave_adapter` is an rWave/ray-Born-inspired adapter baseline in v0.1. A full
+complex ray-Born reproduction requires external complex frequency-domain data
+and solver code.
 
-`bent_ray_gn` now has a project-native regularized travel-time GN smoke backend for the standard benchmark contract. The optional MATLAB path exports a standard MATLAB-readable HDF5 `.mat` input artifact under the case run directory, executes a configured entrypoint with `usctbench_input_mat` and `usctbench_output_mat` variables, and ingests a standard output MAT file when the entrypoint writes one. The public refraction-corrected MATLAB repository remains a reference and optional external integration target; clone it outside Git before experimenting with package-specific entrypoint scripts.
-
-`rwave_adapter` now has a project-native regularized ray-Born/r-Wave smoke backend for the standard benchmark contract. The optional MATLAB path uses the same input/output artifact contract for external r-Wave/ray-Born experiments. The public ray-based quantitative ultrasound tomography repository remains a reference and optional external integration target; clone it outside Git before experimenting with package-specific entrypoint scripts.
-
-For both optional MATLAB adapters, the run directory now includes
-`usctbench_read_case.m` and `usctbench_write_result.m`. External entrypoints
-should read `usctbench_input_mat`, map the fields into the third-party package's
-native structs or variables, then call `usctbench_write_result` with
-`sound_speed_mps`. The Python adapter will ingest that file and add
-project-standard image, water-baseline, and travel-time residual metrics when
-they are not provided by MATLAB.
-
-Repository-specific wrapper templates live under `scripts/matlab_adapters/`.
-They are usct-benchlab glue code, not vendored third-party source. Configure
-`external_root` to an external checkout and `entrypoint` to the template's
-absolute path:
-
-- `refraction_corrected_usct_entrypoint.m` for
-  `rehmanali1994/refractionCorrectedUSCT.github.io`.
-- `rwave_tof_greens_entrypoint.m` for
-  `Ash1362/ray-based-quantitative-ultrasound-tomography`.
-
-`fwi_kwave_adapter` reads existing MATLAB v7.3 FWI result files and can optionally launch the external A100 `USCT_kwave` pipeline. The external approach is derived from `rehmanali1994/WaveformInversionUST`, which is MIT licensed upstream. Keep the full MATLAB/k-Wave code and generated FWI datasets/results outside this Git repository.
-
-`NBPslices2D` is a CC BY numerical phantom dataset. The repository only stores
-conversion code, benchmark configs, and tests; the ZIP archive, extracted `.mat`
-files, converted HDF5 cases, and smoke benchmark outputs must remain under
-workspace `data/` or `runs/`, both ignored by Git.
-
-The v0.1 readiness audit executes the missing-dependency path for the MATLAB
-adapter shells. A valid skip record must include `status=skipped`, a clear
-`failure_reason`, `adapter_status=skipped`, and
-`adapter_dependency_available=false`. CLI runs must write a standard
-`failure_report.md` with `Error type: external-dependency`.
+`fwi_kwave_adapter` can ingest external k-Wave/FWI result artifacts and report
+them using the package-standard `result.h5`, `metrics.json`, `metadata.yaml`,
+and `preview.png` outputs.
 
 ## License Checklist Before Vendoring
 
-1. Record project URL and commit hash.
-2. Record license file and compatibility assessment.
-3. Confirm whether redistribution is allowed.
+1. Record the project URL and commit hash.
+2. Record the license file and compatibility assessment.
+3. Confirm redistribution is allowed.
 4. Keep large data, examples, and generated artifacts out of Git.
-5. Add an entry to this document and an algorithm card update.
+5. Add a focused note to this document and update the relevant algorithm docs.

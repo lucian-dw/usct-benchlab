@@ -14,7 +14,14 @@ def test_release_tree_has_expected_slim_shape():
         "src/usctbench/algorithms/fwi/adapter.py",
         "configs/algorithms/cgls.yaml",
         "configs/benchmarks/synthetic_demo.yaml",
+        ".github/workflows/tests.yml",
         "scripts/audit_release.py",
+        "docs/math_formulation.md",
+        "docs/usage.md",
+        "docs/algorithms.md",
+        "docs/datasets.md",
+        "docs/fwi.md",
+        "docs/development.md",
     ]
     forbidden = [
         "src/usctbench/features",
@@ -31,8 +38,23 @@ def test_release_tree_has_expected_slim_shape():
 
 
 def test_no_large_scientific_files_are_tracked():
-    proc = subprocess.run(["git", "ls-files"], text=True, stdout=subprocess.PIPE, check=True)
-    forbidden_suffixes = (".h5", ".hdf5", ".mat", ".npy", ".npz", ".zarr", ".pt", ".pth", ".ckpt", ".pkl")
-    tracked = [path for path in proc.stdout.splitlines() if path.endswith(forbidden_suffixes)]
+    proc = subprocess.run(
+        ["git", "ls-files"], text=True, stdout=subprocess.PIPE, check=True
+    )
+    forbidden_suffixes = (
+        ".h5",
+        ".hdf5",
+        ".mat",
+        ".npy",
+        ".npz",
+        ".zarr",
+        ".pt",
+        ".pth",
+        ".ckpt",
+        ".pkl",
+    )
+    tracked = [
+        path for path in proc.stdout.splitlines() if path.endswith(forbidden_suffixes)
+    ]
 
     assert tracked == []

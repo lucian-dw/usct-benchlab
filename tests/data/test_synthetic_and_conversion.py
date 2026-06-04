@@ -6,8 +6,15 @@ import h5py
 import numpy as np
 
 from usctbench.core.io import read_case_hdf5
-from usctbench.data.nbpslice2d import inspect_nbp_slice2d_zip, make_nbp_slice2d_smoke_subset
-from usctbench.data.synthetic import make_attenuation_case, make_sound_speed_case, make_synthetic_smoke_subset
+from usctbench.data.nbpslice2d import (
+    inspect_nbp_slice2d_zip,
+    make_nbp_slice2d_smoke_subset,
+)
+from usctbench.data.synthetic import (
+    make_attenuation_case,
+    make_sound_speed_case,
+    make_synthetic_smoke_subset,
+)
 
 
 def test_synthetic_cases_have_algorithm_ready_features():
@@ -20,10 +27,14 @@ def test_synthetic_cases_have_algorithm_ready_features():
 
 
 def test_make_synthetic_smoke_subset_writes_hdf5_cases(tmp_path):
-    records = make_synthetic_smoke_subset(tmp_path / "synthetic", shape=(8, 8), n_transducers=8)
+    records = make_synthetic_smoke_subset(
+        tmp_path / "synthetic", shape=(8, 8), n_transducers=8
+    )
 
     assert len(records) == 2
-    case = read_case_hdf5(tmp_path / "synthetic" / "cases" / "synthetic_circular_sos.h5")
+    case = read_case_hdf5(
+        tmp_path / "synthetic" / "cases" / "synthetic_circular_sos.h5"
+    )
     assert case.grid.shape == (8, 8)
 
 
@@ -41,7 +52,9 @@ def test_nbpslice2d_zip_inspection_and_smoke_conversion(tmp_path):
         archive.write(mat_path, "A/A_sample.mat")
 
     index = inspect_nbp_slice2d_zip(zip_path, tmp_path / "index.json")
-    manifest = make_nbp_slice2d_smoke_subset(zip_path, tmp_path / "nbp", converted_shape=(4, 4), n_transducers=8)
+    manifest = make_nbp_slice2d_smoke_subset(
+        zip_path, tmp_path / "nbp", converted_shape=(4, 4), n_transducers=8
+    )
 
     assert index["summary"]["num_cases"] == 1
     assert manifest["converted_cases"]
