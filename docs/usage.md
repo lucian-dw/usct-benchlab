@@ -1,6 +1,6 @@
 # Usage Guide
 
-This guide shows the normal v0.1 workflow for installation, dataset
+This guide shows the normal workflow for installation, dataset
 preparation, single-algorithm runs, benchmark runs, and output inspection.
 
 ## Install
@@ -153,7 +153,7 @@ usct run bent_ray_gn \
   --out runs/single_bent_ray
 ```
 
-`bent_ray_gn` is a regularized bent-ray-style travel-time baseline in v0.1.
+`bent_ray_gn` is a regularized bent-ray-style travel-time baseline.
 
 ## Run rWave Adapter
 
@@ -164,7 +164,7 @@ usct run rwave_adapter \
   --out runs/single_rwave
 ```
 
-`rwave_adapter` is an rWave/ray-Born-inspired adapter baseline in v0.1.
+`rwave_adapter` is an rWave/ray-Born-inspired adapter baseline.
 
 ## Run FWI Adapter
 

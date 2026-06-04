@@ -1,6 +1,6 @@
 # Development
 
-This document records the release hygiene commands for v0.1.
+This document records the release hygiene commands for `usct-benchlab`.
 
 ## Format and Lint
 

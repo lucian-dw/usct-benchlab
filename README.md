@@ -14,7 +14,7 @@ the object according to an acoustic wave equation, and receiver transducers
 measure the resulting pressure traces. The inverse problem is to recover
 spatial acoustic properties from those measurements.
 
-The main v0.1 target is the sound-speed map $c(x)$. Related physical
+The main reconstruction target is the sound-speed map $c(x)$. Related physical
 properties include density $\rho(x)$ and attenuation $\alpha(x)$. This package
 converts datasets to a common `USCTCase` schema and returns every algorithm
 output as a `ReconstructionResult`.
@@ -54,7 +54,7 @@ $$
 \{d_{sr}(t)\}_{s,r}.
 $$
 
-In v0.1, the primary reconstructed field is $c(x)$.
+The primary reconstructed field is $c(x)$.
 
 The straight-ray travel-time approximation uses a reference speed $c_0$ and
 ray path $\gamma_{sr}$:
@@ -89,7 +89,7 @@ $$
 t_{sr}\approx T_s(r).
 $$
 
-The v0.1 `bent_ray_gn` command is a regularized bent-ray-style travel-time
+The `bent_ray_gn` command is a regularized bent-ray-style travel-time
 baseline, not a full external eikonal solver.
 
 A schematic weak-scattering ray-Born model is
@@ -101,7 +101,7 @@ $$
 G_0(\omega,r,x)K_\omega(x)G_0(\omega,x,s)\delta m(x)\,dx.
 $$
 
-The v0.1 `rwave_adapter` command is a ray-Born-inspired adapter baseline. It
+The `rwave_adapter` command is a ray-Born-inspired adapter baseline. It
 does not claim full reproduction of an external complex rWave solver.
 
 FWI uses pressure data directly:
@@ -115,7 +115,7 @@ $$
 +\lambda R(c).
 $$
 
-The v0.1 FWI path is an adapter for high-fidelity external k-Wave/FWI results.
+The FWI path is an adapter for high-fidelity external k-Wave/FWI results.
 For more detail, see [docs/math_formulation.md](docs/math_formulation.md).
 
 ## Supported Algorithms

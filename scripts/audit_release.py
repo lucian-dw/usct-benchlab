@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 "exec" "python3" "$0" "$@"
-"""Repository-level release audit for the slim v0.1 package."""
+"""Repository-level release audit for the package."""
 
 import subprocess
 import sys

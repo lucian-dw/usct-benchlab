@@ -1,6 +1,6 @@
 # Documentation
 
-User-facing v0.1 documentation:
+User-facing documentation:
 
 - [Mathematical formulation](math_formulation.md)
 - [Usage guide](usage.md)

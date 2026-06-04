@@ -1,6 +1,6 @@
 # Mathematical Formulation
 
-This document summarizes the mathematical models used by `usct-benchlab` v0.1.
+This document summarizes the mathematical models used by `usct-benchlab`.
 The package uses one data/result interface, but the registered algorithms
 correspond to different approximations of the USCT inverse problem.
 
@@ -56,7 +56,7 @@ $$
 \{d_{sr}(t)\}_{s,r}.
 $$
 
-The v0.1 package focuses primarily on reconstructing the sound-speed map
+The package focuses primarily on reconstructing the sound-speed map
 $c(x)$. Attenuation is supported as a separate straight-ray baseline.
 
 ## Straight-Ray Approximation
@@ -104,7 +104,7 @@ $$
 c(x)=\frac{1}{\delta s(x)+1/c_0}.
 $$
 
-In v0.1:
+Registered sound-speed solvers:
 
 - `straight_cgls` is a Krylov least-squares solver.
 - `straight_sirt` is a simultaneous iterative reconstruction method.
@@ -143,9 +143,9 @@ $$
 +\lambda R(c).
 $$
 
-The v0.1 `bent_ray_gn` command is a regularized bent-ray-style travel-time
+The `bent_ray_gn` command is a regularized bent-ray-style travel-time
 baseline. It records `full_external_eikonal_solver = False` and
-`v0_1_backend = "regularized_travel_time_baseline"`.
+`backend = "regularized_travel_time_baseline"`.
 
 ## Weak-Scattering / Ray-Born Model
 
@@ -164,9 +164,9 @@ kernel, and $\delta m(x)$ is a contrast parameter. A complete implementation
 requires complex frequency-domain pressure data and careful reference-field
 handling.
 
-The v0.1 `rwave_adapter` command is an rWave/ray-Born-inspired adapter
+The `rwave_adapter` command is an rWave/ray-Born-inspired adapter
 baseline. It records `full_ray_born_solver = False` and
-`v0_1_backend = "adapter_style_travel_time_baseline"`.
+`backend = "adapter_style_travel_time_baseline"`.
 
 ## FWI PDE-Constrained Objective
 
@@ -183,7 +183,7 @@ $$
 $$
 
 The simulated pressure $\hat p_s(\omega,r;c)$ is constrained by the acoustic
-PDE and its discretization. In v0.1, `fwi_kwave_adapter` ingests external
+PDE and its discretization. The `fwi_kwave_adapter` command ingests external
 k-Wave/FWI artifacts or calls a configured external pipeline, then reports the
 result using the package-standard benchmark outputs.
 

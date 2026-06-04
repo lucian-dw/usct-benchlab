@@ -54,9 +54,9 @@ def test_adapter_baseline_metadata_is_explicit(synthetic_case):
     rwave = RWaveAdapter().run(synthetic_case, config)
 
     assert bent.metrics["full_external_eikonal_solver"] is False
-    assert bent.metrics["v0_1_backend"] == "regularized_travel_time_baseline"
+    assert bent.metrics["backend"] == "regularized_travel_time_baseline"
     assert rwave.metrics["full_ray_born_solver"] is False
-    assert rwave.metrics["v0_1_backend"] == "adapter_style_travel_time_baseline"
+    assert rwave.metrics["backend"] == "adapter_style_travel_time_baseline"
     assert rwave.metrics["ray_born_inspired"] is True
     assert "ray_born_linearization" not in rwave.metrics
 

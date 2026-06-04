@@ -29,7 +29,7 @@ class RWaveAdapter:
                     "ray_born_inspired": True,
                     "adapter_style": True,
                     "full_ray_born_solver": False,
-                    "v0_1_backend": "adapter_style_travel_time_baseline",
+                    "backend": "adapter_style_travel_time_baseline",
                     "surrogate_travel_time_backend": True,
                     "external_reference": "ray-Born/rWave literature",
                 },

@@ -1,6 +1,6 @@
 # FWI Adapter
 
-The v0.1 FWI path is exposed through `fwi_kwave_adapter`. It is designed to
+The FWI path is exposed through `fwi_kwave_adapter`. It is designed to
 ingest and report external k-Wave/FWI outputs in the same artifact format as
 the classical baselines.
 

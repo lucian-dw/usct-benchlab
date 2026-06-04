@@ -40,7 +40,7 @@ def normalize_measurement_provenance(value: Any) -> str:
 
 
 def measurement_provenance_from_metadata(metadata: dict[str, Any]) -> str:
-    """Infer legacy metadata into the explicit v0.1 provenance taxonomy."""
+    """Infer legacy metadata into the explicit provenance taxonomy."""
 
     value = metadata.get("measurement_provenance")
     if value:

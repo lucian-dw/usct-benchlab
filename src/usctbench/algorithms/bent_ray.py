@@ -46,7 +46,7 @@ def run_iterative_travel_time_solver(
 ) -> ReconstructionResult:
     """Run a small regularized travel-time inversion using project-native I/O.
 
-    This is the v0.1 smoke/quality path for algorithms whose full reference
+    This is the release smoke/quality path for algorithms whose full reference
     implementation lives in external MATLAB repositories. It keeps the same
     travel-time data contract and records method-family metadata so results are
     auditable without vendoring third-party code.
@@ -257,7 +257,7 @@ class BentRayGNAdapter:
                 extra_metrics={
                     "surrogate_travel_time_backend": True,
                     "full_external_eikonal_solver": False,
-                    "v0_1_backend": "regularized_travel_time_baseline",
+                    "backend": "regularized_travel_time_baseline",
                     "external_reference": "refraction-corrected USCT literature",
                 },
             )

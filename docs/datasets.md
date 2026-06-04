@@ -71,7 +71,7 @@ usct data make-nbp-quality \
   --n-transducers 128
 ```
 
-NBPslice2D slices are acoustic property maps. Converted v0.1 cases generate
+NBPslice2D slices are acoustic property maps. Converted cases generate
 the feature fields required by the classical baselines.
 
 ## Data Hygiene
