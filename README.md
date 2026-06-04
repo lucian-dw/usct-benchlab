@@ -32,8 +32,8 @@ A more general acoustic model can include density and attenuation:
 $$
 \begin{aligned}
 \frac{1}{c(x)^2}\partial_{tt}p_s
-- \nabla\cdot\left(\frac{1}{\rho(x)}\nabla p_s\right)
-+ \mathcal A_\alpha[p_s]
+-\nabla\cdot\left(\frac{1}{\rho(x)}\nabla p_s\right)
++\mathcal A_\alpha[p_s]
 &= q_s.
 \end{aligned}
 $$
