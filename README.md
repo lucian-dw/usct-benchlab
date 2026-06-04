@@ -1,5 +1,7 @@
 # usct-benchlab
 
+[中文说明](README.zh-CN.md)
+
 `usct-benchlab` is a lightweight Python benchmark package for ultrasound
 computed tomography (USCT) reconstruction algorithms with unified input/output,
 classical baselines, and FWI adapter support. It provides dataset conversion
