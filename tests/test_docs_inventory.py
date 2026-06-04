@@ -20,11 +20,13 @@ ALGORITHM_CARDS = [
     "docs/algorithm_cards/bent_ray_gn.md",
     "docs/algorithm_cards/rwave_ray_born.md",
     "docs/algorithm_cards/fwi_tiny.md",
+    "docs/algorithm_cards/fwi_kwave_adapter.md",
 ]
 
 
 def test_required_v01_docs_exist():
     required = [
+        "docs/README.md",
         "docs/architecture.md",
         "docs/A100_SERVER_SETUP.md",
         "docs/OPENBREASTUS_DATA_PROTOCOL.md",
@@ -36,6 +38,10 @@ def test_required_v01_docs_exist():
         "docs/ALGORITHM_SETTINGS_TROUBLESHOOTING.md",
         "docs/references.bib",
         "docs/V0_1_READINESS_CHECKLIST.md",
+        "docs/project/BENCHMARK_TIERS.md",
+        "docs/project/STAGE_SUMMARY.md",
+        "docs/project/OBSERVABLE_MISMATCH.md",
+        "docs/experiments/FWI_KWAVE_SUCCESS_NOTES.md",
         *ALGORITHM_CARDS,
     ]
     missing = [path for path in required if not Path(path).exists()]

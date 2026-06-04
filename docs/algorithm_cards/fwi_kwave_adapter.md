@@ -23,7 +23,13 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - The smoke config selects the best RMSE iteration against the external k-Wave `C_INTERP` grid for benchmark output. The renderer still writes both best and final reconstruction artifacts so final-iteration behavior remains visible.
 - The default benchmark wrapper case is generated at 256x256 so image metrics are comparable with the traditional quality runs. The external k-Wave/FWI result remains authoritative; judge FWI quality first against the external MAT `C_INTERP` grid and the k-Wave-native metrics, not only against surrogate wrapper metrics.
 - Acceptance requires the selected external iteration to improve over the external initial model using `kwave_gt_selected_relative_rmse_improvement`, plus k-Wave-native `kwave_native_psnr` and `kwave_native_ssim`. Final-iteration improvement is still recorded for diagnostics, but no longer gates the pass/fail result. Water/background improvement is also recorded for diagnostics, but is not a pass/fail gate for FWI.
-- Current reference: `/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/docs/experiments/2026-06-02_bulk_support_dps_mainline.md`. Pure bulk-support FWI reference inside metrics are: sample001 PSNR/SSIM/corr/HP-corr `26.1998/0.7887/0.9368/0.8869`; sample201 `26.4539/0.8315/0.9520/0.9240`; sample501 `26.1279/0.7936/0.9327/0.8941`; sample701 `29.3894/0.8216/0.8414/0.8092`.
+- Current local A100 reference:
+  `$USCT_KWAVE_ROOT/openbreastus_diffusion/kwave_dps/docs/experiments/2026-06-02_bulk_support_dps_mainline.md`.
+  Pure bulk-support FWI reference inside metrics are: sample001
+  PSNR/SSIM/corr/HP-corr `26.1998/0.7887/0.9368/0.8869`; sample201
+  `26.4539/0.8315/0.9520/0.9240`; sample501
+  `26.1279/0.7936/0.9327/0.8941`; sample701
+  `29.3894/0.8216/0.8414/0.8092`.
 
 ## Expected Failure Modes
 
@@ -58,6 +64,6 @@ This adapter represents frequency-domain waveform inversion for ring-array USCT 
 - `scripts/run_fwi_kwave_full_pipeline_smoke.sh`
 - `scripts/render_kwave_fwi_smoke_outputs.py`
 - `tests/test_fwi_kwave_adapter.py`
-- `docs/FWI_KWAVE_SUCCESS_NOTES.md`
-- A100 reference project: `$HOME/USCT_kwave/openbreastus_diffusion/kwave_dps`
+- `docs/experiments/FWI_KWAVE_SUCCESS_NOTES.md`
+- A100 reference project: `$USCT_KWAVE_ROOT` containing the external k-Wave FWI checkout
 - Upstream reference: `rehmanali1994/WaveformInversionUST`, frequency-domain waveform inversion UST using a ring-array transducer.

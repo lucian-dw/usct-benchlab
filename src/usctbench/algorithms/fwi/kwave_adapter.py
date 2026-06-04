@@ -395,7 +395,7 @@ def _run_external_pipeline(case: USCTCase, config: AlgorithmConfig, result_path:
         )
 
     usct_kwave_root = Path(
-        _expand_text(config.parameters.get("usct_kwave_root", os.environ.get("USCT_KWAVE_ROOT", "/home/wudalong/USCT_kwave")))
+        _expand_text(config.parameters.get("usct_kwave_root", os.environ.get("USCT_KWAVE_ROOT", "$HOME/USCT_kwave")))
     ).expanduser()
     commands = [list(command) for command in build["commands"]]
     env = os.environ.copy()

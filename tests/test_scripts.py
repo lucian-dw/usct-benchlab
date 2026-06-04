@@ -24,8 +24,8 @@ def test_shell_scripts_source_local_env():
         Path("scripts/run_openbreastus_smoke.sh"),
         Path("scripts/run_fwi_kwave_adapter_smoke.sh"),
         Path("scripts/run_fwi_kwave_full_pipeline_smoke.sh"),
-        Path("scripts/run_external_matlab_adapter_smoke.sh"),
-        Path("scripts/run_external_matlab_adapter_quality.sh"),
+        Path("scripts/experimental/run_external_matlab_adapter_smoke.sh"),
+        Path("scripts/experimental/run_external_matlab_adapter_quality.sh"),
         Path("scripts/run_nbpslice2d_smoke.sh"),
         Path("scripts/run_openbreastus_quality.sh"),
         Path("scripts/run_nbpslice2d_quality.sh"),
@@ -87,12 +87,12 @@ def test_external_matlab_entrypoint_templates_match_adapter_contract():
 def test_external_matlab_adapter_smoke_script_and_protocol_are_reproducible():
     import yaml
 
-    script = Path("scripts/run_external_matlab_adapter_smoke.sh").read_text(encoding="utf-8")
-    protocol = yaml.safe_load(Path("configs/benchmarks/external_matlab_adapter_smoke.yaml").read_text(encoding="utf-8"))
-    bent_config = yaml.safe_load(Path("configs/algorithms/bent_ray_gn_external_matlab.yaml").read_text(encoding="utf-8"))
-    rwave_config = yaml.safe_load(Path("configs/algorithms/rwave_adapter_external_matlab.yaml").read_text(encoding="utf-8"))
+    script = Path("scripts/experimental/run_external_matlab_adapter_smoke.sh").read_text(encoding="utf-8")
+    protocol = yaml.safe_load(Path("configs/benchmarks/archive/external_matlab_adapter_smoke.yaml").read_text(encoding="utf-8"))
+    bent_config = yaml.safe_load(Path("configs/algorithms/experimental/bent_ray_gn_external_matlab.yaml").read_text(encoding="utf-8"))
+    rwave_config = yaml.safe_load(Path("configs/algorithms/experimental/rwave_adapter_external_matlab.yaml").read_text(encoding="utf-8"))
 
-    assert "configs/benchmarks/external_matlab_adapter_smoke.yaml" in script
+    assert "configs/benchmarks/archive/external_matlab_adapter_smoke.yaml" in script
     assert "USCT_REFRACTION_CORRECTED_ROOT" in script
     assert "USCT_RWAVE_ROOT" in script
     assert "MATLAB_BIN" in script
@@ -109,13 +109,13 @@ def test_external_matlab_adapter_smoke_script_and_protocol_are_reproducible():
 def test_external_matlab_adapter_quality_script_and_protocol_are_reproducible():
     import yaml
 
-    script = Path("scripts/run_external_matlab_adapter_quality.sh").read_text(encoding="utf-8")
-    protocol = yaml.safe_load(Path("configs/benchmarks/external_matlab_adapter_quality.yaml").read_text(encoding="utf-8"))
+    script = Path("scripts/experimental/run_external_matlab_adapter_quality.sh").read_text(encoding="utf-8")
+    protocol = yaml.safe_load(Path("configs/benchmarks/archive/external_matlab_adapter_quality.yaml").read_text(encoding="utf-8"))
 
     assert "make-quality" in script
     assert "USCT_QUALITY_CONVERTED_SHAPE:-256" in script
     assert "USCT_QUALITY_N_TRANSDUCERS:-128" in script
-    assert "configs/benchmarks/external_matlab_adapter_quality.yaml" in script
+    assert "configs/benchmarks/archive/external_matlab_adapter_quality.yaml" in script
     assert "external_matlab_quality_${USCT_QUALITY_CONVERTED_SHAPE}_4class_gray.png" in script
     assert "--cmap gray" in script
     assert "--transpose" in script

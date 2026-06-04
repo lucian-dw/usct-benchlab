@@ -2,10 +2,11 @@
 
 ## Scope
 
-This note records the successful v0.1 k-Wave FWI path without vendoring data,
-MATLAB code, generated RF fields, or run outputs. The adapter remains a
-standard `USCTCase -> ReconstructionResult` algorithm, while the full-wave
-simulation and inversion live in the external A100 `USCT_kwave` tree.
+This historical experiment note records the successful v0.1 k-Wave FWI path
+without vendoring data, MATLAB code, generated RF fields, or run outputs. The
+adapter remains a standard `USCTCase -> ReconstructionResult` algorithm, while
+the full-wave simulation and inversion live in an external A100 `USCT_kwave`
+tree configured through `$USCT_KWAVE_ROOT`.
 
 ## Code Map
 
@@ -55,14 +56,15 @@ preprocessed k-Wave datasets such as test201:
 - background attenuation: `0`;
 - raw gradient dumps: disabled by default.
 
-The preferred sample201 dataset is:
+The preferred sample201 dataset is configured through `USCT_KWAVE_DATASET_PATH`.
+For the A100 experiment, it pointed to:
 
 ```text
-/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/outputs/dps_preproc_test201_latestckpt/datasets/kWave_openbreast_test201_full128_scale1p000_preproc_crop300_tla250_ab0_s2a0_cuda_binary.mat
+$USCT_KWAVE_ROOT/openbreastus_diffusion/kwave_dps/outputs/dps_preproc_test201_latestckpt/datasets/kWave_openbreast_test201_full128_scale1p000_preproc_crop300_tla250_ab0_s2a0_cuda_binary.mat
 ```
 
 Reference pure-FWI inside metrics from
-`/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/docs/experiments/2026-06-02_bulk_support_dps_mainline.md`:
+`$USCT_KWAVE_ROOT/openbreastus_diffusion/kwave_dps/docs/experiments/2026-06-02_bulk_support_dps_mainline.md`:
 
 ```text
 sample001: PSNR=26.1998 SSIM=0.7887 corr=0.9368 HP-corr=0.8869
@@ -113,5 +115,5 @@ Do not delete the following when cleaning redundant FWI files:
 - this note and the `fwi_kwave_adapter` algorithm card.
 
 Run outputs under `runs/`, external MATLAB/k-Wave code under `external/` or
-`$HOME/USCT_kwave`, datasets, RF fields, and `.mat` results must remain outside
+`$USCT_KWAVE_ROOT`, datasets, RF fields, and `.mat` results must remain outside
 Git.

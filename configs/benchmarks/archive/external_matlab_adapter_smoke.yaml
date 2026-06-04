@@ -1,13 +1,13 @@
 name: external_matlab_adapter_smoke
 description: One-case external MATLAB proof-of-life for Bent-ray and r-Wave adapters.
-case_glob: ${USCT_EXTERNAL_MATLAB_SAMPLE_ROOT:-/home/wudalong/usct-benchlab/data/openbreastus_external_matlab_smoke_64}/cases/*.h5
+case_glob: ${USCT_EXTERNAL_MATLAB_SAMPLE_ROOT:-data/openbreastus_external_matlab_smoke_64}/cases/*.h5
 algorithms:
   - name: bent_ray_gn
-    config: configs/algorithms/bent_ray_gn_external_matlab.yaml
+    config: configs/algorithms/experimental/bent_ray_gn_external_matlab.yaml
   - name: rwave_adapter
-    config: configs/algorithms/rwave_adapter_external_matlab.yaml
+    config: configs/algorithms/experimental/rwave_adapter_external_matlab.yaml
 outputs:
-  root: ${USCT_RUN_ROOT:-/home/wudalong/usct-benchlab/runs/usctbench_runs}
+  root: ${USCT_RUN_ROOT:-runs/usctbench_runs}
 min_cases: 1
 min_records: 2
 expected_algorithms:

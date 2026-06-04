@@ -4,8 +4,8 @@ parameters:
   run_external: true
   execution_mode: ${USCT_KWAVE_EXECUTION_MODE:-invert_existing_dataset}
   baseline_sound_speed_mps: 1500.0
-  usct_kwave_root: ${USCT_KWAVE_ROOT:-/home/wudalong/USCT_kwave}
-  python_bin: ${USCT_KWAVE_PYTHON_BIN:-/home/wudalong/miniconda3/envs/usct-kwave/bin/python}
+  usct_kwave_root: ${USCT_KWAVE_ROOT:-$HOME/USCT_kwave}
+  python_bin: ${USCT_KWAVE_PYTHON_BIN:-$HOME/miniconda3/envs/usct-kwave/bin/python}
   pipeline_module: openbreastus_diffusion.kwave_dps.run_full_pipeline
   mat_path: ${USCT_KWAVE_SOURCE_MAT}
   mat_key: ${USCT_KWAVE_MAT_KEY}
@@ -26,7 +26,7 @@ parameters:
   output_dir: ${USCT_KWAVE_OUTPUT_DIR}
   siminfo_path: ${USCT_KWAVE_SIMINFO_PATH}
   scratch_dir: ${USCT_KWAVE_SCRATCH_DIR}
-  dataset_path: ${USCT_KWAVE_DATASET_PATH:-/home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/outputs/dps_preproc_test201_latestckpt/datasets/kWave_openbreast_test201_full128_scale1p000_preproc_crop300_tla250_ab0_s2a0_cuda_binary.mat}
+  dataset_path: ${USCT_KWAVE_DATASET_PATH}
   external_log_path: ${USCT_KWAVE_EXTERNAL_LOG_PATH}
   warm_start_builder: bulk_support
   warm_start_module: openbreastus_diffusion.kwave_dps.make_bulk_support_init
@@ -117,13 +117,13 @@ parameters:
   save_raw_grad_iters: 0
   timeout_s: 21600
 metadata:
-  external_source: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/run_full_pipeline.py
+  external_source: ${USCT_KWAVE_ROOT:-$HOME/USCT_kwave}/openbreastus_diffusion/kwave_dps/run_full_pipeline.py
   default_mode: invert_existing_dataset
   default_dataset_alignment: preproc_crop300_tla250 existing k-Wave MAT, full128 cuda-binary, attenuation disabled.
   default_initialization: bulk-support warm start from openbreastus_diffusion.kwave_dps.make_bulk_support_init.
   frequency_schedule_mhz: "0.3:0.025:0.8 with 3 sound-speed iterations per frequency"
-  reference_bulk_support_doc: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/docs/experiments/2026-06-02_bulk_support_dps_mainline.md
-  reference_bulk_support_config: /home/wudalong/USCT_kwave/openbreastus_diffusion/kwave_dps/configs/bulk_support_dps_notebook30_mainline.json
+  reference_bulk_support_doc: ${USCT_KWAVE_ROOT:-$HOME/USCT_kwave}/openbreastus_diffusion/kwave_dps/docs/experiments/2026-06-02_bulk_support_dps_mainline.md
+  reference_bulk_support_config: ${USCT_KWAVE_ROOT:-$HOME/USCT_kwave}/openbreastus_diffusion/kwave_dps/configs/bulk_support_dps_notebook30_mainline.json
   reference_pure_fwi_metrics: "test201 pure FWI inside_psnr=26.4539 inside_ssim=0.8315 inside_corr=0.9520 inside_hp_corr=0.9240"
   default_selection: best RMSE iteration against external C_INTERP, with final iteration retained as a diagnostic artifact.
   fallback_initialization: unset warm_start_builder to use constant background/debug mode.

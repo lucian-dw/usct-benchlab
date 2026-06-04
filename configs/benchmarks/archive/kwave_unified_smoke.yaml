@@ -14,7 +14,7 @@ algorithms:
   - name: rwave_adapter
     config: configs/algorithms/rwave_adapter.yaml
   - name: fwi_kwave_adapter
-    config: configs/algorithms/fwi_kwave_data_sanity.yaml
+    config: configs/algorithms/experimental/fwi_kwave_data_sanity.yaml
 outputs:
   root: runs/usctbench_runs
 min_cases: 1

@@ -11,8 +11,8 @@ case:
   density_kg_per_m3: 1000.0
 simulation:
   backend: kwave_a100
-  python_bin: ${USCT_KWAVE_PYTHON_BIN:-/home/wudalong/miniconda3/envs/usct-kwave/bin/python}
-  usct_kwave_root: ${USCT_KWAVE_ROOT:-/home/wudalong/USCT_kwave}
+  python_bin: ${USCT_KWAVE_PYTHON_BIN:-$HOME/miniconda3/envs/usct-kwave/bin/python}
+  usct_kwave_root: ${USCT_KWAVE_ROOT:-$HOME/USCT_kwave}
   array_mode: full128
   external_backend: cuda-binary
   reference_sound_speed_mps: 1500.0

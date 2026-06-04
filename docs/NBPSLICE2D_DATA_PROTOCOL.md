@@ -4,7 +4,7 @@
 RF data. The A100 reference archive is expected at:
 
 ```text
-$HOME/USCT_kwave/openbreastus_diffusion/data/openbreastus_speed_crop400/NBPslices2D.zip
+/path/to/NBPslices2D.zip
 ```
 
 The public Illinois Data Bank description records 1,089 HDF5 `.mat` slices,

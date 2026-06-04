@@ -1,13 +1,13 @@
 name: external_matlab_adapter_quality
 description: Four-class 256x256 OpenBreastUS quality comparison for external MATLAB Bent-ray and r-Wave adapters.
-case_glob: ${USCT_EXTERNAL_MATLAB_QUALITY_ROOT:-/home/wudalong/usct-benchlab/data/openbreastus_external_matlab_quality_256}/cases/*.h5
+case_glob: ${USCT_EXTERNAL_MATLAB_QUALITY_ROOT:-data/openbreastus_external_matlab_quality_256}/cases/*.h5
 algorithms:
   - name: bent_ray_gn
-    config: configs/algorithms/bent_ray_gn_external_matlab.yaml
+    config: configs/algorithms/experimental/bent_ray_gn_external_matlab.yaml
   - name: rwave_adapter
-    config: configs/algorithms/rwave_adapter_external_matlab.yaml
+    config: configs/algorithms/experimental/rwave_adapter_external_matlab.yaml
 outputs:
-  root: ${USCT_RUN_ROOT:-/home/wudalong/usct-benchlab/runs/usctbench_runs}
+  root: ${USCT_RUN_ROOT:-runs/usctbench_runs}
 min_cases: 4
 min_records: 8
 expected_algorithms:

@@ -18,7 +18,7 @@ if [ -z "${PYTHON_BIN:-}" ]; then
 fi
 
 WORKSPACE="${USCT_WORKSPACE:-$(cd "$REPO_DIR/.." && pwd)}"
-USCT_NBP_ZIP_PATH="${USCT_NBP_ZIP_PATH:-$HOME/USCT_kwave/openbreastus_diffusion/data/openbreastus_speed_crop400/NBPslices2D.zip}"
+USCT_NBP_ZIP_PATH="${USCT_NBP_ZIP_PATH:-$WORKSPACE/data/NBPslices2D.zip}"
 USCT_NBP_SAMPLE_ROOT="${USCT_NBP_SAMPLE_ROOT:-$WORKSPACE/data/nbpslice2d_sample}"
 USCT_NBP_RUN_ROOT="${USCT_NBP_RUN_ROOT:-$WORKSPACE/runs/usctbench_runs}"
 USCT_NBP_CASES_PER_TYPE="${USCT_NBP_CASES_PER_TYPE:-1}"

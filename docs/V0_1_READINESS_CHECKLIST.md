@@ -1,56 +1,52 @@
 # v0.1 Readiness Checklist
 
-This checklist records current evidence. It is not a claim that v0.1 is complete.
+This checklist describes the release checks for the cleanup branch. It is a
+repository readiness checklist, not a claim that every heavy A100 benchmark has
+been rerun in the current local checkout.
 
-| Requirement | Current evidence | Status |
-|---|---|---|
-| Local `pytest -q` passes | Current branch test suite passes locally on `codex-agent0-skeleton` | Passing |
-| A100 `pytest -q` passes | Current branch test suite passes with `/home/wudalong/miniconda3/bin/python` | Passing |
-| `usct --help` works | editable install and CLI smoke verified locally | Passing |
-| OpenBreastUS inspect runs on A100 | writes index for `breast_train_speed.mat` plus linked local k-Wave simulation MAT evidence | Passing for current A100 mirror |
-| Smoke subset created on A100 | writes manifest and `cases/a_kwave_train_6602.h5` after clearing stale converted cases | Passing |
-| `straight_sart` smoke run | A100 smoke benchmark writes standard artifacts and passes thresholds | Passing |
-| `attenuation_sirt` smoke run | A100 smoke benchmark writes standard artifacts and passes thresholds using simulated nonzero attenuation evidence from a k-Wave channel MAT file | Passing with simulated-data limitation |
-| Tiny FWI gradient check | `test_fwi_gradient_check.py` | Passing synthetic-only |
-| Tiny FWI loss decrease | `test_fwi_loss_decrease.py` | Passing synthetic-only |
-| Bent-ray native/backend + external smoke | OpenBreastUS and NBPslice2D smoke/quality runs write standard metrics and previews; external MATLAB smoke uses the public refraction-corrected repository path and standard adapter MAT I/O | Passing native and 64 smoke external paths |
-| r-Wave native/backend + external smoke | OpenBreastUS and NBPslice2D smoke/quality runs write standard metrics and previews; external MATLAB smoke uses the public ray-Born/r-Wave repository path and standard adapter MAT I/O | Passing native and 64 smoke external paths |
-| k-Wave FWI adapter | A100 `fwi_kwave_full_pipeline_success201_dense` and best-selected re-ingest evidence show external result loading, GT/native metrics, and visual artifacts | Passing one-case A100 smoke |
-| MATLAB adapter dependency path | adapter tests and readiness audit verify `skipped`, external-dependency failure report, and adapter skip metadata when MATLAB backend is requested and unavailable | Passing skip path |
-| Benchmark reports generated automatically | `usct bench` writes CSV and Markdown with reasons/runtime/memory | Passing |
-| Algorithm cards exist for registered algorithms | cards under `docs/algorithm_cards/` | Passing |
-| No data/run/checkpoint outputs committed | `.gitignore` plus current branch status | Passing in current commits |
+## Required Local Checks
 
-## Known Gaps
+- `python -m compileall src tests`
+- `pytest -q`
+- `usct --help`
+- `usct list-algorithms`
+- `python scripts/audit_v01_readiness.py --root .`
+- `git ls-files | grep -E '\.(h5|hdf5|mat|npy|npz|zarr|pt|pth|ckpt|pkl)$' || true`
 
-- The configured A100 data root includes a local symlink to a k-Wave simulation MAT file so attenuation smoke has nonzero simulated attenuation evidence. It is not raw measured OpenBreastUS RF data.
-- The speed-map-only `breast_train_speed.mat` path remains supported, but zero `log_amp` surrogate cases no longer count as valid attenuation DoD evidence.
-- MATLAB adapters now export a standard MATLAB-readable `USCTCase` input MAT
-  file, execute configured entrypoints with `usctbench_input_mat` and
-  `usctbench_output_mat` variables, and ingest standard adapter output MAT
-  files. The default `bent_ray_gn` and `rwave_adapter` paths remain native
-  benchmark backends; public-package-specific entrypoint templates and a
-  reproducible 64x64 external MATLAB smoke script are now in Git.
-- `fwi_tiny` is synthetic proof-of-life only. Production-like FWI evidence is
-  currently the A100 k-Wave adapter path, not `fwi_tiny`.
-- k-Wave FWI has one validated OpenBreastUS test201 smoke case. It is not yet a
-  broad multi-case benchmark.
+## Release Mainline
 
-## Audit Command
+| Track | Suite | Expected role |
+| --- | --- | --- |
+| Travel-time surrogate | `configs/benchmarks/travel_time_surrogate_main.yaml` | CGLS/SIRT/SART, bent-ray surrogate, rWave surrogate |
+| k-Wave FWI | `configs/benchmarks/kwave_fwi_main.yaml` | high-fidelity pure FWI adapter |
+| Smoke/unit | `configs/benchmarks/synthetic_smoke.yaml` and local tests | interface and regression checks |
 
-Repository readiness can be checked with:
+## Diagnostic or Archived Paths
+
+- k-Wave unified ray/rWave feature suites are archived under
+  `configs/benchmarks/archive/`.
+- External MATLAB adapter suites are archived and optional. They require
+  third-party code outside this repository.
+- Experimental algorithm configs live under `configs/algorithms/experimental/`.
+- Historical FWI alignment notes live under `docs/experiments/`.
+
+## Audit Commands
+
+Repository-only audit:
 
 ```bash
 python scripts/audit_v01_readiness.py --root .
 ```
 
-To include benchmark evidence from A100:
+Audit a benchmark run:
 
 ```bash
-python scripts/audit_v01_readiness.py --root . --run-dir "$USCT_RUN_ROOT/<run_id>"
+python scripts/audit_v01_readiness.py \
+  --root . \
+  --run-dir "$USCT_RUN_ROOT/<run_id>"
 ```
 
-To include the current 256 quality and FWI visual evidence bundle from A100:
+Audit a quality evidence bundle:
 
 ```bash
 python scripts/audit_v01_readiness.py \
@@ -58,7 +54,7 @@ python scripts/audit_v01_readiness.py \
   --quality-evidence-root "$USCT_RUN_ROOT"
 ```
 
-For v0.1 release evidence, include the index and smoke manifest:
+Full OpenBreastUS smoke evidence, when local data is available:
 
 ```bash
 python scripts/audit_v01_readiness.py \
@@ -69,70 +65,24 @@ python scripts/audit_v01_readiness.py \
   --require-v01-dod
 ```
 
-The full v0.1 evidence chain can be run on A100 with:
+Convenience release check:
 
 ```bash
-PYTHON_BIN=/home/wudalong/miniconda3/bin/python bash scripts/run_v01_release_check.sh
+bash scripts/run_v01_release_check.sh
 ```
 
-This script runs `pytest`, `inspect-openbreastus`, `make-smoke`, the smoke
-benchmark suite, and `audit_v01_readiness.py --require-v01-dod` with explicit
-OpenBreastUS index, smoke manifest, and run-directory evidence.
+If `USCT_DATA_ROOT` is not present, the convenience script runs repository
+checks and prints an explicit data-benchmark skip. Set `USCT_DATA_ROOT` and the
+workspace variables documented in `README.md` to run the full data evidence
+chain.
 
-The latest verified A100 release check in this thread used:
+## Current Release Evidence Policy
 
-```text
-run_root=/home/wudalong/usct-benchlab/runs/usctbench_runs/openbreastus_smoke_20260530T152151Z
-git_commit=f20d5542e8584c0b50bce3acb94d8013c824ec17
-records=2
-passed=2
-```
-
-Use `--require-clean` only when intentionally auditing a clean release checkout; Codex working threads may have user-owned unstaged instruction edits.
-
-`scripts/run_smoke.sh` runs `pytest` everywhere. When `$USCT_SAMPLE_ROOT/cases/*.h5` exists, it also runs `configs/benchmarks/openbreastus_smoke.yaml` and audits the generated run directory.
-
-`scripts/run_openbreastus_smoke.sh` is the explicit A100 OpenBreastUS smoke
-entrypoint when the sample set has not yet been generated. It inspects the data
-root, creates 64x64 smoke cases, runs `straight_sart`, `bent_ray_gn`,
-`rwave_adapter`, and `attenuation_sirt`, then renders a grayscale sound-speed
-comparison panel for the three sound-speed algorithms.
-
-## Current Traditional/FWI Evidence Paths
-
-Representative A100 evidence from the current branch:
-
-- OpenBreastUS 4-class 256 quality:
-  `/home/wudalong/usct-benchlab/runs/usctbench_runs/openbreastus_quality_20260531T164948Z`
-  - run check: `benchmark_run_checks.json`
-  - panel: `comparison_artifacts/openbreastus_quality_256_4class_5alg_gray.png`
-- NBPslice2D 4-class 256 quality:
-  `/home/wudalong/usct-benchlab/runs/usctbench_runs/nbpslice2d_quality_20260531T162341Z`
-  - run check: `benchmark_run_checks.json`
-  - panel: `comparison_artifacts/nbpslice2d_quality_256_4class_5alg_gray.png`
-- k-Wave FWI successful full-pipeline result:
-  `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_full_pipeline_success201_dense`
-- k-Wave FWI re-ingest with corrected acceptance metrics:
-  `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_best_grid_reingest_2b8d7a5`
-  - run check: `benchmark_run_checks.json`
-  - selected metrics: `kwave_gt_rmse=16.85`, `kwave_gt_selected_relative_rmse_improvement=0.343`, `kwave_gt_ssim=0.677`
-- Single-case cross-algorithm visual comparison:
-  `/home/wudalong/usct-benchlab/runs/usctbench_runs/fwi_kwave_best_grid_reingest_2b8d7a5/comparison_artifacts/fwi_case_test201_best_grid_cross_algorithm_gray.png`
-- External MATLAB adapter 64 smoke:
-  `/home/wudalong/usct-benchlab/runs/usctbench_runs/external_matlab_adapter_smoke_20260531T215551Z`
-  - run check: `benchmark_run_checks.json`
-  - panel: `comparison_artifacts/external_matlab_smoke_64_gray.png`
-- External MATLAB adapter 256 quality:
-  `/home/wudalong/usct-benchlab/runs/usctbench_runs/external_matlab_adapter_quality_20260531T221421Z`
-  - run check: `benchmark_run_checks.json`
-  - suite: `configs/benchmarks/external_matlab_adapter_quality.yaml`
-  - panel: `comparison_artifacts/external_matlab_quality_256_4class_gray.png`
-  - Bent-ray RMSE range: `10.73-21.43`; r-Wave RMSE range: `10.13-21.28`
-
-The current evidence bundle can be audited on A100 with:
-
-```bash
-python scripts/audit_v01_readiness.py \
-  --root /home/wudalong/usct-benchlab/code \
-  --quality-evidence-root /home/wudalong/usct-benchlab/runs/usctbench_runs
-```
+- README comparison panels are small, committed, compressed artifacts under
+  `docs/assets/`.
+- Raw runs, generated HDF5/MAT files, datasets, checkpoints, and external code
+  must remain outside Git.
+- Travel-time surrogate metrics should be reported as baseline/sanity evidence.
+- FWI metrics should be reported as k-Wave full-wave evidence.
+- k-Wave-derived ray/rWave/true-bent results should be reported only as
+  diagnostic evidence unless a future release adds separate validation.

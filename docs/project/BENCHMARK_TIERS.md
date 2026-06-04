@@ -51,11 +51,11 @@ Expected metadata:
 The previous unified k-Wave ray-feature path is retired from the main
 benchmark. In particular, do not run straight-ray, bent-ray surrogate,
 attenuation, or rWave surrogate algorithms on k-Wave-derived apparent/eikonal
-ToF feature cases as a formal result. The compatibility file
-`configs/benchmarks/kwave_unified_quality.yaml` now points to FWI only and
-exists only to avoid stale entry-point confusion.
+ToF feature cases as a formal result.
 
-The following paths are no longer mainline:
+The archived compatibility file now lives at
+`configs/benchmarks/archive/kwave_unified_quality.yaml`. The following paths
+are no longer mainline:
 
 - k-Wave apparent/eikonal ToF feature cases for ray algorithms
 - true-bent shortest-path/eikonal prototypes

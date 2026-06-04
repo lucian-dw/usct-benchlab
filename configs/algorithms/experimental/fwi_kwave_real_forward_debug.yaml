@@ -4,8 +4,8 @@ parameters:
   run_external: true
   execution_mode: invert_existing_dataset
   baseline_sound_speed_mps: 1500.0
-  usct_kwave_root: ${USCT_KWAVE_ROOT:-/home/wudalong/USCT_kwave}
-  python_bin: ${USCT_KWAVE_PYTHON_BIN:-/home/wudalong/miniconda3/envs/usct-kwave/bin/python}
+  usct_kwave_root: ${USCT_KWAVE_ROOT:-$HOME/USCT_kwave}
+  python_bin: ${USCT_KWAVE_PYTHON_BIN:-$HOME/miniconda3/envs/usct-kwave/bin/python}
   pipeline_module: openbreastus_diffusion.kwave_dps.run_full_pipeline
   dataset_path: ${USCT_KWAVE_DATASET_PATH}
   external_log_path: ${USCT_KWAVE_EXTERNAL_LOG_PATH}

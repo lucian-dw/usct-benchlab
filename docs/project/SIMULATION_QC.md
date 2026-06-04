@@ -52,4 +52,10 @@ or reference handling.
 
 If QC fails, the case metadata is stamped with `simulation_failed_qc: true`. The benchmark runner skips algorithm execution for that case and writes `failure_reason=simulation_failed_qc`, so downstream reports cannot treat the reconstruction as a valid conclusion.
 
-The local `native_smoke` backend validates data plumbing and QC logic. Formal high-fidelity evidence should be generated on A100 with an actual k-Wave backend and the same QC contract.
+The local `native_smoke` backend validates data plumbing and QC logic. Formal
+high-fidelity evidence should be generated on A100 with an actual k-Wave
+backend and the same QC contract.
+
+For v0.1 release ranking, passing simulation QC is necessary but not sufficient
+to make k-Wave-derived ray/rWave features a formal benchmark. Those paths are
+archived as observable-mismatch diagnostics. The k-Wave mainline is FWI.

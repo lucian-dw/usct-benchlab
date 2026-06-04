@@ -41,6 +41,27 @@ SMOKE_SUITE="${USCT_SMOKE_BENCHMARK_SUITE:-configs/benchmarks/openbreastus_smoke
 SMOKE_MANIFEST="$USCT_SAMPLE_ROOT/openbreastus_smoke_manifest.json"
 
 "$PYTHON_BIN" -m pytest -q
+
+RUN_WRITE_TEST="$USCT_RUN_ROOT/.release_check_write_test"
+if ! mkdir -p "$USCT_RUN_ROOT" 2>/dev/null || ! ( : > "$RUN_WRITE_TEST" ) 2>/dev/null; then
+  echo "SKIP_DATA_BENCHMARK=1"
+  echo "Run root is not writable: $USCT_RUN_ROOT"
+  echo "Repository-only release checks passed; set USCT_RUN_ROOT to a writable path to run benchmark evidence."
+  PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" scripts/audit_v01_readiness.py \
+    --root "$REPO_DIR"
+  exit 0
+fi
+rm -f "$RUN_WRITE_TEST"
+
+if [ ! -d "$USCT_DATA_ROOT" ]; then
+  echo "SKIP_DATA_BENCHMARK=1"
+  echo "OpenBreastUS data root not found: $USCT_DATA_ROOT"
+  echo "Repository-only release checks passed; set USCT_DATA_ROOT to run the data benchmark evidence chain."
+  PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" scripts/audit_v01_readiness.py \
+    --root "$REPO_DIR"
+  exit 0
+fi
+
 PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli data inspect-openbreastus --root "$USCT_DATA_ROOT" --out "$INDEX_PATH"
 PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli data make-smoke --root "$USCT_DATA_ROOT" --out "$USCT_SAMPLE_ROOT" --cases-per-density 1
 

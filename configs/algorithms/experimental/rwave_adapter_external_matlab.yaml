@@ -2,8 +2,8 @@ name: rwave_adapter
 parameters:
   backend: matlab
   matlab_bin: ${MATLAB_BIN:-/usr/local/MATLAB/R2021b/bin/matlab}
-  external_root: ${USCT_RWAVE_ROOT:-/home/wudalong/usct-benchlab/external/ray-based-quantitative-ultrasound-tomography}
-  entrypoint: ${USCT_RWAVE_ENTRYPOINT:-/home/wudalong/usct-benchlab/code/scripts/matlab_adapters/rwave_tof_greens_entrypoint.m}
+  external_root: ${USCT_RWAVE_ROOT:-external/ray-based-quantitative-ultrasound-tomography}
+  entrypoint: ${USCT_RWAVE_ENTRYPOINT:-scripts/matlab_adapters/rwave_tof_greens_entrypoint.m}
   timeout_s: 900
   outer_iterations: 2
   inner_iterations: 24

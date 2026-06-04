@@ -157,11 +157,6 @@ def test_v01_audit_accepts_quality_evidence_bundle(tmp_path):
             ["straight_cgls", "straight_sirt", "straight_sart", "bent_ray_gn", "rwave_adapter"] * 4,
             True,
         ),
-        "external_matlab_adapter_quality_20260531T221421Z": (
-            "comparison_artifacts/external_matlab_quality_256_4class_gray",
-            ["bent_ray_gn", "rwave_adapter"] * 4,
-            True,
-        ),
         "fwi_kwave_best_grid_reingest_2b8d7a5": (
             "comparison_artifacts/fwi_case_test201_best_grid_cross_algorithm_gray",
             ["straight_cgls", "straight_sirt", "straight_sart", "bent_ray_gn", "rwave_adapter", "fwi_kwave_adapter"],
