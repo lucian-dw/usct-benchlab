@@ -10,15 +10,11 @@ The FWI objective is summarized as
 
 $$
 \min_c
-\frac{1}{2}
-\sum_{\omega,s,r}
+\frac{1}{2}\sum_{\omega,s,r}
 \left|
-\hat p_s(\omega,r;c)
--
-\hat p_{sr}^{\mathrm{obs}}(\omega)
+\hat p_s(\omega,r;c)-\hat p_{sr}^{\mathrm{obs}}(\omega)
 \right|^2
-+
-\lambda R(c).
++\lambda R(c).
 $$
 
 The pressure prediction $\hat p_s(\omega,r;c)$ is produced by an external

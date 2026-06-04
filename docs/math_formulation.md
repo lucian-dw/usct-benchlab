@@ -19,13 +19,12 @@ is sound speed.
 A more general model may include density and attenuation:
 
 $$
+\begin{aligned}
 \frac{1}{c(x)^2}\partial_{tt}p_s
--
-\nabla\cdot\left(\frac{1}{\rho(x)}\nabla p_s\right)
-+
-\mathcal A_\alpha[p_s]
-=
-q_s.
+- \nabla\cdot\left(\frac{1}{\rho(x)}\nabla p_s\right)
++ \mathcal A_\alpha[p_s]
+&= q_s.
+\end{aligned}
 $$
 
 The density field is $\rho(x)$, and $\mathcal A_\alpha$ denotes an attenuation
@@ -70,9 +69,7 @@ $$
 \Delta t_{sr}
 \approx
 \int_{\gamma_{sr}}
-\left(
-\frac{1}{c(x)}-\frac{1}{c_0}
-\right)d\ell .
+\left(\frac{1}{c(x)}-\frac{1}{c_0}\right)d\ell .
 $$
 
 Define the slowness perturbation
@@ -142,10 +139,8 @@ least-squares problem:
 
 $$
 \min_c
-\sum_{s,r}
-\left|t_{sr}^{\mathrm{obs}}-T_s(r;c)\right|^2
-+
-\lambda R(c).
+\sum_{s,r}\left|t_{sr}^{\mathrm{obs}}-T_s(r;c)\right|^2
++\lambda R(c).
 $$
 
 The v0.1 `bent_ray_gn` command is a regularized bent-ray-style travel-time
@@ -161,10 +156,7 @@ $$
 \delta \hat p_{sr}(\omega)
 \approx
 \int_\Omega
-G_0(\omega,r,x)
-K_\omega(x)
-G_0(\omega,x,s)
-\delta m(x)\,dx .
+G_0(\omega,r,x)K_\omega(x)G_0(\omega,x,s)\delta m(x)\,dx .
 $$
 
 $G_0$ is a background Green's function, $K_\omega$ is a frequency-dependent
@@ -183,15 +175,11 @@ observed pressure to simulated pressure. In frequency-domain notation:
 
 $$
 \min_c
-\frac{1}{2}
-\sum_{\omega,s,r}
+\frac{1}{2}\sum_{\omega,s,r}
 \left|
-\hat p_s(\omega,r;c)
--
-\hat p_{sr}^{\mathrm{obs}}(\omega)
+\hat p_s(\omega,r;c)-\hat p_{sr}^{\mathrm{obs}}(\omega)
 \right|^2
-+
-\lambda R(c).
++\lambda R(c).
 $$
 
 The simulated pressure $\hat p_s(\omega,r;c)$ is constrained by the acoustic

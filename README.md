@@ -30,13 +30,12 @@ $$
 A more general acoustic model can include density and attenuation:
 
 $$
+\begin{aligned}
 \frac{1}{c(x)^2}\partial_{tt}p_s
--
-\nabla\cdot\left(\frac{1}{\rho(x)}\nabla p_s\right)
-+
-\mathcal A_\alpha[p_s]
-=
-q_s.
+- \nabla\cdot\left(\frac{1}{\rho(x)}\nabla p_s\right)
++ \mathcal A_\alpha[p_s]
+&= q_s.
+\end{aligned}
 $$
 
 Receiver $r$ observes the pressure through a measurement operator:
@@ -64,9 +63,7 @@ $$
 \Delta t_{sr}
 \approx
 \int_{\gamma_{sr}}
-\left(
-\frac{1}{c(x)}-\frac{1}{c_0}
-\right)d\ell.
+\left(\frac{1}{c(x)}-\frac{1}{c_0}\right)d\ell.
 $$
 
 After discretization,
@@ -101,10 +98,7 @@ $$
 \delta \hat p_{sr}(\omega)
 \approx
 \int_\Omega
-G_0(\omega,r,x)
-K_\omega(x)
-G_0(\omega,x,s)
-\delta m(x)\,dx.
+G_0(\omega,r,x)K_\omega(x)G_0(\omega,x,s)\delta m(x)\,dx.
 $$
 
 The v0.1 `rwave_adapter` command is a ray-Born-inspired adapter baseline. It
@@ -114,15 +108,11 @@ FWI uses pressure data directly:
 
 $$
 \min_c
-\frac{1}{2}
-\sum_{\omega,s,r}
+\frac{1}{2}\sum_{\omega,s,r}
 \left|
-\hat p_s(\omega,r;c)
--
-\hat p_{sr}^{\mathrm{obs}}(\omega)
+\hat p_s(\omega,r;c)-\hat p_{sr}^{\mathrm{obs}}(\omega)
 \right|^2
-+
-\lambda R(c).
++\lambda R(c).
 $$
 
 The v0.1 FWI path is an adapter for high-fidelity external k-Wave/FWI results.

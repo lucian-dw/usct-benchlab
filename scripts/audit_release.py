@@ -59,6 +59,11 @@ FORBIDDEN_DIRS = [
     "scripts/matlab_adapters",
     "docs/internal",
 ]
+FORBIDDEN_FILES = [
+    "AGENTS.md",
+    "CODEX_GOAL_PROMPT.md",
+    "codex_goal_prompt.md",
+]
 
 
 def main() -> int:
@@ -74,6 +79,12 @@ def main() -> int:
     ]
     if existing_forbidden_dirs:
         failures.append("forbidden directories still exist: " + ", ".join(existing_forbidden_dirs))
+
+    existing_forbidden_files = [
+        path for path in FORBIDDEN_FILES if (root / path).exists()
+    ]
+    if existing_forbidden_files:
+        failures.append("forbidden development files still exist: " + ", ".join(existing_forbidden_files))
 
     tracked = _git_ls_files(root)
     data_files = [path for path in tracked if path.endswith(FORBIDDEN_SUFFIXES)]
