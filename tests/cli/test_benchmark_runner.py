@@ -26,6 +26,24 @@ def test_run_algorithm_case_writes_standard_artifacts(synthetic_case, tmp_path):
     assert (out_dir / "preview.png").exists()
 
 
+def test_run_algorithm_case_rejects_config_algorithm_mismatch(synthetic_case, tmp_path):
+    register_builtin_algorithms()
+    case_path = tmp_path / "case.h5"
+    config_path = tmp_path / "sirt.yaml"
+    write_case_hdf5(synthetic_case, case_path)
+    config_path.write_text(
+        "name: straight_sirt\nparameters:\n  iterations: 2\n", encoding="utf-8"
+    )
+
+    out_dir = run_algorithm_case(
+        "straight_cgls", case_path, config_path, tmp_path / "runs"
+    )
+    metadata = yaml.safe_load((out_dir / "metadata.yaml").read_text())
+
+    assert metadata["status"] == "failed"
+    assert "algorithm/config mismatch" in metadata["failure_reason"]
+
+
 def test_benchmark_suite_runs_synthetic_case(synthetic_case, tmp_path):
     register_builtin_algorithms()
     case_dir = tmp_path / "cases"

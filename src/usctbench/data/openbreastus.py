@@ -208,7 +208,8 @@ def _case_capabilities(files: list[dict[str, Any]]) -> dict[str, Any]:
         "sound_speed" in file["roles"]
         and file["suffix"] == ".mat"
         and isinstance(file.get("schema"), dict)
-        and bool(file["schema"].get("largest_3d_dataset"))
+        and bool((file["schema"].get("largest_3d_dataset") or {}).get("dataset"))
+        and bool((file["schema"].get("largest_3d_dataset") or {}).get("shape"))
         and not bool(file["schema"].get("kwave_channel_mat"))
         for file in files
     )
@@ -403,12 +404,16 @@ def _schema(path: Path) -> dict[str, Any]:
             }
             try:
                 schema["largest_3d_dataset"] = speed_mat_metadata(path)
-            except Exception:
-                schema["largest_3d_dataset"] = None
+            except Exception as exc:
+                schema["largest_3d_dataset"] = {
+                    "read_error": f"{type(exc).__name__}: {exc}"
+                }
             try:
                 schema["kwave_channel_mat"] = kwave_channel_mat_metadata(path)
-            except Exception:
-                schema["kwave_channel_mat"] = None
+            except Exception as exc:
+                schema["kwave_channel_mat"] = {
+                    "read_error": f"{type(exc).__name__}: {exc}"
+                }
             return schema
         except Exception as exc:
             return {
@@ -426,7 +431,8 @@ def _shape_from_schema(schema: dict[str, Any]) -> Any:
     if "datasets" in schema:
         return {name: value["shape"] for name, value in schema["datasets"].items()}
     if "largest_3d_dataset" in schema:
-        return schema["largest_3d_dataset"]
+        largest = schema["largest_3d_dataset"] or {}
+        return largest.get("shape")
     return None
 
 
@@ -677,10 +683,9 @@ def _canonical_openbreastus_class_ranges(
     """Infer OpenBreastUS four-class ranges for canonical train/test speed volumes.
 
     The public speed-map mirror is commonly stored as `breast_train_speed.mat`
-    with one 3-D dataset, ordered by class in four contiguous blocks. The A100
-    preprocessing records confirm this for the current 7200-sample train file.
-    This inference is only used for quality panels; measured-data loaders should
-    still prefer explicit class metadata when available.
+    with one 3-D dataset, often ordered by class in four contiguous blocks.
+    This inference is only a fallback for quality panels; explicit class
+    metadata should be preferred whenever it is available.
     """
 
     if not _is_speed_mat_volume(file_record):
@@ -709,10 +714,12 @@ def _is_kwave_channel_mat(file_record: dict[str, Any]) -> bool:
 
 
 def _is_speed_mat_volume(file_record: dict[str, Any]) -> bool:
+    largest = file_record.get("schema", {}).get("largest_3d_dataset") or {}
     return (
         "sound_speed" in file_record.get("roles", [])
         and file_record.get("suffix") == ".mat"
-        and bool(file_record.get("schema", {}).get("largest_3d_dataset"))
+        and bool(largest.get("dataset"))
+        and bool(largest.get("shape"))
         and not _is_kwave_channel_mat(file_record)
     )
 

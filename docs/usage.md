@@ -38,6 +38,8 @@ export USCT_DATA_ROOT=$USCT_WORKSPACE/data/openbreastus
 export USCT_RUN_ROOT=$USCT_WORKSPACE/runs/usctbench_runs
 export USCT_NBP_ZIP_PATH=/path/to/NBPslices2D.zip
 export USCT_KWAVE_FWI_RESULT_PATH=/path/to/fwi_result.mat
+export USCT_KWAVE_ROOT=/path/to/external/USCT_kwave
+export USCT_KWAVE_PYTHON_BIN=/path/to/python
 ```
 
 Prepare directories:
@@ -45,6 +47,10 @@ Prepare directories:
 ```bash
 bash scripts/setup_workspace.sh
 ```
+
+The setup script creates workspace directories and lightweight repo-local
+symlinks such as `data/raw/openbreastus` and `runs/current`. It does not copy
+datasets into Git and it does not make generated runs tracked files.
 
 ## Synthetic Demo
 
@@ -172,7 +178,13 @@ Set an external artifact path:
 
 ```bash
 export USCT_KWAVE_FWI_RESULT_PATH=/path/to/fwi_result.mat
+export USCT_KWAVE_ROOT=/path/to/external/USCT_kwave
+export USCT_KWAVE_PYTHON_BIN=/path/to/python
 ```
+
+The result MAT file must contain `VEL_ESTIM`. Optional fields such as
+`C_INTERP`, `VEL_ESTIM_ITER`, and `LOSS_ITER` enable ground-truth metrics and
+iteration selection.
 
 Run:
 

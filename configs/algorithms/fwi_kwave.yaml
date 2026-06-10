@@ -4,7 +4,7 @@ parameters:
   run_external: false
   reconstruction_iteration: ${USCT_KWAVE_RECONSTRUCTION_ITERATION:-best}
   baseline_sound_speed_mps: 1500.0
-  usct_kwave_root: ${USCT_KWAVE_ROOT:-$HOME/USCT_kwave}
-  python_bin: ${USCT_KWAVE_PYTHON_BIN:-$HOME/miniconda3/envs/usct-kwave/bin/python}
+  usct_kwave_root: ${USCT_KWAVE_ROOT:-}
+  python_bin: ${USCT_KWAVE_PYTHON_BIN:-}
   pipeline_module: openbreastus_diffusion.kwave_dps.run_full_pipeline
   timeout_s: 21600

@@ -219,7 +219,28 @@ class USCTCase(_ArrayModel):
         for name, value in arrays.items():
             if value is not None and value.shape != expected_shape:
                 raise ValueError(f"{name} must match grid.shape")
+        self._validate_feature_measurement_shapes()
         return self
+
+    def _validate_feature_measurement_shapes(self) -> None:
+        expected_shape = (
+            int(self.geometry.tx_pos_m.shape[0]),
+            int(self.geometry.rx_pos_m.shape[0]),
+        )
+        arrays = {
+            "measurement.tof_s": self.measurement.tof_s,
+            "measurement.delta_tof_s": self.measurement.delta_tof_s,
+            "measurement.tof_first_arrival_s": self.measurement.tof_first_arrival_s,
+            "measurement.tof_xcorr_s": self.measurement.tof_xcorr_s,
+            "measurement.phase_slope_delay_s": self.measurement.phase_slope_delay_s,
+            "measurement.log_amp": self.measurement.log_amp,
+            "measurement.valid_mask": self.measurement.valid_mask,
+            "measurement.feature_quality": self.measurement.feature_quality,
+            "measurement.ray_weights": self.measurement.ray_weights,
+        }
+        for name, value in arrays.items():
+            if value is not None and value.shape != expected_shape:
+                raise ValueError(f"{name} must match (n_tx, n_rx)={expected_shape}")
 
 
 class AlgorithmConfig(_ArrayModel):

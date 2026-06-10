@@ -144,8 +144,8 @@ def speed_mat_metadata(mat_path: str | Path) -> dict[str, Any] | None:
                 ),
                 "mat_format": str(speed_volume["format"]),
             }
-    except Exception:
-        return None
+    except Exception as exc:
+        return {"read_error": f"{type(exc).__name__}: {exc}"}
 
 
 def convert_kwave_channel_mat(
@@ -341,8 +341,8 @@ def nbp_slice2d_mat_metadata(mat_path: str | Path) -> dict[str, Any] | None:
     try:
         with h5py.File(mat_path, "r") as handle:
             return _nbp_metadata_from_handle(handle)
-    except Exception:
-        return None
+    except Exception as exc:
+        return {"read_error": f"{type(exc).__name__}: {exc}"}
 
 
 def _speed_array_to_case(
@@ -769,8 +769,8 @@ def _grid_from_coordinates(
     if xi is not None and yi is not None and xi.size > 1 and yi.size > 1:
         x_min, x_max = float(np.nanmin(xi)), float(np.nanmax(xi))
         y_min, y_max = float(np.nanmin(yi)), float(np.nanmax(yi))
-        dy = (y_max - y_min) / float(shape[0])
-        dx = (x_max - x_min) / float(shape[1])
+        dy = (y_max - y_min) / float(max(shape[0] - 1, 1))
+        dx = (x_max - x_min) / float(max(shape[1] - 1, 1))
         if dy > 0.0 and dx > 0.0:
             return GridSpec(
                 shape=shape,

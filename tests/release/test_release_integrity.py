@@ -22,6 +22,9 @@ def test_release_tree_has_expected_slim_shape():
         "docs/datasets.md",
         "docs/fwi.md",
         "docs/development.md",
+        "LICENSE",
+        "examples/README.md",
+        "examples/synthetic_quickstart.sh",
     ]
     forbidden = [
         "src/usctbench/features",

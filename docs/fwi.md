@@ -26,6 +26,8 @@ Set:
 
 ```bash
 export USCT_KWAVE_FWI_RESULT_PATH=/path/to/fwi_result.mat
+export USCT_KWAVE_ROOT=/path/to/external/USCT_kwave
+export USCT_KWAVE_PYTHON_BIN=/path/to/python
 ```
 
 Then run:
@@ -36,6 +38,25 @@ usct run fwi_kwave_adapter \
   --config configs/algorithms/fwi_kwave.yaml \
   --out runs/single_fwi
 ```
+
+The result MAT file must contain `VEL_ESTIM`, the final reconstructed sound
+speed image. Optional fields enable richer reports:
+
+| Field | Meaning |
+| --- | --- |
+| `C_INTERP` | Ground-truth sound speed used for FWI-native metrics. |
+| `ATTEN_ESTIM` | Final attenuation estimate. |
+| `VEL_ESTIM_ITER` | Sound-speed images over iterations. |
+| `ATTEN_ESTIM_ITER` | Attenuation images over iterations. |
+| `LOSS_ITER` | Per-iteration loss curve and iteration count. |
+| `VEL_INIT` | Initial sound-speed model. |
+| `ATTEN_INIT_USED` | Initial attenuation model. |
+| `psnr_value`, `ssim_value` | Native external metrics, if saved. |
+| `datasetPath` | External dataset path recorded by the FWI pipeline. |
+
+If `run_external: true` is enabled in the config, `USCT_KWAVE_ROOT` must point
+to the external solver checkout. If `USCT_KWAVE_PYTHON_BIN` is unset, the
+adapter uses the current Python interpreter.
 
 ## Run the Demo Suite
 

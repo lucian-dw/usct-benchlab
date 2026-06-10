@@ -5,8 +5,8 @@ This document records the release hygiene commands for `usct-benchlab`.
 ## Format and Lint
 
 ```bash
-black src tests
-ruff check src tests --fix
+black src tests scripts
+ruff check src tests scripts --fix
 ```
 
 ## Compile and Test
@@ -27,7 +27,7 @@ bash scripts/run_smoke.sh
 ## Release Audit
 
 ```bash
-bash scripts/audit_release.py
+python scripts/audit_release.py
 ```
 
 Additional checks:

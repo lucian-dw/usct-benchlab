@@ -119,8 +119,8 @@ class KWaveFWIAdapterAlgorithm:
 
     The default path is intentionally non-invasive: it reads an existing
     MATLAB result MAT file and converts it to the standard ReconstructionResult.
-    Set `run_external: true` only in A100 configs that deliberately invoke the
-    external `USCT_kwave` pipeline.
+    Set `run_external: true` only in environments that deliberately invoke an
+    external k-Wave/FWI pipeline.
     """
 
     name = "fwi_kwave_adapter"
@@ -453,13 +453,19 @@ def _run_external_pipeline(
             failure_reason=str(build["error"]),
         )
 
-    usct_kwave_root = Path(
-        _expand_text(
-            config.parameters.get(
-                "usct_kwave_root", os.environ.get("USCT_KWAVE_ROOT", "$HOME/USCT_kwave")
-            )
+    root_text = _expand_text(
+        config.parameters.get("usct_kwave_root", os.environ.get("USCT_KWAVE_ROOT", ""))
+    ).strip()
+    if not root_text or "$" in root_text:
+        return ReconstructionResult(
+            algorithm=KWaveFWIAdapterAlgorithm.name,
+            case_id=case.case_id,
+            status=ResultStatus.SKIPPED,
+            failure_reason=(
+                "run_external requires parameters.usct_kwave_root or " "USCT_KWAVE_ROOT"
+            ),
         )
-    ).expanduser()
+    usct_kwave_root = Path(root_text).expanduser()
     commands = [list(command) for command in build["commands"]]
     env = os.environ.copy()
     env["PYTHONPATH"] = str(usct_kwave_root) + (
@@ -549,7 +555,7 @@ def _build_external_pipeline_command(
             "error": f"unsupported k-Wave external execution_mode: {mode}",
         }
 
-    python_bin = _expand_text(config.parameters.get("python_bin", sys.executable))
+    python_bin = _configured_python_bin(config)
     module = _expand_text(
         config.parameters.get(
             "pipeline_module", "openbreastus_diffusion.kwave_dps.run_full_pipeline"
@@ -627,7 +633,7 @@ def _with_optional_warm_start_steps(
     diagnostic_prefix = _configured_path(
         config, "warm_start_diagnostic_prefix"
     ) or warm_start_path.with_suffix("")
-    python_bin = _expand_text(config.parameters.get("python_bin", sys.executable))
+    python_bin = _configured_python_bin(config)
     warm_module = _warm_start_module_for_builder(config)
     warm_command = [
         python_bin,
@@ -681,7 +687,15 @@ def _configured_path(config: AlgorithmConfig, key: str) -> Path | None:
     value = config.parameters.get(key)
     if not value:
         return None
-    return Path(_expand_text(value)).expanduser()
+    expanded = _expand_text(value).strip()
+    if not expanded or "$" in expanded:
+        return None
+    return Path(expanded).expanduser()
+
+
+def _configured_python_bin(config: AlgorithmConfig) -> str:
+    value = _expand_text(config.parameters.get("python_bin", "")).strip()
+    return value if value and "$" not in value else sys.executable
 
 
 def _configured_iteration(
@@ -716,7 +730,7 @@ def _best_iteration_by_rmse(
     stack = external.get("sound_speed_iter_mps")
     if stack is None:
         return None, {"best_iteration_reason": "missing_sound_speed_iter"}
-    images = _iteration_stack(stack)
+    images = _iteration_stack(stack, iterations=external.get("iterations"))
     if images is None or images.size == 0:
         return None, {"best_iteration_reason": "empty_sound_speed_iter"}
 
@@ -767,7 +781,7 @@ def _select_iteration_image(
     if stack is None:
         value = external.get(final_key)
         return np.asarray(value, dtype=float) if value is not None else None
-    array = _iteration_stack(stack)
+    array = _iteration_stack(stack, iterations=external.get("iterations"))
     if array is None or array.shape[0] == 0:
         value = external.get(final_key)
         return np.asarray(value, dtype=float) if value is not None else None
@@ -775,13 +789,41 @@ def _select_iteration_image(
     return array[index]
 
 
-def _iteration_stack(stack: Any) -> np.ndarray | None:
+def _iteration_stack(stack: Any, iterations: Any = None) -> np.ndarray | None:
     array = np.asarray(stack, dtype=float)
     if array.ndim < 3:
         return None
-    if array.shape[0] <= array.shape[-1]:
+    if array.ndim != 3:
         return array
-    return np.moveaxis(array, -1, 0)
+
+    iteration_count = _positive_int(iterations)
+    if iteration_count is not None:
+        matching_axes = [
+            axis
+            for axis, length in enumerate(array.shape)
+            if int(length) == iteration_count
+        ]
+        if len(matching_axes) == 1:
+            return np.moveaxis(array, matching_axes[0], 0)
+        if matching_axes:
+            preferred_axis = 2 if 2 in matching_axes else matching_axes[0]
+            return np.moveaxis(array, preferred_axis, 0)
+
+    if array.shape[0] < min(array.shape[1], array.shape[2]):
+        return array
+    if array.shape[-1] < min(array.shape[0], array.shape[1]):
+        return np.moveaxis(array, -1, 0)
+    if array.shape[0] == array.shape[1]:
+        return np.moveaxis(array, -1, 0)
+    return array
+
+
+def _positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _loss_at_iteration(losses: Any, iteration: int | None) -> float | None:

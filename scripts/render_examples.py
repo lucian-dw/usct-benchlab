@@ -13,7 +13,6 @@ import numpy as np
 
 from usctbench.core.io import read_case_hdf5, read_result_hdf5
 
-
 DEFAULT_ALGORITHMS = [
     "straight_cgls",
     "straight_sirt",
@@ -56,24 +55,52 @@ def main() -> int:
     summary_rows: list[dict[str, Any]] = []
     for row_label, case in zip(args.row_labels, cases, strict=True):
         gt = np.asarray(case.ground_truth.sound_speed_mps, dtype=float)
-        row: list[dict[str, Any]] = [{"label": "GT", "image": gt, "metrics": {}, "row_label": row_label}]
-        for algorithm, column_label in zip(args.algorithms, args.algorithm_labels, strict=True):
+        row: list[dict[str, Any]] = [
+            {"label": "GT", "image": gt, "metrics": {}, "row_label": row_label}
+        ]
+        for algorithm, column_label in zip(
+            args.algorithms, args.algorithm_labels, strict=True
+        ):
             result_path = Path(args.run_dir) / algorithm / case.case_id / "result.h5"
             if result_path.exists():
                 result = read_result_hdf5(result_path)
                 image = result.sound_speed_mps
+                if image is None:
+                    raise SystemExit(
+                        f"{result_path} does not contain sound_speed_mps; "
+                        "render_examples.py only renders sound-speed comparison panels"
+                    )
                 metrics = dict(result.metrics)
                 row.append(
                     {
                         "label": column_label,
-                        "image": _apply_transform(np.asarray(image, dtype=float), transforms.get(algorithm, "")),
+                        "image": _apply_transform(
+                            np.asarray(image, dtype=float),
+                            transforms.get(algorithm, ""),
+                        ),
                         "metrics": metrics,
                     }
                 )
-                summary_rows.append({"case_id": case.case_id, "row_label": row_label, "algorithm": algorithm, **_metric_subset(metrics)})
+                summary_rows.append(
+                    {
+                        "case_id": case.case_id,
+                        "row_label": row_label,
+                        "algorithm": algorithm,
+                        **_metric_subset(metrics),
+                    }
+                )
             else:
-                row.append({"label": column_label, "image": None, "metrics": {"missing": True}})
-                summary_rows.append({"case_id": case.case_id, "row_label": row_label, "algorithm": algorithm, "missing": True})
+                row.append(
+                    {"label": column_label, "image": None, "metrics": {"missing": True}}
+                )
+                summary_rows.append(
+                    {
+                        "case_id": case.case_id,
+                        "row_label": row_label,
+                        "algorithm": algorithm,
+                        "missing": True,
+                    }
+                )
         rows.append(row)
 
     _write_panel(rows, Path(args.out), title=args.title, cmap=args.cmap, unit=args.unit)
@@ -103,7 +130,9 @@ def _parse_transforms(values: list[str]) -> dict[str, str]:
     transforms: dict[str, str] = {}
     for value in values:
         if "=" not in value:
-            raise SystemExit(f"display transform must be algorithm=transform, got {value!r}")
+            raise SystemExit(
+                f"display transform must be algorithm=transform, got {value!r}"
+            )
         algorithm, transform = value.split("=", 1)
         transforms[algorithm.strip()] = transform.strip().lower()
     return transforms
@@ -136,7 +165,9 @@ def _load_cases(cases_dir: Path, case_ids: list[str]) -> list[Any]:
     return [by_id[case_id] for case_id in case_ids]
 
 
-def _write_panel(rows: list[list[dict[str, Any]]], out: Path, *, title: str, cmap: str, unit: str) -> None:
+def _write_panel(
+    rows: list[list[dict[str, Any]]], out: Path, *, title: str, cmap: str, unit: str
+) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -150,7 +181,9 @@ def _write_panel(rows: list[list[dict[str, Any]]], out: Path, *, title: str, cma
     out.parent.mkdir(parents=True, exist_ok=True)
     nrows = len(rows)
     ncols = max(len(row) for row in rows)
-    images = [cell["image"] for row in rows for cell in row if cell["image"] is not None]
+    images = [
+        cell["image"] for row in rows for cell in row if cell["image"] is not None
+    ]
     vmin, vmax = _shared_limits(images)
 
     fig, axes = plt.subplots(
@@ -176,9 +209,17 @@ def _write_panel(rows: list[list[dict[str, Any]]], out: Path, *, title: str, cma
             if image is None:
                 ax.text(0.5, 0.5, "missing", ha="center", va="center", fontsize=8)
             else:
-                image_artist = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax, interpolation="nearest")
+                image_artist = ax.imshow(
+                    image, cmap=cmap, vmin=vmin, vmax=vmax, interpolation="nearest"
+                )
             if row_idx == 0:
-                ax.set_title(str(cell["label"]), fontsize=11, pad=11, fontweight="bold", color="black")
+                ax.set_title(
+                    str(cell["label"]),
+                    fontsize=11,
+                    pad=11,
+                    fontweight="bold",
+                    color="black",
+                )
             if col_idx == 0:
                 ax.text(
                     -0.13,
@@ -218,7 +259,9 @@ def _write_panel(rows: list[list[dict[str, Any]]], out: Path, *, title: str, cma
         hspace=0.42,
     )
     if image_artist is not None:
-        colorbar = fig.colorbar(image_artist, ax=axes.ravel().tolist(), fraction=0.016, pad=0.012)
+        colorbar = fig.colorbar(
+            image_artist, ax=axes.ravel().tolist(), fraction=0.016, pad=0.012
+        )
         colorbar.set_label(unit, fontsize=9)
         colorbar.ax.tick_params(labelsize=8)
     fig.savefig(out, bbox_inches="tight", facecolor="white")
@@ -228,8 +271,12 @@ def _write_panel(rows: list[list[dict[str, Any]]], out: Path, *, title: str, cma
 def _metric_text(metrics: dict[str, Any]) -> str:
     if metrics.get("missing"):
         return "missing"
-    psnr_key = "kwave_native_psnr" if _is_number(metrics.get("kwave_native_psnr")) else "psnr"
-    ssim_key = "kwave_native_ssim" if _is_number(metrics.get("kwave_native_ssim")) else "ssim"
+    psnr_key = (
+        "kwave_native_psnr" if _is_number(metrics.get("kwave_native_psnr")) else "psnr"
+    )
+    ssim_key = (
+        "kwave_native_ssim" if _is_number(metrics.get("kwave_native_ssim")) else "ssim"
+    )
     if _is_number(metrics.get(psnr_key)):
         text = f"PSNR {float(metrics[psnr_key]):.1f}"
         if _is_number(metrics.get(ssim_key)):
@@ -254,8 +301,15 @@ def _metric_subset(metrics: dict[str, Any]) -> dict[str, Any]:
 
 
 def _shared_limits(images: list[np.ndarray]) -> tuple[float, float]:
-    finite_parts = [np.asarray(image, dtype=float)[np.isfinite(image)].reshape(-1) for image in images]
-    finite = np.concatenate([part for part in finite_parts if part.size]) if finite_parts else np.asarray([])
+    finite_parts = [
+        np.asarray(image, dtype=float)[np.isfinite(image)].reshape(-1)
+        for image in images
+    ]
+    finite = (
+        np.concatenate([part for part in finite_parts if part.size])
+        if finite_parts
+        else np.asarray([])
+    )
     if finite.size == 0:
         return 0.0, 1.0
     low, high = np.percentile(finite, [1.0, 99.0])
@@ -266,7 +320,15 @@ def _shared_limits(images: list[np.ndarray]) -> tuple[float, float]:
 
 def _write_summary_csv(rows: list[dict[str, Any]], path: Path) -> None:
     fields = sorted({key for row in rows for key in row})
-    preferred = ["row_label", "case_id", "algorithm", "rmse", "ssim", "kwave_gt_rmse", "kwave_gt_ssim"]
+    preferred = [
+        "row_label",
+        "case_id",
+        "algorithm",
+        "rmse",
+        "ssim",
+        "kwave_gt_rmse",
+        "kwave_gt_ssim",
+    ]
     fieldnames = preferred + [field for field in fields if field not in preferred]
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)

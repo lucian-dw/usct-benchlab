@@ -5,6 +5,7 @@ import numpy as np
 
 from usctbench.algorithms.fwi.adapter import (
     KWaveFWIAdapterAlgorithm,
+    _iteration_stack,
     read_kwave_fwi_result,
 )
 from usctbench.algorithms.fwi.tiny import TinyFWIAlgorithm
@@ -48,3 +49,21 @@ def test_kwave_adapter_skips_missing_result(synthetic_case, tmp_path):
     )
 
     assert result.status == ResultStatus.SKIPPED
+
+
+def test_iteration_stack_uses_iteration_count_to_select_axis():
+    matlab_stack = np.zeros((5, 5, 7))
+    matlab_stack[:, :, 3] = 3.0
+    normalized = _iteration_stack(matlab_stack, iterations=7)
+
+    assert normalized is not None
+    assert normalized.shape == (7, 5, 5)
+    assert float(normalized[3, 0, 0]) == 3.0
+
+    python_stack = np.zeros((7, 5, 5))
+    python_stack[4, :, :] = 4.0
+    normalized = _iteration_stack(python_stack, iterations=7)
+
+    assert normalized is not None
+    assert normalized.shape == (7, 5, 5)
+    assert float(normalized[4, 0, 0]) == 4.0

@@ -6,6 +6,7 @@ import h5py
 import numpy as np
 
 from usctbench.core.io import read_case_hdf5
+from usctbench.data.conversion import _grid_from_coordinates
 from usctbench.data.nbpslice2d import (
     inspect_nbp_slice2d_zip,
     make_nbp_slice2d_smoke_subset,
@@ -36,6 +37,16 @@ def test_make_synthetic_smoke_subset_writes_hdf5_cases(tmp_path):
         tmp_path / "synthetic" / "cases" / "synthetic_circular_sos.h5"
     )
     assert case.grid.shape == (8, 8)
+
+
+def test_grid_from_coordinates_uses_point_spacing():
+    xi = np.linspace(-0.01, 0.01, 5)
+    yi = np.linspace(-0.02, 0.02, 9)
+
+    grid = _grid_from_coordinates((9, 5), xi=xi, yi=yi)
+
+    assert np.isclose(grid.spacing_m[0], 0.005)
+    assert np.isclose(grid.spacing_m[1], 0.005)
 
 
 def test_nbpslice2d_zip_inspection_and_smoke_conversion(tmp_path):

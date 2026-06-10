@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from skimage.metrics import structural_similarity
 
 
 def _masked_values(
@@ -31,7 +32,12 @@ def compute_image_metrics(
 ) -> dict[str, float]:
     """Compute scalar image metrics over finite ROI pixels."""
 
-    pred, truth = _masked_values(prediction, target, mask)
+    pred_image = np.asarray(prediction, dtype=float)
+    truth_image = np.asarray(target, dtype=float)
+    finite_mask = np.isfinite(pred_image) & np.isfinite(truth_image)
+    if mask is not None:
+        finite_mask &= np.asarray(mask, dtype=bool)
+    pred, truth = _masked_values(pred_image, truth_image, finite_mask)
     error = pred - truth
     mse = float(np.mean(error**2))
     rmse = math.sqrt(mse)
@@ -47,7 +53,13 @@ def compute_image_metrics(
         f"{prefix}mae": mae,
         f"{prefix}nrmse": nrmse,
         f"{prefix}psnr": psnr,
-        f"{prefix}ssim": _global_ssim(pred, truth, data_range=data_range),
+        f"{prefix}ssim": _image_ssim(
+            pred_image,
+            truth_image,
+            valid_mask=finite_mask,
+            data_range=data_range,
+        ),
+        f"{prefix}global_ssim": _global_ssim(pred, truth, data_range=data_range),
     }
 
 
@@ -101,6 +113,53 @@ def _global_ssim(
     if denom == 0:
         return 1.0
     return float(((2.0 * mu_x * mu_y + c1) * (2.0 * cov_xy + c2)) / denom)
+
+
+def _image_ssim(
+    prediction: np.ndarray,
+    target: np.ndarray,
+    *,
+    valid_mask: np.ndarray,
+    data_range: float,
+) -> float:
+    """Compute standard 2-D SSIM with invalid pixels neutralized."""
+
+    pred = np.asarray(prediction, dtype=float)
+    truth = np.asarray(target, dtype=float)
+    valid = np.asarray(valid_mask, dtype=bool)
+    if pred.ndim != 2 or truth.ndim != 2:
+        return _global_ssim(pred[valid], truth[valid], data_range=data_range)
+    if not np.any(valid):
+        raise ValueError("no finite pixels available for metric computation")
+
+    rows, cols = np.where(valid)
+    row_slice = slice(int(rows.min()), int(rows.max()) + 1)
+    col_slice = slice(int(cols.min()), int(cols.max()) + 1)
+    pred_crop = pred[row_slice, col_slice].copy()
+    truth_crop = truth[row_slice, col_slice].copy()
+    valid_crop = valid[row_slice, col_slice]
+    if min(pred_crop.shape) < 3:
+        return _global_ssim(pred[valid], truth[valid], data_range=data_range)
+
+    fill_value = float(np.median(truth[valid]))
+    pred_crop[~valid_crop] = fill_value
+    truth_crop[~valid_crop] = fill_value
+    pred_crop[~np.isfinite(pred_crop)] = fill_value
+    truth_crop[~np.isfinite(truth_crop)] = fill_value
+
+    win_size = min(7, pred_crop.shape[0], pred_crop.shape[1])
+    if win_size % 2 == 0:
+        win_size -= 1
+    if win_size < 3:
+        return _global_ssim(pred[valid], truth[valid], data_range=data_range)
+    return float(
+        structural_similarity(
+            truth_crop,
+            pred_crop,
+            data_range=float(data_range) if data_range > 0 else 1.0,
+            win_size=win_size,
+        )
+    )
 
 
 def residual_metrics(

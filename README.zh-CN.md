@@ -19,87 +19,85 @@ $\rho(x)$ 和衰减 $\alpha(x)$。所有数据都会被转换成统一的 `USCTC
 
 ## 数学形式
 
-对声源 $s$，一个简单的无损声压模型可以写为
+USCT 应被理解为 PDE 驱动的反问题，而不是普通的图像重建任务。声源换能器
+激发声压场，声场在未知介质中传播，接收器测量这些传播后的信号，再由这些
+测量反推介质参数。
 
 $$
 \frac{1}{c(x)^2}\partial_{tt}p_s(t,x)-\Delta p_s(t,x)=q_s(t,x).
 $$
 
-更一般的模型可以包含密度和衰减：
+在频域中，对应的 Helmholtz 形式常写为
 
 $$
-\begin{aligned}
-\frac{1}{c(x)^2}\partial_{tt}p_s
--\nabla\cdot\left(\frac{1}{\rho(x)}\nabla p_s\right)
-+\mathcal A_\alpha[p_s]
-&= q_s.
-\end{aligned}
+\left(\Delta+\omega^2m(x)\right)\hat p_s(\omega,x)=-\hat q_s(\omega,x).
 $$
 
-接收器 $r$ 通过测量算子观测声压场：
+其中 $p_s$ 是声源 $s$ 对应的声压，$q_s$ 是发射源，$c(x)$ 是声速，$m(x)$
+是平方慢度：
+
+$$
+m(x)=\frac{1}{c(x)^2}.
+$$
+
+本仓库中的多数声速重建方法估计的是声速图 $c(x)$，或者慢度图
+
+$$
+u(x)=\frac{1}{c(x)}.
+$$
+
+接收器 $r$ 通过测量算子观测传播后的声压场：
 
 $$
 d_{sr}(t)=\mathcal M_r p_s(t,\cdot)+\eta_{sr}(t).
 $$
 
-因此，USCT 反问题可以概括为：
+不同算法的核心区别在于保留了多少波动物理。FWI 在优化中保留声学 PDE 或
+Helmholtz 求解，并匹配波形或复数频域压力。travel-time baseline 会先把数据
+降维为到时特征，再反演射线或 eikonal 近似；它们更快、更稳定，但舍弃了相位、
+幅度、衍射以及大量有限频物理。
+
+直射线 travel-time 模型使用参考声速 $c_0$ 和固定路径 $\gamma_{sr}$：
 
 $$
-\text{recover } c(x),\rho(x),\alpha(x)
-\quad
-\text{from}
-\quad
-\{d_{sr}(t)\}_{s,r}.
+\Delta t_{sr}\approx\int_{\gamma_{sr}}\delta u(x)d\ell.
 $$
 
-本仓库的主要重建目标是 $c(x)$。
-
-直射线 travel-time 模型使用参考声速 $c_0$ 和射线路径 $\gamma_{sr}$：
+慢度扰动为
 
 $$
-\Delta t_{sr}
-\approx
-\int_{\gamma_{sr}}
-\left(\frac{1}{c(x)}-\frac{1}{c_0}\right)d\ell.
+\delta u(x)=\frac{1}{c(x)}-\frac{1}{c_0}.
 $$
 
-离散化后得到
+像素离散化后得到
 
 $$
-A\delta s \approx b,
-\qquad
-\delta s = \frac{1}{c}-\frac{1}{c_0}.
+A\delta u \approx b.
 $$
 
 CGLS、SIRT 和 SART 求解的都是类似下面的代数射线系统：
 
 $$
-\min_{\delta s}
-\|W(A\delta s-b)\|_2^2+\lambda^2R(\delta s).
+\min_{\delta u}\|W(A\delta u-b)\|_2^2+\lambda^2\|L\delta u\|_2^2.
 $$
 
-对折射修正的 bent-ray travel-time，可以用 eikonal 模型描述：
+Bent-ray 方法保留高频 travel-time 模型，路径会随当前介质变化：
 
 $$
-|\nabla T_s(x)| = \frac{1}{c(x)},
-\qquad
+|\nabla T_s(x)|=u(x).
+$$
+
+接收器 travel time 近似为
+
+$$
 t_{sr}\approx T_s(r).
 $$
 
-`bent_ray_gn` 是一个正则化的 bent-ray 风格 travel-time baseline，
-不是完整外部 eikonal solver 的复现。
-
-弱散射或 ray-Born 模型可以示意为
+理想化的非线性 travel-time 目标可以写为
 
 $$
-\delta \hat p_{sr}(\omega)
-\approx
-\int_\Omega
-G_0(\omega,r,x)K_\omega(x)G_0(\omega,x,s)\delta m(x)\,dx.
+\min_c\sum_{s,r}\left|t_{sr}^{\mathrm{obs}}-T_s(r;c)\right|^2+\lambda R(c).
 $$
-
-`rwave_adapter` 是一个 ray-Born-inspired adapter baseline，
-并不声称完整复现外部 complex rWave solver。
 
 FWI 直接使用波形或频域压力数据：
 
@@ -112,8 +110,22 @@ $$
 +\lambda R(c).
 $$
 
-FWI 路线在本仓库中作为高保真外部 k-Wave/FWI 结果的适配器。更详细的数学
-说明见 [docs/math_formulation.md](docs/math_formulation.md)。
+其中 $\hat p_s(\omega,r;c)$ 不是任意图像算子，而是候选声速下由声学 PDE 或
+Helmholtz solver 预测出来的压力。
+
+| 方法 | 建模假设 | 优化目标 | 适用场景 |
+| --- | --- | --- | --- |
+| CGLS | 参考介质中的固定直射线；到时差在线性慢度扰动上近似。 | 对 $A\delta u\approx b$ 做加权正则化最小二乘 Krylov 求解。 | 快速、可复现的声速 baseline 和回归测试。 |
+| SIRT | 与 CGLS 相同的直射线代数模型，但用同步归一化残差反投影更新。 | 通过 relaxation 和 smoothing 迭代降低 $A\delta u\approx b$ 的加权残差。 | 更重视稳定性的迭代 baseline。 |
+| SART | 相同直射线模型，用发射器或射线子集做有序更新。 | 子集 row-action 更新。 | 早期收敛更快，但对排序和 relaxation 更敏感。 |
+| Bent-ray | 高频 travel time 满足 eikonal 近似；射线路径随声速或慢度变化。 | 基于 $T_s(r;c)$ 的正则化非线性 travel-time mismatch。 | 无法使用完整波形反演时的折射感知 surrogate 对比。 |
+| FWI | 完整声学波或 Helmholtz 传播；数据是波形或复数压力。 | 对声源、接收器和频率上的 PDE-constrained waveform mismatch 做优化。 | 有外部 k-Wave/FWI artifact 或外部 FWI 命令时的高保真汇报。 |
+
+`bent_ray_gn` 是一个正则化的 bent-ray 风格 travel-time baseline，不是完整外部
+eikonal solver。`rwave_adapter` 是 ray-Born-inspired adapter baseline，并不
+声称完整复现外部 complex rWave solver。FWI 路线在本仓库中作为高保真外部
+k-Wave/FWI 结果的适配器。更详细的数学说明见
+[docs/math_formulation.md](docs/math_formulation.md)。
 
 ## 支持的算法
 
@@ -155,6 +167,12 @@ usct list-algorithms
 pytest -q
 ```
 
+如果只想快速跑通一个端到端示例，并且把生成文件都写到 `/tmp`，可以运行：
+
+```bash
+bash examples/synthetic_quickstart.sh
+```
+
 ## 环境变量和工作区布局
 
 建议用环境变量管理数据和输出，避免把数据、运行结果或外部工程提交到 Git：
@@ -165,6 +183,8 @@ export USCT_DATA_ROOT=$USCT_WORKSPACE/data/openbreastus
 export USCT_RUN_ROOT=$USCT_WORKSPACE/runs/usctbench_runs
 export USCT_NBP_ZIP_PATH=/path/to/NBPslices2D.zip
 export USCT_KWAVE_FWI_RESULT_PATH=/path/to/fwi_result.mat
+export USCT_KWAVE_ROOT=/path/to/external/USCT_kwave
+export USCT_KWAVE_PYTHON_BIN=/path/to/python
 ```
 
 推荐工作区结构：
@@ -177,6 +197,9 @@ export USCT_KWAVE_FWI_RESULT_PATH=/path/to/fwi_result.mat
   external/      # 可选外部工程
   checkpoints/   # 本地权重或 checkpoint
 ```
+
+`scripts/setup_workspace.sh` 可以创建这套目录和仓库内的轻量 symlink；它不会
+把数据集复制进 Git。
 
 ## 准备数据
 
@@ -279,16 +302,11 @@ usct run fwi_kwave_adapter \
 ```
 
 如果 FWI adapter 需要读取已有重建结果，请设置
-`USCT_KWAVE_FWI_RESULT_PATH`。
+`USCT_KWAVE_FWI_RESULT_PATH`。可读取的 artifact 必须包含 `VEL_ESTIM`；
+可选字段 `C_INTERP`、`VEL_ESTIM_ITER` 和 `LOSS_ITER` 会启用 ground-truth
+指标和迭代选择。
 
 ## 运行 benchmark
-
-```bash
-usct bench --suite configs/benchmarks/synthetic_demo.yaml
-usct bench --suite configs/benchmarks/nbpslice2d_demo.yaml
-usct bench --suite configs/benchmarks/openbreastus_demo.yaml
-usct bench --suite configs/benchmarks/fwi_kwave_demo.yaml
-```
 
 demo benchmark 会读取下面这些可选 case glob：
 
@@ -297,6 +315,15 @@ export USCT_SYNTHETIC_CASE_GLOB="$USCT_WORKSPACE/data/synthetic_demo/cases/*.h5"
 export USCT_NBP_CASE_GLOB="$USCT_WORKSPACE/data/nbpslice2d_demo/cases/*.h5"
 export USCT_OPENBREASTUS_CASE_GLOB="$USCT_WORKSPACE/data/openbreastus_demo/cases/*.h5"
 export USCT_KWAVE_FWI_CASE_GLOB="$USCT_WORKSPACE/data/fwi_kwave_demo/cases/*.h5"
+```
+
+运行 benchmark：
+
+```bash
+usct bench --suite configs/benchmarks/synthetic_demo.yaml
+usct bench --suite configs/benchmarks/nbpslice2d_demo.yaml
+usct bench --suite configs/benchmarks/openbreastus_demo.yaml
+usct bench --suite configs/benchmarks/fwi_kwave_demo.yaml
 ```
 
 ## 输出文件
@@ -350,12 +377,12 @@ NBPslice2D，2D Acoustic Numerical Breast Phantoms for USCT：
 ## 开发
 
 ```bash
-black src tests
-ruff check src tests --fix
+black src tests scripts
+ruff check src tests scripts --fix
 python -m compileall src tests
 pytest -q
 bash scripts/run_smoke.sh
-bash scripts/audit_release.py
+python scripts/audit_release.py
 ```
 
 更多 release 检查和仓库卫生规则见 [docs/development.md](docs/development.md)。
@@ -365,3 +392,7 @@ bash scripts/audit_release.py
 如果在实验中使用了 OpenBreastUS、NBPslice2D、k-Wave 或
 WaveformInversionUST，请引用相应数据集和外部工具。参考文献见
 [docs/references.bib](docs/references.bib)。
+
+## 许可证
+
+本仓库使用 MIT License 发布。见 [LICENSE](LICENSE)。

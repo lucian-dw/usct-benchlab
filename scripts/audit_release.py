@@ -1,14 +1,12 @@
-#!/usr/bin/env bash
-"exec" "python3" "$0" "$@"
+#!/usr/bin/env python3
 """Repository-level release audit for the package."""
 
 import subprocess
-import sys
 from pathlib import Path
-
 
 REQUIRED = [
     "README.md",
+    "LICENSE",
     "pyproject.toml",
     "requirements.txt",
     "environment.yml",
@@ -36,6 +34,8 @@ REQUIRED = [
     "docs/references.bib",
     "docs/assets/nbpslice2d_readme_fwi_vs_surrogate.png",
     "docs/assets/openbreastus_readme_fwi_vs_surrogate.png",
+    "examples/README.md",
+    "examples/synthetic_quickstart.sh",
 ]
 
 FORBIDDEN_SUFFIXES = (
@@ -78,13 +78,18 @@ def main() -> int:
         path for path in FORBIDDEN_DIRS if (root / path).exists()
     ]
     if existing_forbidden_dirs:
-        failures.append("forbidden directories still exist: " + ", ".join(existing_forbidden_dirs))
+        failures.append(
+            "forbidden directories still exist: " + ", ".join(existing_forbidden_dirs)
+        )
 
     existing_forbidden_files = [
         path for path in FORBIDDEN_FILES if (root / path).exists()
     ]
     if existing_forbidden_files:
-        failures.append("forbidden development files still exist: " + ", ".join(existing_forbidden_files))
+        failures.append(
+            "forbidden development files still exist: "
+            + ", ".join(existing_forbidden_files)
+        )
 
     tracked = _git_ls_files(root)
     data_files = [path for path in tracked if path.endswith(FORBIDDEN_SUFFIXES)]
