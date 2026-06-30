@@ -23,6 +23,7 @@ from usctbench.algorithms.ray import (
     speed_bounds,
     target_delta_tof,
 )
+from usctbench.core.config import coerce_bool
 from usctbench.core.registry import register_algorithm
 from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, USCTCase
 from usctbench.metrics import (
@@ -73,9 +74,9 @@ def run_iterative_travel_time_solver(
     )
     damping = float(config.parameters.get("damping", lambda_value**2))
     smooth_sigma = float(config.parameters.get("smooth_sigma", default_smooth_sigma))
-    roi_update_only = bool(config.parameters.get("roi_update_only", False))
-    line_search = bool(config.parameters.get("line_search", False))
-    roi_laplacian = bool(config.parameters.get("roi_laplacian", False))
+    roi_update_only = coerce_bool(config.parameters.get("roi_update_only", False))
+    line_search = coerce_bool(config.parameters.get("line_search", False))
+    roi_laplacian = coerce_bool(config.parameters.get("roi_laplacian", False))
     robust_loss = str(config.parameters.get("robust_loss", "none")).lower()
     delta_slowness = np.zeros(case.grid.shape, dtype=float)
     initial_norm = masked_norm(target, mask, weights)

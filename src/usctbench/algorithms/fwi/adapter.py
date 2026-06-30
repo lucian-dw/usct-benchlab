@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from usctbench.core.config import coerce_bool
 from usctbench.metrics import (
     compute_baseline_improvement_metrics,
     compute_image_metrics,
@@ -135,7 +136,7 @@ class KWaveFWIAdapterAlgorithm:
                 failure_reason="fwi_kwave_adapter requires parameters.result_path",
             )
 
-        run_external = bool(config.parameters.get("run_external", False))
+        run_external = coerce_bool(config.parameters.get("run_external", False))
         if run_external:
             launched = _run_external_pipeline(case, config, result_path)
             if launched.status != ResultStatus.SUCCESS:
@@ -856,13 +857,7 @@ def _expand_text(value: Any) -> str:
 
 
 def _as_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    return coerce_bool(value)
 
 
 def _is_finite_number(value: Any) -> bool:

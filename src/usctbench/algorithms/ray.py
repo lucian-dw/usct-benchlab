@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 
+from usctbench.core.config import coerce_bool
 from usctbench.core.registry import register_algorithm
 from usctbench.core.schema import (
     AlgorithmConfig,
@@ -899,13 +900,15 @@ class StraightRayCGLSAlgorithm:
                 )
             )
             damping = float(config.parameters.get("damping", lambda_value**2))
-            roi_update_only = bool(config.parameters.get("roi_update_only", False))
-            roi_laplacian = bool(
+            roi_update_only = coerce_bool(
+                config.parameters.get("roi_update_only", False)
+            )
+            roi_laplacian = coerce_bool(
                 config.parameters.get(
                     "roi_laplacian", config.parameters.get("roi_aware_laplacian", False)
                 )
             )
-            use_coverage_preconditioning = bool(
+            use_coverage_preconditioning = coerce_bool(
                 config.parameters.get("coverage_preconditioning", False)
             )
             robust_loss = str(config.parameters.get("robust_loss", "none")).lower()
@@ -936,7 +939,7 @@ class StraightRayCGLSAlgorithm:
                     max_scale=float(
                         config.parameters.get("coverage_preconditioner_max_scale", 10.0)
                     ),
-                    normalize=bool(
+                    normalize=coerce_bool(
                         config.parameters.get("coverage_preconditioner_normalize", True)
                     ),
                 )
@@ -1043,7 +1046,9 @@ class StraightRaySIRTAlgorithm:
             relaxation = float(config.parameters.get("relaxation", 0.3))
             smooth_sigma = float(config.parameters.get("smooth_sigma", 0.0))
             smooth_every = int(config.parameters.get("smooth_every", 0))
-            roi_update_only = bool(config.parameters.get("roi_update_only", False))
+            roi_update_only = coerce_bool(
+                config.parameters.get("roi_update_only", False)
+            )
             c0 = reference_sound_speed(case, config)
             initial_norm = masked_norm(target, mask, weights)
             delta_slowness, residual_norms = sirt_solve(
@@ -1110,7 +1115,9 @@ class StraightRaySARTAlgorithm:
             subsets = int(config.parameters.get("subsets", 8))
             smooth_sigma = float(config.parameters.get("smooth_sigma", 0.0))
             smooth_every = int(config.parameters.get("smooth_every", 0))
-            roi_update_only = bool(config.parameters.get("roi_update_only", False))
+            roi_update_only = coerce_bool(
+                config.parameters.get("roi_update_only", False)
+            )
             c0 = reference_sound_speed(case, config)
             initial_norm = masked_norm(target, mask, weights)
             delta_slowness, residual_norms = sart_solve(

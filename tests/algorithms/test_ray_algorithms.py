@@ -61,6 +61,39 @@ def test_adapter_baseline_metadata_is_explicit(synthetic_case):
     assert "ray_born_linearization" not in rwave.metrics
 
 
+def test_string_false_bool_parameters_do_not_enable_ray_options(synthetic_case):
+    config = AlgorithmConfig(
+        parameters={
+            "iterations": 2,
+            "subsets": 4,
+            "outer_iterations": 1,
+            "inner_iterations": 2,
+            "roi_update_only": "false",
+            "roi_laplacian": "false",
+            "line_search": "false",
+            "coverage_preconditioning": "false",
+            "coverage_preconditioner_normalize": "false",
+        }
+    )
+
+    cgls = StraightRayCGLSAlgorithm().run(synthetic_case, config)
+    sirt = StraightRaySIRTAlgorithm().run(synthetic_case, config)
+    sart = StraightRaySARTAlgorithm().run(synthetic_case, config)
+    bent = BentRayGNAdapter().run(synthetic_case, config)
+    rwave = RWaveAdapter().run(synthetic_case, config)
+
+    assert cgls.metrics["roi_update_only"] is False
+    assert cgls.metrics["roi_laplacian"] is False
+    assert cgls.metrics["coverage_preconditioning"] is False
+    assert sirt.metrics["roi_update_only"] is False
+    assert sart.metrics["roi_update_only"] is False
+    assert bent.metrics["roi_update_only"] is False
+    assert bent.metrics["roi_laplacian"] is False
+    assert bent.metrics["line_search"] is False
+    assert rwave.metrics["roi_update_only"] is False
+    assert rwave.metrics["line_search"] is False
+
+
 def test_attenuation_algorithm_runs_on_log_amplitude_case():
     case = make_attenuation_case(shape=(10, 10), n_transducers=8)
     result = AttenuationSIRTAlgorithm().run(

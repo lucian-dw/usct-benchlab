@@ -146,24 +146,43 @@ k-Wave/FWI 结果的适配器。更详细的数学说明见
 ### Diffusion + FWI adapter
 
 `diffusion_fwi_kwave_adapter` 用于汇报外部 diffusion-prior k-Wave/FWI
-pipeline 产生的重建结果。在这条 pipeline 中，k-Wave 或 Helmholtz 物理模型
-提供 data-consistency 更新，训练好的 diffusion model 作为采样过程中的学习型
-图像先验。一个概念性的目标函数可以写成
+pipeline 产生的重建结果。这里真正重要的是采样循环：当前声速图会反复接受
+一次 waveform physics correction，然后再接受一次 learned diffusion prior
+correction。默认路径从 `bulk_support` warm start 出发，使用 sparse64 观测，
+并在 prior 之前先做 FWI 物理更新（`physics_position=pre`）。
 
 $$
-\min_c
+g_k
+=
+\nabla_c
 \frac{1}{2}
-\sum_{\omega,s,r}
-\left|
-\hat p_s(\omega,r;c)-\hat p_{sr}^{\mathrm{obs}}(\omega)
-\right|^2
-\lambda R_{\theta}(c),
+\left\|
+\hat p(c_k)-\hat p^{\mathrm{obs}}
+\right\|_2^2,
+\qquad
+c_{k+\frac{1}{2}}
+=
+\mathrm{LineSearch}\left(c_k - \eta_k M g_k\right).
 $$
 
-其中 $R_{\theta}$ 表示由外部 diffusion model 给出的 score/prior 项。本仓库
-本身不训练 diffusion model，也不把 PyTorch、MATLAB 或 k-Wave 变成核心依赖；
-它只负责读取外部 DPS `.mat`/`.json` 结果，或者在明确配置时调用外部
-USCT-kwave pipeline。
+其中 $g_k$ 是由当前 waveform residual 计算出的 FWI/Helmholtz 梯度，$M$ 是
+配置中的预条件器，例如 `slowness_precond`。完成这一步 data-consistency
+更新后，再在低噪声时间步调用 diffusion model，得到 score/prior correction：
+
+$$
+s_k = s_{\theta}(c_{k+\frac{1}{2}}, t),
+\qquad
+c_{k+1}
+=
+\Pi_{[c_{\min},c_{\max}]}
+\left(c_{k+\frac{1}{2}} + \lambda_k s_k\right).
+$$
+
+默认 smoke 配置中 `score_reg_t=0.10`、`score_reg_lambda=0.1`。FWI 梯度负责
+让样本匹配实测压力数据，diffusion prior 负责抑制不合理纹理，并把迭代结果
+推向从 OpenBreastUS 类声速图中学到的图像分布。本仓库本身不训练 diffusion
+model，也不把 PyTorch、MATLAB 或 k-Wave 变成核心依赖；它只负责读取外部
+DPS `.mat`/`.json` 结果，或者在明确配置时调用外部 USCT-kwave pipeline。
 
 DPS 结果文件可包含 `VEL_DPS_PHYS`、`VEL_DPS_VIEW`、`VEL_FINAL_PHYS`、
 `VEL_FINAL_VIEW`、`VEL_INIT_VIEW` 和 `GT_VIEW`。JSON summary 用于记录

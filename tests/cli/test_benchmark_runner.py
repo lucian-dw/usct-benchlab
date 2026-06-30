@@ -73,3 +73,38 @@ def test_benchmark_suite_runs_synthetic_case(synthetic_case, tmp_path):
 
     assert result["run_checks"]["passed"] is True
     assert result["records"]
+
+
+def test_benchmark_suite_resolves_config_relative_to_suite_file(
+    synthetic_case, tmp_path
+):
+    register_builtin_algorithms()
+    case_dir = tmp_path / "cases"
+    config_dir = tmp_path / "configs"
+    case_dir.mkdir()
+    config_dir.mkdir()
+    write_case_hdf5(synthetic_case, case_dir / "case.h5")
+    (config_dir / "sirt.yaml").write_text(
+        "name: straight_sirt\nparameters:\n  iterations: 1\n", encoding="utf-8"
+    )
+    suite_path = tmp_path / "suite.yaml"
+    suite_path.write_text(
+        yaml.safe_dump(
+            {
+                "name": "relative_suite",
+                "case_glob": str(case_dir / "*.h5"),
+                "outputs": {"root": str(tmp_path / "runs")},
+                "algorithms": [
+                    {"name": "straight_sirt", "config": "configs/sirt.yaml"}
+                ],
+                "min_cases": 1,
+                "min_records": 1,
+                "expected_statuses": ["success"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_benchmark_suite(suite_path)
+
+    assert result["run_checks"]["passed"] is True

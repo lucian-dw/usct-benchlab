@@ -32,6 +32,23 @@ def expand_config_value(value: Any) -> Any:
     return value
 
 
+def coerce_bool(value: Any) -> bool:
+    """Parse config booleans from YAML scalars or environment-string values."""
+
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off", ""}:
+        return False
+    return bool(value)
+
+
 def _expand_env(value: str) -> str:
     def replace_default(match: re.Match[str]) -> str:
         name, default = match.group(1), match.group(2)

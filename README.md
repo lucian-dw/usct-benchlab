@@ -155,25 +155,48 @@ More details are in [docs/algorithms.md](docs/algorithms.md).
 ### Diffusion + FWI Adapter
 
 `diffusion_fwi_kwave_adapter` reports reconstructions produced by an external
-diffusion-prior k-Wave/FWI pipeline. In that pipeline, k-Wave or Helmholtz
-physics supplies the data-consistency update, while a trained diffusion model
-acts as a learned image prior during sampling. A representative objective is
+diffusion-prior k-Wave/FWI pipeline. The important point is the sampling loop:
+the current sound-speed image is repeatedly corrected by a waveform physics
+step and then nudged by a learned diffusion prior. The default path starts from
+a `bulk_support` warm start, uses sparse64 observations, and applies the FWI
+physics update before the prior update (`physics_position=pre`).
 
 $$
-\min_c
+g_k
+=
+\nabla_c
 \frac{1}{2}
-\sum_{\omega,s,r}
-\left|
-\hat p_s(\omega,r;c)-\hat p_{sr}^{\mathrm{obs}}(\omega)
-\right|^2
-\lambda R_{\theta}(c),
+\left\|
+\hat p(c_k)-\hat p^{\mathrm{obs}}
+\right\|_2^2,
+\qquad
+c_{k+\frac{1}{2}}
+=
+\mathrm{LineSearch}\left(c_k - \eta_k M g_k\right).
 $$
 
-where $R_{\theta}$ denotes the learned score/prior term from a separately
-trained diffusion model. The adapter itself does not train the diffusion model
-and does not vendor PyTorch, MATLAB, or k-Wave into `usct-benchlab`; it only
-loads an external DPS `.mat`/`.json` result or, when explicitly configured,
-launches the external pipeline.
+Here $g_k$ is the FWI/Helmholtz gradient computed from the current waveform
+residual, and $M$ denotes the configured preconditioner, such as
+`slowness_precond`. After this data-consistency step, the diffusion model is
+queried at a low noise level and used as a score/prior correction:
+
+$$
+s_k = s_{\theta}(c_{k+\frac{1}{2}}, t),
+\qquad
+c_{k+1}
+=
+\Pi_{[c_{\min},c_{\max}]}
+\left(c_{k+\frac{1}{2}} + \lambda_k s_k\right).
+$$
+
+In the default smoke configuration, `score_reg_t=0.10` and
+`score_reg_lambda=0.1`. The FWI gradient keeps the sample consistent with the
+measured pressure data, while the diffusion prior suppresses implausible
+textures and biases the iterate toward the distribution learned from
+OpenBreastUS-like sound-speed maps. The adapter itself does not train the
+diffusion model and does not vendor PyTorch, MATLAB, or k-Wave into
+`usct-benchlab`; it only loads an external DPS `.mat`/`.json` result or, when
+explicitly configured, launches the external pipeline.
 
 The expected DPS result fields are `VEL_DPS_PHYS`, `VEL_DPS_VIEW`,
 `VEL_FINAL_PHYS`, `VEL_FINAL_VIEW`, `VEL_INIT_VIEW`, and `GT_VIEW`. The JSON

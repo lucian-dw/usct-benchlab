@@ -206,7 +206,7 @@ Set external DPS artifact paths:
 export USCT_DPS_FWI_RESULT_PATH=/path/to/dps_result.mat
 export USCT_DPS_FWI_SUMMARY_PATH=/path/to/dps_result.json
 export USCT_DPS_DATASET_PATH=/path/to/kwave_dataset.mat
-export USCT_DPS_CHECKPOINT=/path/to/checkpoint.pth
+export USCT_DPS_CHECKPOINT=/path/to/diffusion_checkpoint.pth
 ```
 
 Run:

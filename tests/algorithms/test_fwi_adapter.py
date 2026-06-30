@@ -51,6 +51,26 @@ def test_kwave_adapter_skips_missing_result(synthetic_case, tmp_path):
     assert result.status == ResultStatus.SKIPPED
 
 
+def test_kwave_adapter_treats_string_false_run_external_as_loader_only(
+    synthetic_case, tmp_path
+):
+    result_path = tmp_path / "fwi_result.mat"
+    with h5py.File(result_path, "w") as handle:
+        handle.create_dataset("VEL_ESTIM", data=np.full((12, 12), 1490.0))
+        handle.create_dataset("LOSS_ITER", data=np.array([1.0]))
+
+    result = KWaveFWIAdapterAlgorithm().run(
+        synthetic_case,
+        AlgorithmConfig(
+            parameters={"result_path": str(result_path), "run_external": "false"}
+        ),
+    )
+
+    assert result.status == ResultStatus.SUCCESS
+    assert result.failure_reason is None
+    assert result.metrics["external_result_loaded"] is True
+
+
 def test_iteration_stack_uses_iteration_count_to_select_axis():
     matlab_stack = np.zeros((5, 5, 7))
     matlab_stack[:, :, 3] = 3.0

@@ -20,6 +20,7 @@ from typing import Any
 import yaml
 
 from usctbench.benchmark.report import write_failure_report
+from usctbench.core.config import coerce_bool
 from usctbench.core.io import read_case_hdf5, write_result_hdf5
 from usctbench.core.provenance import case_measurement_metadata
 from usctbench.core.registry import get_algorithm
@@ -201,7 +202,7 @@ def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
     suite_name = suite.get("name", suite_file.stem)
     case_glob = _expand(str(suite["case_glob"]))
     suite_cases = sorted(Path(path) for path in glob.glob(case_glob, recursive=True))
-    if not suite_cases and not bool(suite.get("allow_empty", False)):
+    if not suite_cases and not coerce_bool(suite.get("allow_empty", False)):
         raise ValueError(f"benchmark suite matched no cases: {case_glob}")
     output_root = Path(
         _expand(str(suite.get("outputs", {}).get("root", "runs/usctbench_runs")))
@@ -222,13 +223,7 @@ def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
 
     for algorithm in algorithms:
         algorithm_name = algorithm["name"]
-        config_path = Path(_expand(str(algorithm["config"])))
-        if not config_path.is_absolute():
-            config_path = (
-                suite_file.parent.parent.parent / config_path
-                if suite_file.parent.name == "benchmarks"
-                else Path.cwd() / config_path
-            )
+        config_path = _resolve_algorithm_config_path(algorithm["config"], suite_file)
         algorithm_case_glob = algorithm.get("case_glob")
         cases = suite_cases
         if algorithm_case_glob:
@@ -236,7 +231,7 @@ def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
             cases = sorted(
                 Path(path) for path in glob.glob(expanded_glob, recursive=True)
             )
-            if not cases and not bool(
+            if not cases and not coerce_bool(
                 algorithm.get("allow_empty", suite.get("allow_empty", False))
             ):
                 raise ValueError(
@@ -488,6 +483,32 @@ def _expand(value: str) -> str:
     return os.path.expandvars(os.path.expanduser(value))
 
 
+def _resolve_algorithm_config_path(config: Any, suite_file: Path) -> Path:
+    config_path = Path(_expand(str(config)))
+    if config_path.is_absolute():
+        return config_path
+
+    suite_candidate = suite_file.parent / config_path
+    if suite_candidate.exists():
+        return suite_candidate
+
+    root_candidate = _repo_root() / config_path
+    if root_candidate.exists():
+        return root_candidate
+
+    cwd_candidate = Path.cwd() / config_path
+    if cwd_candidate.exists():
+        return cwd_candidate
+
+    if config_path.parts and config_path.parts[0] == "configs":
+        return root_candidate
+    return suite_candidate
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
 def _expand_config_value(value: Any) -> Any:
     if isinstance(value, str):
         return _expand(value)
@@ -601,7 +622,7 @@ def _assess_run_records(
     if (
         expected_algorithms
         and observed_cases
-        and bool(protocol.get("require_algorithm_case_matrix", True))
+        and coerce_bool(protocol.get("require_algorithm_case_matrix", True))
     ):
         observed_pairs = {
             (str(record.get("algorithm", "")), str(record.get("case_id", "")))
