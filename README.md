@@ -147,6 +147,7 @@ For more detail, see [docs/math_formulation.md](docs/math_formulation.md).
 | Bent-ray | `bent_ray_gn` | Regularized bent-ray-style travel-time baseline | `USCTCase` with travel-time measurements | Refraction-style comparison | `configs/algorithms/bent_ray.yaml` |
 | rWave adapter | `rwave_adapter` | Ray-Born-inspired adapter baseline | `USCTCase` with travel-time measurements | Wave-inspired adapter comparison | `configs/algorithms/rwave.yaml` |
 | FWI adapter | `fwi_kwave_adapter` | PDE-level full-wave inversion adapter | `USCTCase` plus external k-Wave/FWI artifact or command path | High-fidelity FWI reporting | `configs/algorithms/fwi_kwave.yaml` |
+| Diffusion FWI adapter | `diffusion_fwi_kwave_adapter` | External diffusion-prior k-Wave/FWI DPS adapter | `USCTCase` plus external DPS `.mat`/`.json` artifact or command path | Report existing diffusion + FWI outputs in the same benchmark format | `configs/algorithms/diffusion_fwi_kwave.yaml` |
 | Tiny FWI sanity | `fwi_tiny` | Small waveform-inversion sanity model | Small synthetic sound-speed case | Local waveform-inversion plumbing test | `configs/algorithms/fwi_tiny.yaml` |
 
 More details are in [docs/algorithms.md](docs/algorithms.md).
@@ -314,6 +315,21 @@ For the FWI adapter, set `USCT_KWAVE_FWI_RESULT_PATH` when the config should
 ingest an existing reconstruction artifact. A readable artifact must include
 `VEL_ESTIM`; optional fields such as `C_INTERP`, `VEL_ESTIM_ITER`, and
 `LOSS_ITER` enable ground-truth metrics and iteration selection.
+
+Diffusion + FWI adapter:
+
+```bash
+export USCT_DPS_FWI_RESULT_PATH=/path/to/dps_result.mat
+export USCT_DPS_FWI_SUMMARY_PATH=/path/to/dps_result.json
+usct run diffusion_fwi_kwave_adapter \
+  --case "$USCT_WORKSPACE/data/openbreastus_demo/cases/example_case.h5" \
+  --config configs/algorithms/diffusion_fwi_kwave.yaml \
+  --out runs/single_diffusion_fwi
+```
+
+The DPS artifact can contain `VEL_DPS_PHYS`, `VEL_DPS_VIEW`,
+`VEL_FINAL_PHYS`, or `VEL_FINAL_VIEW`. The optional JSON summary is used to
+record checkpoint, dataset, frequency schedule, and diffusion-prior settings.
 
 ## Run Benchmarks
 

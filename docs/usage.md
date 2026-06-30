@@ -198,6 +198,30 @@ usct run fwi_kwave_adapter \
 The adapter can also construct and call an external command when configured to
 do so, but release tests focus on artifact ingestion and reporting.
 
+## Run Diffusion + FWI Adapter
+
+Set external DPS artifact paths:
+
+```bash
+export USCT_DPS_FWI_RESULT_PATH=/path/to/dps_result.mat
+export USCT_DPS_FWI_SUMMARY_PATH=/path/to/dps_result.json
+export USCT_DPS_DATASET_PATH=/path/to/kwave_dataset.mat
+export USCT_DPS_CHECKPOINT=/path/to/checkpoint.pth
+```
+
+Run:
+
+```bash
+usct run diffusion_fwi_kwave_adapter \
+  --case "$USCT_WORKSPACE/data/openbreastus_demo/cases/example_case.h5" \
+  --config configs/algorithms/diffusion_fwi_kwave.yaml \
+  --out runs/single_diffusion_fwi
+```
+
+The default config is loader-only. Set `run_external: true` only in an
+environment where the external USCT-kwave package, checkpoint, CUDA device,
+MATLAB/k-Wave runtime, and dataset path are deliberately available.
+
 ## Run Benchmark
 
 Synthetic:
@@ -222,6 +246,12 @@ FWI:
 
 ```bash
 usct bench --suite configs/benchmarks/fwi_kwave_demo.yaml
+```
+
+Diffusion + FWI:
+
+```bash
+usct bench --suite configs/benchmarks/diffusion_fwi_kwave_demo.yaml
 ```
 
 Run all available demos:

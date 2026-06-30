@@ -1,8 +1,14 @@
 # FWI Adapter
 
-The FWI path is exposed through `fwi_kwave_adapter`. It is designed to
-ingest and report external k-Wave/FWI outputs in the same artifact format as
-the classical baselines.
+The FWI path is exposed through two adapter-style commands:
+
+- `fwi_kwave_adapter` ingests pure external k-Wave/FWI artifacts.
+- `diffusion_fwi_kwave_adapter` ingests external diffusion-prior k-Wave/FWI
+  DPS artifacts.
+
+Both commands report external reconstructions in the same artifact format as
+the classical baselines. They do not vendor the external solver, PyTorch model,
+MATLAB runtime, or k-Wave binary into `usct-benchlab`.
 
 ## Mathematical Model
 
@@ -58,11 +64,51 @@ If `run_external: true` is enabled in the config, `USCT_KWAVE_ROOT` must point
 to the external solver checkout. If `USCT_KWAVE_PYTHON_BIN` is unset, the
 adapter uses the current Python interpreter.
 
+## Configure an Existing Diffusion + FWI Result
+
+Set:
+
+```bash
+export USCT_DPS_FWI_RESULT_PATH=/path/to/dps_result.mat
+export USCT_DPS_FWI_SUMMARY_PATH=/path/to/dps_result.json
+export USCT_DPS_DATASET_PATH=/path/to/kwave_dataset.mat
+export USCT_DPS_CHECKPOINT=/path/to/checkpoint.pth
+```
+
+Then run:
+
+```bash
+usct run diffusion_fwi_kwave_adapter \
+  --case "$USCT_WORKSPACE/data/openbreastus_demo/cases/example_case.h5" \
+  --config configs/algorithms/diffusion_fwi_kwave.yaml \
+  --out runs/single_diffusion_fwi
+```
+
+The DPS MAT file may contain any of these sound-speed fields:
+
+| Field | Meaning |
+| --- | --- |
+| `VEL_DPS_PHYS` | Preferred selected reconstruction in physics-grid coordinates. |
+| `VEL_DPS_VIEW` | Preferred selected reconstruction in display/view coordinates. |
+| `VEL_FINAL_PHYS` | Final physical-grid reconstruction fallback. |
+| `VEL_FINAL_VIEW` | Final display/view reconstruction fallback. |
+| `VEL_INIT_VIEW` | Initial model, used for diagnostic metrics when available. |
+| `GT_VIEW` | External ground truth, used only when the case has no ground truth. |
+
+The JSON summary is optional, but it is the preferred source for provenance:
+checkpoint, dataset path, frequency schedule, diffusion-prior settings, and
+selected-step metadata.
+
 ## Run the Demo Suite
 
 ```bash
 export USCT_KWAVE_FWI_CASE_GLOB="$USCT_WORKSPACE/data/fwi_kwave_demo/cases/*.h5"
 usct bench --suite configs/benchmarks/fwi_kwave_demo.yaml
+```
+
+```bash
+export USCT_DPS_FWI_CASE_GLOB="$USCT_WORKSPACE/data/fwi_kwave_demo/cases/*.h5"
+usct bench --suite configs/benchmarks/diffusion_fwi_kwave_demo.yaml
 ```
 
 ## Outputs
@@ -81,6 +127,7 @@ RMSE, SSIM, PSNR, and baseline-improvement values.
 
 ## Scope
 
-`fwi_kwave_adapter` is an adapter route. It does not vendor a production
-k-Wave or MATLAB solver into this package. External solver setup remains the
-responsibility of the user environment.
+`fwi_kwave_adapter` and `diffusion_fwi_kwave_adapter` are adapter routes. They
+do not vendor a production k-Wave, MATLAB, or diffusion model implementation
+into this package. External solver setup remains the responsibility of the user
+environment.
