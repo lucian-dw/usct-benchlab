@@ -161,33 +161,30 @@ step and then nudged by a learned diffusion prior. The default path starts from
 a `bulk_support` warm start, uses sparse64 observations, and applies the FWI
 physics update before the prior update (`physics_position=pre`).
 
-$$
-g_k
-=
+```math
+g_k =
 \nabla_c
 \frac{1}{2}
 \left\|
 \hat p(c_k)-\hat p^{\mathrm{obs}}
 \right\|_2^2,
 \qquad
-c_{k+\frac{1}{2}}
-=
+c_{k+\frac{1}{2}} =
 \mathrm{LineSearch}\left(c_k - \eta_k M g_k\right).
-$$
+```
 
 Here $g_k$ is the FWI/Helmholtz gradient computed from the current waveform
 residual, and $M$ denotes the configured preconditioner, such as
 `slowness_precond`. After this data-consistency step, the diffusion model is
 queried at a low noise level and used as a score/prior correction:
 
-$$
+```math
 s_k = s_{\theta}(c_{k+\frac{1}{2}}, t),
 \qquad
-c_{k+1}
-=
+c_{k+1} =
 \Pi_{[c_{\min},c_{\max}]}
 \left(c_{k+\frac{1}{2}} + \lambda_k s_k\right).
-$$
+```
 
 In the default smoke configuration, `score_reg_t=0.10` and
 `score_reg_lambda=0.1`. The FWI gradient keeps the sample consistent with the
