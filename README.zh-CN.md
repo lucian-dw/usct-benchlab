@@ -138,9 +138,36 @@ k-Wave/FWI 结果的适配器。更详细的数学说明见
 | Bent-ray | `bent_ray_gn` | 正则化 bent-ray 风格 travel-time baseline | 带 travel-time 测量的 `USCTCase` | 折射风格对比方法 | `configs/algorithms/bent_ray.yaml` |
 | rWave adapter | `rwave_adapter` | ray-Born-inspired adapter baseline | 带 travel-time 测量的 `USCTCase` | 波动启发式对比方法 | `configs/algorithms/rwave.yaml` |
 | FWI adapter | `fwi_kwave_adapter` | PDE 层面的 full-wave inversion adapter | `USCTCase` 加外部 k-Wave/FWI 结果或命令路径 | 高保真 FWI 结果汇报 | `configs/algorithms/fwi_kwave.yaml` |
+| Diffusion FWI adapter | `diffusion_fwi_kwave_adapter` | 外部 diffusion-prior k-Wave/FWI DPS adapter | `USCTCase` 加外部 DPS `.mat`/`.json` 结果或命令路径 | 用统一 benchmark 格式汇报 diffusion + FWI 结果 | `configs/algorithms/diffusion_fwi_kwave.yaml` |
 | Tiny FWI sanity | `fwi_tiny` | 小型 waveform-inversion sanity model | 小尺寸合成声速样本 | 本地 FWI 管线 sanity check | `configs/algorithms/fwi_tiny.yaml` |
 
 更多算法说明见 [docs/algorithms.md](docs/algorithms.md)。
+
+### Diffusion + FWI adapter
+
+`diffusion_fwi_kwave_adapter` 用于汇报外部 diffusion-prior k-Wave/FWI
+pipeline 产生的重建结果。在这条 pipeline 中，k-Wave 或 Helmholtz 物理模型
+提供 data-consistency 更新，训练好的 diffusion model 作为采样过程中的学习型
+图像先验。一个概念性的目标函数可以写成
+
+$$
+\min_c
+\frac{1}{2}
+\sum_{\omega,s,r}
+\left|
+\hat p_s(\omega,r;c)-\hat p_{sr}^{\mathrm{obs}}(\omega)
+\right|^2
+\lambda R_{\theta}(c),
+$$
+
+其中 $R_{\theta}$ 表示由外部 diffusion model 给出的 score/prior 项。本仓库
+本身不训练 diffusion model，也不把 PyTorch、MATLAB 或 k-Wave 变成核心依赖；
+它只负责读取外部 DPS `.mat`/`.json` 结果，或者在明确配置时调用外部
+USCT-kwave pipeline。
+
+DPS 结果文件可包含 `VEL_DPS_PHYS`、`VEL_DPS_VIEW`、`VEL_FINAL_PHYS`、
+`VEL_FINAL_VIEW`、`VEL_INIT_VIEW` 和 `GT_VIEW`。JSON summary 用于记录
+checkpoint、dataset、频率 schedule、selected step 和 prior 参数。
 
 ## 安装
 
@@ -185,6 +212,10 @@ export USCT_NBP_ZIP_PATH=/path/to/NBPslices2D.zip
 export USCT_KWAVE_FWI_RESULT_PATH=/path/to/fwi_result.mat
 export USCT_KWAVE_ROOT=/path/to/external/USCT_kwave
 export USCT_KWAVE_PYTHON_BIN=/path/to/python
+export USCT_DPS_FWI_RESULT_PATH=/path/to/dps_result.mat
+export USCT_DPS_FWI_SUMMARY_PATH=/path/to/dps_result.json
+export USCT_DPS_DATASET_PATH=/path/to/kwave_dataset.mat
+export USCT_DPS_CHECKPOINT=/path/to/diffusion_checkpoint.pth
 ```
 
 推荐工作区结构：
@@ -306,6 +337,122 @@ usct run fwi_kwave_adapter \
 可选字段 `C_INTERP`、`VEL_ESTIM_ITER` 和 `LOSS_ITER` 会启用 ground-truth
 指标和迭代选择。
 
+Diffusion + FWI adapter：
+
+```bash
+export USCT_DPS_FWI_RESULT_PATH=/path/to/dps_result.mat
+export USCT_DPS_FWI_SUMMARY_PATH=/path/to/dps_result.json
+usct run diffusion_fwi_kwave_adapter \
+  --case "$USCT_WORKSPACE/data/openbreastus_demo/cases/example_case.h5" \
+  --config configs/algorithms/diffusion_fwi_kwave.yaml \
+  --out runs/single_diffusion_fwi
+```
+
+DPS artifact 可以包含 `VEL_DPS_PHYS`、`VEL_DPS_VIEW`、`VEL_FINAL_PHYS`
+或 `VEL_FINAL_VIEW`。可选 JSON summary 会被用于记录 checkpoint、dataset、
+频率 schedule 和 diffusion-prior 参数。
+
+如果希望由 `usct-benchlab` 启动外部 diffusion + FWI sampler，请在
+`configs/algorithms/diffusion_fwi_kwave.yaml` 中设置 `run_external: true`，
+并提供已有 k-Wave dataset 和 diffusion checkpoint：
+
+```bash
+export USCT_KWAVE_ROOT=/path/to/external/USCT_kwave
+export USCT_KWAVE_PYTHON_BIN=/path/to/usct-kwave/python
+export USCT_DPS_DATASET_PATH=/path/to/kwave_dataset.mat
+export USCT_DPS_CHECKPOINT=/path/to/diffusion_checkpoint.pth
+export USCT_DPS_FWI_RESULT_PATH="$USCT_RUN_ROOT/dps_results/case001_dps.mat"
+export USCT_DPS_FWI_SUMMARY_PATH="$USCT_RUN_ROOT/dps_results/case001_dps.json"
+
+usct run diffusion_fwi_kwave_adapter \
+  --case "$USCT_WORKSPACE/data/openbreastus_demo/cases/example_case.h5" \
+  --config configs/algorithms/diffusion_fwi_kwave.yaml \
+  --out runs/single_diffusion_fwi_external
+```
+
+默认采样参数写在 `configs/algorithms/diffusion_fwi_kwave.yaml` 中：默认观测
+为 `sparse64`，warm start 为 `bulk_support`，`steps=12`，频率 schedule 为
+`0.3 0.3 0.3 0.35 0.35 0.35 0.4 0.4 0.4 0.45 0.45 0.45 MHz`，
+`prior_mode=score_reg`，`score_reg_t=0.10`，`score_reg_lambda=0.1`，
+`physics_position=pre`，`physics_inner_steps=1`，`eta=0.1`，
+`guidance_gain=1.15`，`gradient_mode=slowness_precond`，
+`step_strategy=line_search`，`mask_mode=support_alpha`，并关闭
+`final_prior_update`。
+
+如果直接在外部 USCT-kwave checkout 中运行 sampler，可参考下面的命令：
+
+```bash
+cd "$USCT_KWAVE_ROOT"
+PYTHONPATH="$USCT_KWAVE_ROOT" "$USCT_KWAVE_PYTHON_BIN" \
+  -m openbreastus_diffusion.kwave_dps.run_dps_kwave \
+  --dataset-path "$USCT_DPS_DATASET_PATH" \
+  --checkpoint "$USCT_DPS_CHECKPOINT" \
+  --init-mat /path/to/bulk_support_init.mat \
+  --output-path "$USCT_DPS_FWI_RESULT_PATH" \
+  --summary-path "$USCT_DPS_FWI_SUMMARY_PATH" \
+  --device cuda:0 \
+  --seed 1234 \
+  --steps 12 \
+  --crop-source-size 300 \
+  --source-size 480 \
+  --sampler-mode reference \
+  --prior-mode score_reg \
+  --freqs-mhz 0.3 0.3 0.3 0.35 0.35 0.35 0.4 0.4 0.4 0.45 0.45 0.45 \
+  --eta 0.1 \
+  --guidance-gain 1.15 \
+  --prior-strength 1.0 \
+  --prior-mask-mode none \
+  --score-reg-t 0.10 \
+  --score-reg-lambda 0.1 \
+  --physics-position pre \
+  --physics-inner-steps 1 \
+  --output-selection final \
+  --no-final-prior-update \
+  --gradient-mode slowness_precond \
+  --step-strategy line_search \
+  --tx-stride 1 \
+  --mask-mode support_alpha \
+  --support-guidance \
+  --sign-conv -1
+```
+
+diffusion prior 的训练也属于外部项目，不属于 `usct-benchlab` 核心功能。典型
+训练命令应在外部工程中运行，checkpoint 放在工作区的 `checkpoints/` 下，不
+提交到 Git：
+
+```bash
+cd "$USCT_KWAVE_ROOT"
+PYTHONPATH="$USCT_KWAVE_ROOT" "$USCT_KWAVE_PYTHON_BIN" \
+  openbreastus_diffusion/train_openbreastus.py \
+  --data-root /path/to/openbreastus_training_crops \
+  --workdir "$USCT_WORKSPACE/checkpoints/openbreastus_diffusion" \
+  --include-classes HET FIB FAT EXD \
+  --image-size 256 \
+  --crop-size 300 \
+  --batch-size 32 \
+  --epochs 5000 \
+  --max-steps 300000 \
+  --device-ids 0
+```
+
+外部项目也支持单独对 diffusion prior 做采样，适合在耦合 FWI 之前检查
+checkpoint 本身是否正常：
+
+```bash
+cd "$USCT_KWAVE_ROOT"
+PYTHONPATH="$USCT_KWAVE_ROOT" "$USCT_KWAVE_PYTHON_BIN" \
+  openbreastus_diffusion/sample_openbreastus.py \
+  --checkpoint "$USCT_DPS_CHECKPOINT" \
+  --out-dir "$USCT_WORKSPACE/runs/diffusion_prior_samples" \
+  --num-samples 16 \
+  --batch-size 4 \
+  --device-ids 0
+```
+
+如果你的外部 checkout 中训练或采样模块名称不同，保持接口约定即可：训练在
+`usct-benchlab` 外完成，然后通过 `USCT_DPS_CHECKPOINT` 把 checkpoint 传给
+adapter。
+
 ## 运行 benchmark
 
 demo benchmark 会读取下面这些可选 case glob：
@@ -315,6 +462,7 @@ export USCT_SYNTHETIC_CASE_GLOB="$USCT_WORKSPACE/data/synthetic_demo/cases/*.h5"
 export USCT_NBP_CASE_GLOB="$USCT_WORKSPACE/data/nbpslice2d_demo/cases/*.h5"
 export USCT_OPENBREASTUS_CASE_GLOB="$USCT_WORKSPACE/data/openbreastus_demo/cases/*.h5"
 export USCT_KWAVE_FWI_CASE_GLOB="$USCT_WORKSPACE/data/fwi_kwave_demo/cases/*.h5"
+export USCT_DPS_FWI_CASE_GLOB="$USCT_WORKSPACE/data/fwi_kwave_demo/cases/*.h5"
 ```
 
 运行 benchmark：
@@ -324,6 +472,7 @@ usct bench --suite configs/benchmarks/synthetic_demo.yaml
 usct bench --suite configs/benchmarks/nbpslice2d_demo.yaml
 usct bench --suite configs/benchmarks/openbreastus_demo.yaml
 usct bench --suite configs/benchmarks/fwi_kwave_demo.yaml
+usct bench --suite configs/benchmarks/diffusion_fwi_kwave_demo.yaml
 ```
 
 ## 输出文件
