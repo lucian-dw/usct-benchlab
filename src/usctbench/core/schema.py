@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Any
+
+from usctbench.core.compat import StrEnum
+from usctbench.core.run_controls import BudgetCaps, RunControls
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -107,6 +109,8 @@ class MeasurementSpec(_ArrayModel):
     freq_data: np.ndarray | None = None
     time_data: np.ndarray | None = None
     water_reference: np.ndarray | None = None
+    water_reference_time: np.ndarray | None = None
+    source_spectrum: np.ndarray | None = None
     source_wavelet: np.ndarray | None = None
     time_axis_s: np.ndarray | None = None
     tof_s: np.ndarray | None = None
@@ -114,7 +118,6 @@ class MeasurementSpec(_ArrayModel):
     tof_first_arrival_s: np.ndarray | None = None
     tof_xcorr_s: np.ndarray | None = None
     phase_slope_delay_s: np.ndarray | None = None
-    log_amp: np.ndarray | None = None
     valid_mask: np.ndarray | None = None
     feature_quality: np.ndarray | None = None
     ray_weights: np.ndarray | None = None
@@ -124,6 +127,8 @@ class MeasurementSpec(_ArrayModel):
         "freq_data",
         "time_data",
         "water_reference",
+        "water_reference_time",
+        "source_spectrum",
         "source_wavelet",
         "time_axis_s",
         "tof_s",
@@ -131,7 +136,6 @@ class MeasurementSpec(_ArrayModel):
         "tof_first_arrival_s",
         "tof_xcorr_s",
         "phase_slope_delay_s",
-        "log_amp",
         "feature_quality",
         "ray_weights",
         mode="before",
@@ -145,6 +149,8 @@ class MeasurementSpec(_ArrayModel):
     def _coerce_valid_mask(cls, value: Any) -> np.ndarray | None:
         array = _optional_array(value)
         if array is not None:
+            if not np.isin(array, [0, 1]).all():
+                raise ValueError("valid_mask must contain only 0/1")
             array = array.astype(bool, copy=False)
         return array
 
@@ -172,13 +178,12 @@ class MeasurementSpec(_ArrayModel):
                     self.tof_first_arrival_s,
                     self.tof_xcorr_s,
                     self.phase_slope_delay_s,
-                    self.log_amp,
                     self.ray_weights,
                 )
             )
             if not has_feature:
                 raise ValueError(
-                    "feature-domain measurements require tof_s, delta_tof_s, or log_amp"
+                    "feature-domain measurements require a sound-speed ToF/delay feature or ray weights"
                 )
         return self
 
@@ -187,12 +192,9 @@ class GroundTruthSpec(_ArrayModel):
     """Optional image-domain ground truth for synthetic or labeled cases."""
 
     sound_speed_mps: np.ndarray | None = None
-    attenuation_np_per_m: np.ndarray | None = None
     density_kg_per_m3: np.ndarray | None = None
 
-    @field_validator(
-        "sound_speed_mps", "attenuation_np_per_m", "density_kg_per_m3", mode="before"
-    )
+    @field_validator("sound_speed_mps", "density_kg_per_m3", mode="before")
     @classmethod
     def _coerce_ground_truth_arrays(cls, value: Any) -> np.ndarray | None:
         return _optional_array(value)
@@ -213,7 +215,6 @@ class USCTCase(_ArrayModel):
         expected_shape = self.grid.shape
         arrays = {
             "ground_truth.sound_speed_mps": self.ground_truth.sound_speed_mps,
-            "ground_truth.attenuation_np_per_m": self.ground_truth.attenuation_np_per_m,
             "ground_truth.density_kg_per_m3": self.ground_truth.density_kg_per_m3,
         }
         for name, value in arrays.items():
@@ -233,22 +234,67 @@ class USCTCase(_ArrayModel):
             "measurement.tof_first_arrival_s": self.measurement.tof_first_arrival_s,
             "measurement.tof_xcorr_s": self.measurement.tof_xcorr_s,
             "measurement.phase_slope_delay_s": self.measurement.phase_slope_delay_s,
-            "measurement.log_amp": self.measurement.log_amp,
             "measurement.valid_mask": self.measurement.valid_mask,
             "measurement.feature_quality": self.measurement.feature_quality,
             "measurement.ray_weights": self.measurement.ray_weights,
         }
         for name, value in arrays.items():
+            if (
+                name == "measurement.valid_mask"
+                and value is not None
+                and self.measurement.freq_data is not None
+                and value.shape == self.measurement.freq_data.shape
+            ):
+                continue
             if value is not None and value.shape != expected_shape:
                 raise ValueError(f"{name} must match (n_tx, n_rx)={expected_shape}")
+        measurement = self.measurement
+        if measurement.water_reference_time is not None:
+            if (
+                measurement.time_data is None
+                or measurement.water_reference_time.shape != measurement.time_data.shape
+            ):
+                raise ValueError("water_reference_time must match time_data")
+        if measurement.source_spectrum is not None:
+            if measurement.frequencies_hz is None:
+                raise ValueError("source_spectrum requires frequencies_hz")
+            shape = (len(measurement.frequencies_hz), expected_shape[0])
+            if measurement.source_spectrum.shape not in {
+                shape,
+                (shape[0],),
+            } or not np.all(np.isfinite(measurement.source_spectrum)):
+                raise ValueError(
+                    "source_spectrum must be finite (frequency,tx) or (frequency,)"
+                )
 
 
 class AlgorithmConfig(_ArrayModel):
     """Algorithm configuration passed to registry entries."""
 
     name: str | None = None
+    run_controls: RunControls | None = None
+    budget_caps: BudgetCaps | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("parameters", mode="before")
+    @classmethod
+    def _typed_parameters(cls, value):
+        from usctbench.algorithms.parameters import Parameters
+
+        if isinstance(value, Parameters):
+            return value.model_dump(exclude_none=True)
+        return value
+
+    @model_validator(mode="after")
+    def _unambiguous_controls(self):
+        # One owner for execution budgets: legacy YAML and typed controls must
+        # never silently override each other.
+        if (
+            self.run_controls is not None or self.budget_caps is not None
+        ) and "stopping" in self.parameters:
+            raise ValueError("use run_controls or legacy parameters.stopping, not both")
+        return self
 
 
 class ReconstructionResult(_ArrayModel):
@@ -257,7 +303,6 @@ class ReconstructionResult(_ArrayModel):
     algorithm: str
     case_id: str
     sound_speed_mps: np.ndarray | None = None
-    attenuation_np_per_m: np.ndarray | None = None
     reflectivity: np.ndarray | None = None
     uncertainty: np.ndarray | None = None
     metrics: dict[str, Any] = Field(default_factory=dict)
@@ -268,7 +313,6 @@ class ReconstructionResult(_ArrayModel):
 
     @field_validator(
         "sound_speed_mps",
-        "attenuation_np_per_m",
         "reflectivity",
         "uncertainty",
         mode="before",

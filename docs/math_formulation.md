@@ -16,20 +16,10 @@ $$
 Here $p_s(t,x)$ is pressure, $q_s(t,x)$ is the emitted source term, and $c(x)$
 is sound speed.
 
-A more general model may include density and attenuation:
-
-$$
-\begin{aligned}
-\frac{1}{c(x)^2}\partial_{tt}p_s
-- \nabla\cdot\left(\frac{1}{\rho(x)}\nabla p_s\right)
-+ \mathcal A_\alpha[p_s]
-&= q_s.
-\end{aligned}
-$$
-
-The density field is $\rho(x)$, and $\mathcal A_\alpha$ denotes an attenuation
-operator controlled by $\alpha(x)$. Practical solvers also include boundary
-conditions, transducer models, grids, and source wavelets.
+The active model reconstructs sound speed in two spatial dimensions, with fixed
+material assumptions. Practical solvers also include boundary conditions,
+transducer models, grids, and source wavelets. Absorbing boundary layers are
+numerical boundary conditions, not reconstructed tissue absorption.
 
 ## Receiver Operator
 
@@ -41,23 +31,22 @@ d_{sr}(t)=\mathcal M_r p_s(t,\cdot)+\eta_{sr}(t).
 $$
 
 The data $d_{sr}(t)$ may be stored as raw time traces, frequency-domain complex
-pressure, or derived features such as travel-time delay and log-amplitude
-ratio.
+pressure, or derived sound-speed features such as travel-time delay.
 
 ## Inverse Problem
 
-The full USCT inverse problem is
+The sound-speed inverse problem considered here is
 
 $$
-\text{recover } c(x),\rho(x),\alpha(x)
+\text{recover } c(x)
 \quad
 \text{from}
 \quad
 \{d_{sr}(t)\}_{s,r}.
 $$
 
-The package focuses primarily on reconstructing the sound-speed map
-$c(x)$. Attenuation is supported as a separate straight-ray baseline.
+The package reconstructs $c(x)$; other material properties are not optimization
+targets in this contract.
 
 ## Straight-Ray Approximation
 
@@ -89,15 +78,35 @@ $\Delta t_{sr}$ values.
 
 ## Algebraic Reconstruction
 
-The straight-ray sound-speed algorithms solve weighted regularized systems:
+The quadratic CGLS path solves a weighted regularized system:
 
 $$
 \min_{\delta s}
 \|W(A\delta s-b)\|_2^2+\lambda^2R(\delta s).
 $$
 
-$W$ contains valid-ray masks and optional weights. $R$ is a regularizer such as
-damping or smoothness. After solving for $\delta s$, sound speed is recovered
+$W=\operatorname{diag}(\sqrt{w_i})$ contains the square roots of training-ray
+precision weights; excluded channels have zero precision. $R$ is the squared
+norm of the configured damping or smoothness operator. The optional Huber mode
+replaces the quadratic data loss with an explicitly recorded robust loss.
+
+SIRT and SART use the same ray matrix, but not generally the same minimization
+problem. Write $r_i=\sum_j A_{ij}$ and $C_{jj}=\sum_i w_iA_{ij}$. Without optional
+postprocessing, the simultaneous update is
+
+$$
+x_{k+1}=\Pi\left[x_k+\beta C^{-1}A^T
+\operatorname{diag}(w_i/r_i)(b-Ax_k)\right],\qquad x=\delta s.
+$$
+
+Its unprocessed fixed-point objective uses $w_i/r_i$ rather than $w_i$.
+SART applies corresponding subset updates; fixed relaxation can yield cycles
+on inconsistent data, so a complete sweep does not guarantee monotonic global
+least-squares descent. Image smoothing is an engineering regularization step,
+not the exact minimizer of the quadratic loss. Reported common data residuals
+retain input precision $w_i$, separately from the row-normalized objective monitor.
+
+After solving for $\delta s$, sound speed is recovered
 by
 
 $$
@@ -109,19 +118,6 @@ Registered sound-speed solvers:
 - `straight_cgls` is a Krylov least-squares solver.
 - `straight_sirt` is a simultaneous iterative reconstruction method.
 - `straight_sart` is an ordered/subset algebraic reconstruction method.
-
-## Attenuation Tomography
-
-For amplitude-based attenuation tomography, the basic line-integral model is
-
-$$
--\log |p/p_0|
-\approx
-\int_\gamma \alpha(x)\,d\ell .
-$$
-
-The registered `attenuation_sirt` command solves this straight-ray attenuation
-problem with an algebraic update.
 
 ## Eikonal / Bent-Ray Model
 
@@ -143,9 +139,12 @@ $$
 +\lambda R(c).
 $$
 
-The `bent_ray_gn` command is a regularized bent-ray-style travel-time
-baseline. It records `full_external_eikonal_solver = False` and
-`backend = "regularized_travel_time_baseline"`.
+`bent_ray_gn` now solves the first-order discrete Eikonal problem with fast
+marching, including water padding, bilinear receivers and water calibration.
+Its tangent differentiates the accepted upwind stencil and its adjoint reverses
+that same computational tape. A regularized GN step updates slowness and
+backtracking evaluates a new nonlinear travel-time solve. This is a native
+discretization, not the external upstream ray-shooting implementation.
 
 ## Weak-Scattering / Ray-Born Model
 
@@ -164,9 +163,23 @@ kernel, and $\delta m(x)$ is a contrast parameter. A complete implementation
 requires complex frequency-domain pressure data and careful reference-field
 handling.
 
-The `rwave_adapter` command is an rWave/ray-Born-inspired adapter
-baseline. It records `full_ray_born_solver = False` and
-`backend = "adapter_style_travel_time_baseline"`.
+`rwave_adapter` uses $m=c^{-2}$, complex outgoing Green functions and the discrete
+Born map $J\delta m=\omega^2\Delta A\,G_r\operatorname{diag}(\delta m)G_s q_s$.
+Its real-model adjoint obeys $\operatorname{Re}\langle Jv,z\rangle=\langle v,J^*z\rangle$.
+The supplied nonlinear config recomputes full Green fields from the discrete
+volume-integral equation at each trial model:
+
+$$
+U = U_0 + G_0 V(m) U, \qquad V(m)=\omega^2\Delta A\,\operatorname{diag}(m-m_0).
+$$
+
+Linear convolution is evaluated by zero-padded FFT, not periodic propagation.
+The resulting full-field Born Jacobian is the discrete derivative up to GMRES
+tolerance. This is distorted Born, not a complete upstream r-Wave reproduction.
+For the optional Eikonal/WKB predictor, the Born map remains only an approximate
+derivative; an exact frozen transpose does not imply a passing WKB derivative
+test. Acceptance always uses newly computed nonlinear training pressure.
+See [operator contracts](operator_contract.md) for this distinction.
 
 ## FWI PDE-Constrained Objective
 
@@ -183,8 +196,7 @@ $$
 $$
 
 The simulated pressure $\hat p_s(\omega,r;c)$ is constrained by the acoustic
-PDE and its discretization. The `fwi_kwave_adapter` command ingests external
-k-Wave/FWI artifacts or calls a configured external pipeline, then reports the
+PDE and its discretization. The `fwi_wust` command calls the pinned WUST MATLAB/CUDA runtime with existing total complex pressure, then reports the
 result using the package-standard benchmark outputs.
 
 ## Mapping from Models to Commands
@@ -194,8 +206,6 @@ result using the package-standard benchmark outputs.
 | Straight-ray weighted least squares | `straight_cgls` | `delta_tof_s` | Sound speed |
 | Simultaneous iterative ray tomography | `straight_sirt` | `delta_tof_s` | Sound speed |
 | Ordered/subset algebraic ray update | `straight_sart` | `delta_tof_s` | Sound speed |
-| Straight-ray log-amplitude tomography | `attenuation_sirt` | `log_amp` | Attenuation |
-| Regularized bent-ray-style travel-time baseline | `bent_ray_gn` | `delta_tof_s` | Sound speed |
-| Ray-Born-inspired adapter baseline | `rwave_adapter` | `delta_tof_s` | Sound speed |
-| PDE-level full-wave inversion adapter | `fwi_kwave_adapter` | External FWI artifact or command | Sound speed |
-| Small waveform-inversion sanity model | `fwi_tiny` | Synthetic waveform case | Sound speed |
+| Nonlinear Eikonal travel-time tomography | `bent_ray_gn` | `delta_tof_s` or `tof_s` | Sound speed |
+| Relinearized finite-frequency Ray-Born | `rwave_adapter` | `freq_data`, calibrated source/reference | Sound speed |
+| PDE-level full-wave inversion adapter | `fwi_wust` | Total complex pressure and approved WUST CUDA runtime | Sound speed |

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import glob
+import hashlib
 import json
 import math
 import numpy as np
@@ -31,8 +32,20 @@ from usctbench.core.schema import (
     USCTCase,
 )
 from usctbench.viz import write_preview_png
+from usctbench.metrics import compute_regional_image_metrics
 
 _ENV_DEFAULT_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}")
+
+
+def _implementation_digest():
+    """Fingerprint actual package sources, including uncommitted development code."""
+    root = Path(__file__).resolve().parents[1]
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*")):
+        if path.suffix in {".py", ".m"} and path.is_file():
+            digest.update(path.relative_to(root).as_posix().encode())
+            digest.update(b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()
 
 
 def load_algorithm_config(path: str | Path) -> AlgorithmConfig:
@@ -46,11 +59,34 @@ def load_algorithm_config(path: str | Path) -> AlgorithmConfig:
         raise ValueError("config parameters must be a mapping")
     if not isinstance(metadata, dict):
         raise ValueError("config metadata must be a mapping")
-    return AlgorithmConfig(
+    from usctbench.algorithms.configuration import validate_algorithm_config
+
+    unknown = payload.keys() - {
+        "name",
+        "algorithm",
+        "parameters",
+        "metadata",
+        "run_controls",
+        "budget_caps",
+    }
+    if unknown:
+        raise ValueError(f"unknown algorithm config fields: {sorted(unknown)}")
+    if (
+        payload.get("name")
+        and payload.get("algorithm")
+        and payload["name"] != payload["algorithm"]
+    ):
+        raise ValueError("conflicting name/algorithm aliases")
+    config = AlgorithmConfig(
         name=payload.get("name") or payload.get("algorithm"),
         parameters=_expand_config_value(parameters),
         metadata=_expand_config_value(metadata),
+        run_controls=payload.get("run_controls"),
+        budget_caps=payload.get("budget_caps"),
     )
+    if config.name:
+        return validate_algorithm_config(config.name, config)
+    return config
 
 
 def run_algorithm_case(
@@ -66,11 +102,14 @@ def run_algorithm_case(
     algorithm_for_report = algorithm_name
     config_for_report = str(config_path)
     memory_before_mb = _peak_memory_mb()
+    implementation_before = _implementation_digest()
+    resolved_config = None
     case: USCTCase | None = None
     try:
         case = read_case_hdf5(case_path)
         case_id = case.case_id
         config = load_algorithm_config(config_path)
+        resolved_config = config.model_dump(mode="json")
         if config.name is not None and config.name != algorithm_name:
             raise ValueError(
                 "algorithm/config mismatch: "
@@ -79,6 +118,23 @@ def run_algorithm_case(
         config.parameters.setdefault("_run_output_dir", str(out_root / case_id))
         algorithm = get_algorithm(algorithm_name)
         result = algorithm.run(case, config)
+        if result.sound_speed_mps is not None and result.status == ResultStatus.SUCCESS:
+            # Reporting only: the solver has already selected its final state.
+            image_policy = dict(config.parameters.get("image_evaluation", {}))
+            image_policy.setdefault(
+                "water_speed_mps",
+                config.parameters.get(
+                    "reference_sound_speed_mps",
+                    case.metadata.get("reference_sound_speed_mps", 1500.0),
+                ),
+            )
+            result.metrics.update(
+                compute_regional_image_metrics(
+                    result.sound_speed_mps,
+                    case.ground_truth.sound_speed_mps,
+                    **image_policy,
+                )
+            )
     except Exception as exc:
         result = ReconstructionResult(
             algorithm=algorithm_for_report,
@@ -88,6 +144,13 @@ def run_algorithm_case(
             failure_reason=f"{type(exc).__name__}: {exc}",
         )
     memory_after_mb = _peak_memory_mb()
+    implementation_after = _implementation_digest()
+    result.metrics["implementation"] = {
+        "source_sha256_at_start": implementation_before,
+        "source_changed_during_run": implementation_before != implementation_after,
+        "source_sha256_at_finish": implementation_after,
+    }
+    result.metrics["resolved_config"] = resolved_config
     if case is not None:
         for key, value in _feature_qc_metrics(case).items():
             result.metrics.setdefault(key, value)
@@ -254,11 +317,7 @@ def _write_result_artifacts(
     peak_memory_mb: float,
     case: USCTCase | None = None,
 ) -> None:
-    preview_image = (
-        result.sound_speed_mps
-        if result.sound_speed_mps is not None
-        else result.attenuation_np_per_m
-    )
+    preview_image = result.sound_speed_mps
     if preview_image is not None:
         preview_path = write_preview_png(preview_image, out_dir / "preview.png")
         result.artifacts.setdefault("preview", str(preview_path))
@@ -290,6 +349,9 @@ def _write_result_artifacts(
                 ),
                 **measurement_metadata,
                 "config": config,
+                "resolved_config": result.metrics.get("resolved_config"),
+                "implementation": result.metrics.get("implementation"),
+                "image_evaluation": result.metrics.get("image_evaluation"),
                 "error_type": _classify_failure(result.failure_reason),
                 "runtime_s": result.runtime_s,
                 "peak_memory_mb": peak_memory_mb,
@@ -329,18 +391,14 @@ def _write_result_artifacts(
 def _write_straight_ray_diagnostics(
     result: ReconstructionResult, case: USCTCase | None, out_dir: Path
 ) -> None:
-    ray_diagnostic_algorithms = {"bent_ray_gn", "rwave_adapter"}
-    if case is None or (
-        not str(result.algorithm).startswith("straight_")
-        and str(result.algorithm) not in ray_diagnostic_algorithms
-    ):
+    if case is None or not str(result.algorithm).startswith("straight_"):
         return
     try:
         from usctbench.algorithms.ray import (
-            StraightRayProjector,
             ray_weights,
             valid_ray_mask,
         )
+        from usctbench.operators.straight_ray import StraightRayProjector
     except Exception:
         return
 
@@ -542,6 +600,10 @@ def _assess_record(
         pass_reasons.append("required artifacts present")
 
     algorithm_name = str(record.get("algorithm", ""))
+    if record.get("stopping", {}).get("termination_category") == "failure":
+        fail_reasons.append(
+            f"solver stopped unsuccessfully: {record.get('stop_reason')}"
+        )
 
     for key in _required_metrics_for_algorithm(
         protocol.get("required_metrics", []), algorithm_name
@@ -735,6 +797,11 @@ def _write_summary_csv(records: list[dict[str, Any]], path: Path) -> None:
         "pass_reasons",
         "fail_reasons",
         "runtime_s",
+        "primary_image_region",
+        "rmse",
+        "psnr",
+        "ssim",
+        "water_background_rmse",
         "peak_memory_mb",
         "artifacts_complete",
         "failure_report_present",
@@ -808,8 +875,24 @@ def _write_benchmark_report(
             "",
             "## Results",
             "",
+            "Image scores use each row's declared region. Do not mix historical full-image and tissue scores.",
+            "",
+            "| Algorithm | Case | Region | RMSE (m/s) | PSNR (dB) | SSIM | Water RMSE |",
+            "| --- | --- | --- | ---: | ---: | ---: | ---: |",
         ]
     )
+    for record in records:
+
+        def score(name):
+            value = record.get(name)
+            return f"{value:.5g}" if _is_number(value) else "N/A"
+
+        lines.append(
+            f"| {record.get('algorithm')} | {record.get('case_id')} | "
+            f"{record.get('primary_image_region', 'legacy/unspecified')} | "
+            f"{score('rmse')} | {score('psnr')} | {score('ssim')} | {score('water_background_rmse')} |"
+        )
+    lines.extend(["", "### Execution", ""])
     for record in records:
         lines.append(
             f"- `{record.get('algorithm')}` / `{record.get('case_id')}`: "

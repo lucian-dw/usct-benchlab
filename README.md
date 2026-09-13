@@ -2,11 +2,11 @@
 
 [中文说明](README.zh-CN.md)
 
-`usct-benchlab` is a lightweight Python benchmark package for ultrasound
-computed tomography (USCT) reconstruction algorithms with unified input/output,
-classical baselines, and FWI adapter support. It provides dataset conversion
-helpers, runnable algorithm configs, common metrics, preview figures, and
-benchmark summaries for reproducible comparisons.
+`usct-benchlab` focuses on research-grade numerical benchmarking and runtime
+integration for **2-D ultrasound sound-speed reconstruction**. It provides unified
+case/result interfaces, dataset preparation, classical and native physical-model
+solvers, FWI adapters, metrics, and reproducible benchmark reports. It does not
+provide an attenuation-reconstruction API or claim clinical validity.
 
 ## What is USCT?
 
@@ -16,10 +16,8 @@ the object according to an acoustic wave equation, and receiver transducers
 measure the resulting pressure traces. The inverse problem is to recover
 spatial acoustic properties from those measurements.
 
-The main reconstruction target is the sound-speed map $c(x)$. Related physical
-properties include density $\rho(x)$ and attenuation $\alpha(x)$. This package
-converts datasets to a common `USCTCase` schema and returns every algorithm
-output as a `ReconstructionResult`.
+The reconstructed quantity is the sound-speed map $c(x)$. Datasets use the
+common `USCTCase` schema and algorithm outputs use `ReconstructionResult`.
 
 ## Mathematical Formulation
 
@@ -93,6 +91,12 @@ $$
 \min_{\delta u}\|W(A\delta u-b)\|_2^2+\lambda^2\|L\delta u\|_2^2.
 $$
 
+This is the quadratic CGLS objective, with $W_{ii}=\sqrt{w_i}$. The current
+SIRT row normalization instead induces weights $w_i/\sum_jA_{ij}$; subset SART
+can cycle on inconsistent data. Their shared forward model does not imply an
+identical objective or a monotonic global loss, especially with optional smoothing.
+See [the numerical solver audit](docs/validation/2026-09-09_inverse_solver_audit_CN.md).
+
 Bent-ray methods keep a high-frequency travel-time model in which paths depend
 on the current medium:
 
@@ -131,74 +135,44 @@ candidate sound speed.
 | Bent-ray | High-frequency travel time follows an eikonal model; rays bend according to the current sound speed or slowness. | Regularized nonlinear travel-time mismatch based on $T_s(r;c)$. | Refraction-aware surrogate comparison when full waveform inversion is too expensive or unavailable. |
 | FWI | Full acoustic wave or Helmholtz propagation; measured data are pressure waveforms or complex pressure samples. | PDE-constrained waveform mismatch over sources, receivers, and frequencies. | High-fidelity reporting when external k-Wave/FWI artifacts or an external FWI command are available. |
 
-The `bent_ray_gn` command is a regularized bent-ray-style travel-time baseline,
-not a full external eikonal solver. The FWI path is an adapter for high-fidelity
-external k-Wave/FWI results.
+`bent_ray_gn` solves a nonlinear Eikonal equation with fast marching and an
+exact discrete Jacobian/adjoint. `rwave_adapter` requires calibrated complex
+pressure and relinearizes finite-frequency Born scattering. Its supplied config
+uses full Green backgrounds from a free-space volume-integral solve; the
+Eikonal/WKB Green approximation remains an explicit option. Neither uses the
+straight-ray projector. These discretizations
+do not guarantee a monotone ranking of image quality or reproduce every option
+of upstream r-Wave. Production FWI calls the pinned WUST MATLAB/CUDA runtime.
 For more detail, see [docs/math_formulation.md](docs/math_formulation.md).
 
 ## Supported Algorithms
+
+For validated Python/YAML parameters, see the [parameter contract](docs/parameter_contract.md).
+Research Agent consumers can discover physical variants and permitted controls with
+`usct list-algorithms --json` and `usct describe-algorithm <id> --json`;
+see the [Agent API guide](docs/agent_algorithm_api.md).
 
 | Algorithm | Command name | Mathematical model | Input requirement | Typical use | Config |
 | --- | --- | --- | --- | --- | --- |
 | CGLS | `straight_cgls` | Straight-ray weighted least squares | `USCTCase` with ring geometry and travel-time measurements | Fast sound-speed baseline | `configs/algorithms/cgls.yaml` |
 | SIRT | `straight_sirt` | Simultaneous iterative ray tomography | `USCTCase` with ring geometry and travel-time measurements | Robust iterative sound-speed baseline | `configs/algorithms/sirt.yaml` |
 | SART | `straight_sart` | Ordered/subset algebraic ray update | `USCTCase` with ring geometry and travel-time measurements | Ordered-update straight-ray baseline | `configs/algorithms/sart.yaml` |
-| Attenuation SIRT | `attenuation_sirt` | Straight-ray log-amplitude tomography | `USCTCase` with log-amplitude measurements | Attenuation baseline | `configs/algorithms/attenuation.yaml` |
-| Bent-ray | `bent_ray_gn` | Regularized bent-ray-style travel-time baseline | `USCTCase` with travel-time measurements | Refraction-style comparison | `configs/algorithms/bent_ray.yaml` |
-| rWave adapter | `rwave_adapter` | Ray-Born-inspired adapter baseline | `USCTCase` with travel-time measurements | Wave-inspired adapter comparison | `configs/algorithms/rwave.yaml` |
-| FWI adapter | `fwi_kwave_adapter` | PDE-level full-wave inversion adapter | `USCTCase` plus external k-Wave/FWI artifact or command path | High-fidelity FWI reporting | `configs/algorithms/fwi_kwave.yaml` |
-| Diffusion FWI adapter | `diffusion_fwi_kwave_adapter` | External diffusion-prior k-Wave/FWI DPS adapter | `USCTCase` plus external DPS `.mat`/`.json` artifact or command path | Report existing diffusion + FWI outputs in the same benchmark format | `configs/algorithms/diffusion_fwi_kwave.yaml` |
-| Tiny FWI sanity | `fwi_tiny` | Small waveform-inversion sanity model | Small synthetic sound-speed case | Local waveform-inversion plumbing test | `configs/algorithms/fwi_tiny.yaml` |
+| Bent-ray | `bent_ray_gn` | Nonlinear Eikonal / fast marching | First-arrival times or calibrated delays | Refraction-corrected tomography | `configs/algorithms/bent_ray.yaml` |
+| rWave adapter | `rwave_adapter` | Relinearized finite-frequency Ray-Born | Complex `(frequency,tx,rx)` pressure and calibrated source or independent water reference | Scattering-sensitive pressure inversion | `configs/algorithms/rwave.yaml` |
+| WUST FWI | `fwi_wust` | PDE-level frequency-domain inversion | Total complex pressure, declared convention and mask | CUDA full-wave reconstruction | `configs/algorithms/fwi_wust.yaml` |
 
 More details are in [docs/algorithms.md](docs/algorithms.md).
 
-### Diffusion + FWI Adapter
+### Physics and Agent Validation
 
-`diffusion_fwi_kwave_adapter` reports reconstructions produced by an external
-diffusion-prior k-Wave/FWI pipeline. The important point is the sampling loop:
-the current sound-speed image is repeatedly corrected by a waveform physics
-step and then nudged by a learned diffusion prior. The default path starts from
-a `bulk_support` warm start, uses sparse64 observations, and applies the FWI
-physics update before the prior update (`physics_position=pre`).
+Canonical operators live in `usctbench.operators.<physical_operator>`; forward/adjoint compatibility imports remain thin. Production full-wave numerics belong to WUST. See [operator contracts](docs/operator_contract.md).
 
-```math
-g_k =
-\nabla_c
-\frac{1}{2}
-\left\|
-\hat p(c_k)-\hat p^{\mathrm{obs}}
-\right\|_2^2,
-\qquad
-c_{k+\frac{1}{2}} =
-\mathrm{LineSearch}\left(c_k - \eta_k M g_k\right).
-```
-
-Here $g_k$ is the FWI/Helmholtz gradient computed from the current waveform
-residual, and $M$ denotes the configured preconditioner, such as
-`slowness_precond`. After this data-consistency step, the diffusion model is
-queried at a low noise level and used as a score/prior correction:
-
-```math
-s_k = s_{\theta}(c_{k+\frac{1}{2}}, t),
-\qquad
-c_{k+1} =
-\Pi_{[c_{\min},c_{\max}]}
-\left(c_{k+\frac{1}{2}} + \lambda_k s_k\right).
-```
-
-In the default smoke configuration, `score_reg_t=0.10` and
-`score_reg_lambda=0.1`. The FWI gradient keeps the sample consistent with the
-measured pressure data, while the diffusion prior suppresses implausible
-textures and biases the iterate toward the distribution learned from
-OpenBreastUS-like sound-speed maps. The adapter itself does not train the
-diffusion model and does not vendor PyTorch, MATLAB, or k-Wave into
-`usct-benchlab`; it only loads an external DPS `.mat`/`.json` result or, when
-explicitly configured, launches the external pipeline.
-
-The expected DPS result fields are `VEL_DPS_PHYS`, `VEL_DPS_VIEW`,
-`VEL_FINAL_PHYS`, `VEL_FINAL_VIEW`, `VEL_INIT_VIEW`, and `GT_VIEW`. The JSON
-summary is used to record checkpoint, dataset, frequency schedule, selected
-step, and prior settings.
+Native solvers support grouped receiver/frequency validation and OR stopping:
+residual/noise targets, update/objective/validation stagnation, time/call budgets
+and iteration caps. Reports retain the actual stop reason, selected checkpoint
+and work counts. GT metrics are optional and never select iterates by default.
+See [evaluation and stopping](docs/agent_evaluation.md) and the
+[reproducible validation workflow](docs/physics_validation.md).
 
 ## Installation
 
@@ -240,13 +214,6 @@ export USCT_WORKSPACE=/path/to/usct-benchlab
 export USCT_DATA_ROOT=$USCT_WORKSPACE/data/openbreastus
 export USCT_RUN_ROOT=$USCT_WORKSPACE/runs/usctbench_runs
 export USCT_NBP_ZIP_PATH=/path/to/NBPslices2D.zip
-export USCT_KWAVE_FWI_RESULT_PATH=/path/to/fwi_result.mat
-export USCT_KWAVE_ROOT=/path/to/external/USCT_kwave
-export USCT_KWAVE_PYTHON_BIN=/path/to/python
-export USCT_DPS_FWI_RESULT_PATH=/path/to/dps_result.mat
-export USCT_DPS_FWI_SUMMARY_PATH=/path/to/dps_result.json
-export USCT_DPS_DATASET_PATH=/path/to/kwave_dataset.mat
-export USCT_DPS_CHECKPOINT=/path/to/diffusion_checkpoint.pth
 ```
 
 Recommended workspace layout:
@@ -349,142 +316,27 @@ rWave adapter:
 
 ```bash
 usct run rwave_adapter \
-  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
+  --case "$USCT_WORKSPACE/data/physics/example/pressure_case.h5" \
   --config configs/algorithms/rwave.yaml \
   --out runs/single_rwave
 ```
 
-FWI adapter:
+This case must contain actual complex pressure and source calibration, not a
+speed-map-derived ToF case. Create a pressure pair using the validation workflow;
+`mode: fixed_background` explicitly selects the linear Born reference instead
+of the default nonlinear background updates.
+
+FWI with the pinned WUST CUDA runtime:
 
 ```bash
-usct run fwi_kwave_adapter \
-  --case "$USCT_WORKSPACE/data/openbreastus_demo/cases/example_case.h5" \
-  --config configs/algorithms/fwi_kwave.yaml \
+export USCT_WUST_ROOT=/path/to/approved/WaveformInversionUST
+usct run fwi_wust \
+  --case /path/to/frequency_case.h5 \
+  --config configs/algorithms/fwi_wust.yaml \
   --out runs/single_fwi
 ```
 
-For the FWI adapter, set `USCT_KWAVE_FWI_RESULT_PATH` when the config should
-ingest an existing reconstruction artifact. A readable artifact must include
-`VEL_ESTIM`; optional fields such as `C_INTERP`, `VEL_ESTIM_ITER`, and
-`LOSS_ITER` enable ground-truth metrics and iteration selection.
-
-Diffusion + FWI adapter:
-
-```bash
-export USCT_DPS_FWI_RESULT_PATH=/path/to/dps_result.mat
-export USCT_DPS_FWI_SUMMARY_PATH=/path/to/dps_result.json
-usct run diffusion_fwi_kwave_adapter \
-  --case "$USCT_WORKSPACE/data/openbreastus_demo/cases/example_case.h5" \
-  --config configs/algorithms/diffusion_fwi_kwave.yaml \
-  --out runs/single_diffusion_fwi
-```
-
-The DPS artifact can contain `VEL_DPS_PHYS`, `VEL_DPS_VIEW`,
-`VEL_FINAL_PHYS`, or `VEL_FINAL_VIEW`. The optional JSON summary is used to
-record checkpoint, dataset, frequency schedule, and diffusion-prior settings.
-
-To launch the external diffusion + FWI sampler from `usct-benchlab`, set
-`run_external: true` in `configs/algorithms/diffusion_fwi_kwave.yaml` and
-provide an existing k-Wave dataset plus diffusion checkpoint:
-
-```bash
-export USCT_KWAVE_ROOT=/path/to/external/USCT_kwave
-export USCT_KWAVE_PYTHON_BIN=/path/to/usct-kwave/python
-export USCT_DPS_DATASET_PATH=/path/to/kwave_dataset.mat
-export USCT_DPS_CHECKPOINT=/path/to/diffusion_checkpoint.pth
-export USCT_DPS_FWI_RESULT_PATH="$USCT_RUN_ROOT/dps_results/case001_dps.mat"
-export USCT_DPS_FWI_SUMMARY_PATH="$USCT_RUN_ROOT/dps_results/case001_dps.json"
-
-usct run diffusion_fwi_kwave_adapter \
-  --case "$USCT_WORKSPACE/data/openbreastus_demo/cases/example_case.h5" \
-  --config configs/algorithms/diffusion_fwi_kwave.yaml \
-  --out runs/single_diffusion_fwi_external
-```
-
-The default sampling settings in `configs/algorithms/diffusion_fwi_kwave.yaml`
-match the current smoke path: `array_mode=sparse64`, `warm_start_builder` set
-to `bulk_support`, `steps=12`, frequency schedule
-`0.3 0.3 0.3 0.35 0.35 0.35 0.4 0.4 0.4 0.45 0.45 0.45 MHz`,
-`prior_mode=score_reg`, `score_reg_t=0.10`, `score_reg_lambda=0.1`,
-`physics_position=pre`, `physics_inner_steps=1`, `eta=0.1`,
-`guidance_gain=1.15`, `gradient_mode=slowness_precond`,
-`step_strategy=line_search`, `mask_mode=support_alpha`, and
-`final_prior_update=false`.
-
-Example external sampling command, useful when running directly inside the
-external USCT-kwave checkout:
-
-```bash
-cd "$USCT_KWAVE_ROOT"
-PYTHONPATH="$USCT_KWAVE_ROOT" "$USCT_KWAVE_PYTHON_BIN" \
-  -m openbreastus_diffusion.kwave_dps.run_dps_kwave \
-  --dataset-path "$USCT_DPS_DATASET_PATH" \
-  --checkpoint "$USCT_DPS_CHECKPOINT" \
-  --init-mat /path/to/bulk_support_init.mat \
-  --output-path "$USCT_DPS_FWI_RESULT_PATH" \
-  --summary-path "$USCT_DPS_FWI_SUMMARY_PATH" \
-  --device cuda:0 \
-  --seed 1234 \
-  --steps 12 \
-  --crop-source-size 300 \
-  --source-size 480 \
-  --sampler-mode reference \
-  --prior-mode score_reg \
-  --freqs-mhz 0.3 0.3 0.3 0.35 0.35 0.35 0.4 0.4 0.4 0.45 0.45 0.45 \
-  --eta 0.1 \
-  --guidance-gain 1.15 \
-  --prior-strength 1.0 \
-  --prior-mask-mode none \
-  --score-reg-t 0.10 \
-  --score-reg-lambda 0.1 \
-  --physics-position pre \
-  --physics-inner-steps 1 \
-  --output-selection final \
-  --no-final-prior-update \
-  --gradient-mode slowness_precond \
-  --step-strategy line_search \
-  --tx-stride 1 \
-  --mask-mode support_alpha \
-  --support-guidance \
-  --sign-conv -1
-```
-
-Training a diffusion prior is also external to this repository. A typical
-training run belongs in the external project, with generated checkpoints kept
-under the workspace `checkpoints/` directory and never committed:
-
-```bash
-cd "$USCT_KWAVE_ROOT"
-PYTHONPATH="$USCT_KWAVE_ROOT" "$USCT_KWAVE_PYTHON_BIN" \
-  openbreastus_diffusion/train_openbreastus.py \
-  --data-root /path/to/openbreastus_training_crops \
-  --workdir "$USCT_WORKSPACE/checkpoints/openbreastus_diffusion" \
-  --include-classes HET FIB FAT EXD \
-  --image-size 256 \
-  --crop-size 300 \
-  --batch-size 32 \
-  --epochs 5000 \
-  --max-steps 300000 \
-  --device-ids 0
-```
-
-The external project also supports standalone prior sampling, which is useful
-for checking the checkpoint before coupling it to FWI:
-
-```bash
-cd "$USCT_KWAVE_ROOT"
-PYTHONPATH="$USCT_KWAVE_ROOT" "$USCT_KWAVE_PYTHON_BIN" \
-  openbreastus_diffusion/sample_openbreastus.py \
-  --checkpoint "$USCT_DPS_CHECKPOINT" \
-  --out-dir "$USCT_WORKSPACE/runs/diffusion_prior_samples" \
-  --num-samples 16 \
-  --batch-size 4 \
-  --device-ids 0
-```
-
-If the external training or sampling module uses a different name in your
-checkout, keep the same contract: train outside `usct-benchlab`, then pass the
-resulting checkpoint through `USCT_DPS_CHECKPOINT`.
+Use an existing total-pressure frequency case, not a travel-time demo. The example config requires explicit sound-speed bounds and PML thickness; its values illustrate syntax, not a calibrated preset. One frequency-schedule entry is one update. Completion is not convergence. See [FWI deployment and input contract](docs/fwi.md).
 
 ## Run Benchmarks
 
@@ -494,8 +346,6 @@ Demo suites read these optional case globs:
 export USCT_SYNTHETIC_CASE_GLOB="$USCT_WORKSPACE/data/synthetic_demo/cases/*.h5"
 export USCT_NBP_CASE_GLOB="$USCT_WORKSPACE/data/nbpslice2d_demo/cases/*.h5"
 export USCT_OPENBREASTUS_CASE_GLOB="$USCT_WORKSPACE/data/openbreastus_demo/cases/*.h5"
-export USCT_KWAVE_FWI_CASE_GLOB="$USCT_WORKSPACE/data/fwi_kwave_demo/cases/*.h5"
-export USCT_DPS_FWI_CASE_GLOB="$USCT_WORKSPACE/data/fwi_kwave_demo/cases/*.h5"
 ```
 
 Run the suites:
@@ -504,8 +354,7 @@ Run the suites:
 usct bench --suite configs/benchmarks/synthetic_demo.yaml
 usct bench --suite configs/benchmarks/nbpslice2d_demo.yaml
 usct bench --suite configs/benchmarks/openbreastus_demo.yaml
-usct bench --suite configs/benchmarks/fwi_kwave_demo.yaml
-usct bench --suite configs/benchmarks/diffusion_fwi_kwave_demo.yaml
+usct bench --suite configs/benchmarks/fwi_wust_demo.yaml
 ```
 
 ## Output Files
@@ -534,7 +383,19 @@ runs/usctbench_runs/synthetic_demo_YYYYMMDDTHHMMSSZ/benchmark_report.md
 truth and forward measurements are available. `metadata.yaml` records the
 algorithm, config path, case id, runtime, status, and measurement provenance.
 
+New CLI/benchmark runs use **non-water tissue RMSE, PSNR and SSIM** as the
+primary image scores. Full-image scores (`full_image_*`) and water-background
+RMSE remain separate. The GT mask is used only after reconstruction, never for
+initialization or stopping; without GT, image scores are unavailable and
+measurement/holdout residuals remain available. Historical figures retain their
+original metric definitions. See [evaluation policy](docs/agent_evaluation.md).
+
 ## Example Results
+
+The following figures are historical main-branch examples. Their bent/rWave
+columns predate the native physics operators and are not validation of the new
+implementations. See [physics validation](docs/physics_validation.md) for current
+measurements, grids and acceptance boundaries.
 
 OpenBreastUS four-class comparison:
 
@@ -554,9 +415,8 @@ metadata.
 - Missing `.h5` or `.mat` data: confirm the dataset conversion command
   completed and that the relevant environment variable points to an existing
   path.
-- FWI result path missing: set `USCT_KWAVE_FWI_RESULT_PATH` or edit
-  `configs/algorithms/fwi_kwave.yaml` to point to the artifact you want to
-  ingest.
+- FWI runtime missing: set `USCT_WUST_ROOT` to the approved clean WUST checkout
+  and verify MATLAB/CUDA availability; see [deployment](docs/fwi.md).
 - NaN/Inf output: inspect `failure_report.md`, check the case units, and lower
   the iteration count or relaxation in the algorithm config.
 - No cases matched by glob: print the expanded `USCT_*_CASE_GLOB` value and

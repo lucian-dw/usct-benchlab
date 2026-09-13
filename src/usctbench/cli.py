@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -23,20 +24,18 @@ from usctbench.data.openbreastus import (
     write_schema_report,
 )
 from usctbench.data.synthetic import make_synthetic_smoke_subset
-from usctbench.core.registry import list_algorithms
+from usctbench.core.registry import get_algorithm_entry, list_algorithms
 
 
 def register_builtin_algorithms() -> None:
     """Register built-in algorithms exactly once for CLI use."""
 
-    from usctbench.algorithms.attenuation import register_attenuation_algorithm
     from usctbench.algorithms.bent_ray import register_bent_ray_algorithm
     from usctbench.algorithms.fwi import register_fwi_algorithms
     from usctbench.algorithms.ray import register_ray_algorithms
     from usctbench.algorithms.rwave import register_rwave_algorithm
 
     register_ray_algorithms(replace=True)
-    register_attenuation_algorithm(replace=True)
     register_bent_ray_algorithm(replace=True)
     register_rwave_algorithm(replace=True)
     register_fwi_algorithms(replace=True)
@@ -48,8 +47,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser(
+    list_parser = subparsers.add_parser(
         "list-algorithms", help="List registered reconstruction algorithms."
+    )
+    list_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit authoritative machine-readable specifications.",
+    )
+    describe_parser = subparsers.add_parser(
+        "describe-algorithm",
+        help="Describe a registered algorithm and approved physical variants.",
+    )
+    describe_parser.add_argument("algorithm_id")
+    describe_parser.add_argument(
+        "--variant", help="Approved variant id from list-algorithms --json."
+    )
+    describe_parser.add_argument(
+        "--json", action="store_true", help="Emit machine-readable JSON only."
+    )
+    describe_parser.add_argument(
+        "--case",
+        help="Optionally append case-bound capabilities from HDF5; does not run a solver.",
     )
 
     data_parser = subparsers.add_parser(
@@ -165,9 +184,6 @@ def build_parser() -> argparse.ArgumentParser:
     nbp_smoke_parser.add_argument(
         "--reference-sound-speed-mps", type=float, default=1500.0
     )
-    nbp_smoke_parser.add_argument(
-        "--attenuation-frequency-mhz", type=float, default=1.0
-    )
 
     nbp_quality_parser = data_subparsers.add_parser(
         "make-nbp-quality", help="Create 256x256 NBPslice2D quality-comparison cases."
@@ -198,9 +214,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     nbp_quality_parser.add_argument(
         "--reference-sound-speed-mps", type=float, default=1500.0
-    )
-    nbp_quality_parser.add_argument(
-        "--attenuation-frequency-mhz", type=float, default=1.0
     )
 
     synthetic_smoke_parser = data_subparsers.add_parser(
@@ -249,6 +262,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "list-algorithms":
         entries = list_algorithms()
+        if args.json:
+            print(
+                json.dumps(
+                    [entry.describe() for entry in entries], indent=2, allow_nan=False
+                )
+            )
+            return 0
         if not entries:
             print("No algorithms registered.")
             return 0
@@ -256,6 +276,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             tags = f" [{' '.join(entry.tags)}]" if entry.tags else ""
             suffix = f" - {entry.description}" if entry.description else ""
             print(f"{entry.name}{tags}{suffix}")
+        return 0
+
+    if args.command == "describe-algorithm":
+        try:
+            description = get_algorithm_entry(args.algorithm_id).describe(args.variant)
+            if args.case:
+                from usctbench.core.algorithm_specs import case_capabilities
+                from usctbench.core.io import read_case_hdf5
+
+                description["case_capabilities"] = case_capabilities(
+                    args.algorithm_id, read_case_hdf5(args.case), variant=args.variant
+                )
+        except (KeyError, ValueError, OSError) as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(description, indent=2, allow_nan=False))
+        else:
+            print(f"{description['algorithm_id']}: {description['description']}")
+            print(json.dumps(description, indent=2, allow_nan=False))
         return 0
 
     if args.command == "data":
@@ -303,7 +342,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 converted_shape=(args.converted_shape, args.converted_shape),
                 n_transducers=args.n_transducers,
                 reference_sound_speed_mps=args.reference_sound_speed_mps,
-                attenuation_frequency_mhz=args.attenuation_frequency_mhz,
             )
             print(args.out)
             return 0
@@ -315,7 +353,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 converted_shape=(args.converted_shape, args.converted_shape),
                 n_transducers=args.n_transducers,
                 reference_sound_speed_mps=args.reference_sound_speed_mps,
-                attenuation_frequency_mhz=args.attenuation_frequency_mhz,
             )
             print(args.out)
             return 0

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from usctbench.algorithms.configuration import validated_run
+
 import numpy as np
 
 from usctbench.metrics import (
@@ -25,6 +27,7 @@ class TinyFWIAlgorithm:
 
     name = "fwi_tiny"
 
+    @validated_run
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
         if case.ground_truth.sound_speed_mps is None:
             return ReconstructionResult(
@@ -67,6 +70,23 @@ class TinyFWIAlgorithm:
             "final_loss": losses[-1],
             "loss_decreased": losses[-1] < losses[0],
             "iterations": steps,
+            "stop_reason": "schedule_completed",
+            "stopping": {
+                "optimization_variable": "central_path_sound_speed",
+                "update_variable": None,
+                "update_units": None,
+                "update_norm": None,
+                "update_norm_scope": None,
+                "update_normalization": None,
+                "update_stopping_supported": False,
+                "iteration_unit": "clipped_gradient_step",
+                "stage_id": None,
+                "resolved_policy": {
+                    "max_iterations": max(0, steps),
+                    "update_rtol": None,
+                },
+                "reason": "schedule_completed",
+            },
         }
         metrics.update(
             compute_image_metrics(sound_speed, truth, mask=case.grid.roi_mask)
