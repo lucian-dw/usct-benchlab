@@ -1,449 +1,298 @@
 # usct-benchlab
 
-[中文说明](README.zh-CN.md)
+[中文说明](README.zh-CN.md) · [Usage](docs/usage.md) · [Algorithms](docs/algorithms.md) · [Agent API](docs/agent_algorithm_api.md)
 
-`usct-benchlab` focuses on research-grade numerical benchmarking and runtime
-integration for **2-D ultrasound sound-speed reconstruction**. It provides unified
-case/result interfaces, dataset preparation, classical and native physical-model
-solvers, FWI adapters, metrics, and reproducible benchmark reports. It does not
-provide an attenuation-reconstruction API or claim clinical validity.
+A research package for **2-D ultrasound sound-speed reconstruction**, with unified case/result interfaces, native physical operators, numerical solvers, and an external WUST full-wave runtime. Active reconstruction is sound-speed-only. Numerical and phantom validation do not establish clinical validity.
 
-## What is USCT?
+## What Is New on Main
 
-**Ultrasound computed tomography is a PDE-constrained inverse problem.** A
-source transducer emits an acoustic pulse, the pressure field propagates through
-the object according to an acoustic wave equation, and receiver transducers
-measure the resulting pressure traces. The inverse problem is to recover
-spatial acoustic properties from those measurements.
+- **Native Bent/Eikonal:** nonlinear fast-marching travel times and a discrete Jacobian/adjoint replace the former straight-ray surrogate.
+- **Native Ray-Born:** fixed and relinearized WKB or Full-Green pressure inversion. `rwave_adapter` remains the command id, not a claim of reproducing the upstream r-Wave package.
+- **Pressure-preserving k-Wave input:** explicit geometry, axes, Fourier convention, masks and provenance. Travel-time features and complex pressure remain distinct observations.
+- **Production FWI is `fwi_wust`:** the maintained WUST fork owns frequency ingestion and MATLAB/CUDA reconstruction. Old FWI pipeline/result-import APIs are removed.
+- **Typed parameters and execution contracts:** Agent/expert/deployment permissions, compute budgets, stopping reasons and optional no-GT evaluation.
 
-The reconstructed quantity is the sound-speed map $c(x)$. Datasets use the
-common `USCTCase` schema and algorithm outputs use `ReconstructionResult`.
+There are six public algorithms below. Attenuation reconstruction is not exposed. `TinyFWIAlgorithm` remains a directly importable mathematical regression fixture, not a CLI or Agent algorithm.
 
-## Mathematical Formulation
+## What Is USCT?
 
-USCT should be read as a PDE-driven inverse problem, not as a generic image
-reconstruction task. A source transducer excites an acoustic pressure field,
-the field propagates through the unknown medium, and receiver measurements are
-used to infer the medium parameters.
+USCT is a **PDE-constrained inverse problem**: transmitters excite an acoustic field, receivers measure pressure, and reconstruction estimates sound speed $c(x)$. A simplified constant-density, lossless model is
 
 $$
-\frac{1}{c(x)^2}\partial_{tt}p_s(t,x)-\Delta p_s(t,x)=q_s(t,x).
+\frac{1}{c(x)^2}\partial_{tt}p_s(t,x)-\Delta p_s(t,x)=q_s(t,x),\qquad d_{sr}(t)=\mathcal M_r p_s(t,\cdot)+\eta_{sr}(t).
 $$
 
-In frequency-domain notation, the corresponding Helmholtz form is commonly
-written as
+| Model | Mathematical relation | Interpretation |
+|---|---|---|
+| Straight rays | $A\delta s\approx\Delta t$, $\delta s=1/c-1/c_0$ | Fixed paths; CGLS/SIRT/SART use different updates |
+| Eikonal | $\lVert\nabla T_s\rVert=1/c$ | Medium-dependent first-arrival travel time |
+| Born | $\delta\hat p\approx J_m\delta m$, $m=1/c^2$ | Complex-pressure sensitivity around a background |
+| FWI | $\hat p(c)$ from a Helmholtz solve | Nonlinear total-pressure inversion |
+
+A representative straight-ray objective is
 
 $$
-\left(\Delta+\omega^2m(x)\right)\hat p_s(\omega,x)=-\hat q_s(\omega,x).
+\min_{\delta s}\frac12\lVert W(A\delta s-\Delta t)\rVert_2^2+\frac{\lambda^2}{2}\lVert L\delta s\rVert_2^2.
 $$
 
-Here $p_s$ is pressure for source $s$, $q_s$ is the emitted source, $c(x)$ is
-sound speed, and $m(x)$ is squared slowness:
-
-$$
-m(x)=\frac{1}{c(x)^2}.
-$$
-
-Most sound-speed methods in this repository estimate either the sound-speed map
-$c(x)$ or a slowness map
-
-$$
-u(x)=\frac{1}{c(x)}.
-$$
-
-Receiver $r$ observes the propagated field through a measurement operator:
-
-$$
-d_{sr}(t)=\mathcal M_r p_s(t,\cdot)+\eta_{sr}(t).
-$$
-
-The key distinction between algorithms is how much of this wave physics they
-keep. Waveform-based FWI keeps the acoustic PDE or Helmholtz solve inside the
-optimization and matches measured pressure traces or complex frequency-domain
-pressure. Travel-time surrogate methods first reduce the data to arrival-time
-features, then invert a ray or eikonal approximation. They are faster and more
-stable as baselines, but they discard waveform phase, amplitude, diffraction,
-and much of the finite-frequency physics.
-
-The straight-ray travel-time approximation uses a reference speed $c_0$ and
-fixed path $\gamma_{sr}$:
-
-$$
-\Delta t_{sr}\approx\int_{\gamma_{sr}}\delta u(x)d\ell.
-$$
-
-The slowness perturbation is
-
-$$
-\delta u(x)=\frac{1}{c(x)}-\frac{1}{c_0}.
-$$
-
-After pixel discretization, the straight-ray model becomes
-
-$$
-A\delta u\approx b.
-$$
-
-CGLS, SIRT, and SART are different solvers or update rules for this algebraic
-travel-time system. A representative regularized objective is
-
-$$
-\min_{\delta u}\|W(A\delta u-b)\|_2^2+\lambda^2\|L\delta u\|_2^2.
-$$
-
-This is the quadratic CGLS objective, with $W_{ii}=\sqrt{w_i}$. The current
-SIRT row normalization instead induces weights $w_i/\sum_jA_{ij}$; subset SART
-can cycle on inconsistent data. Their shared forward model does not imply an
-identical objective or a monotonic global loss, especially with optional smoothing.
-See [the numerical solver audit](docs/validation/2026-09-09_inverse_solver_audit_CN.md).
-
-Bent-ray methods keep a high-frequency travel-time model in which paths depend
-on the current medium:
-
-$$
-|\nabla T_s(x)|=u(x).
-$$
-
-The receiver travel time is approximated by
-
-$$
-t_{sr}\approx T_s(r).
-$$
-
-The idealized nonlinear travel-time objective is
-
-$$
-\min_c\sum_{s,r}\left|t_{sr}^{\mathrm{obs}}-T_s(r;c)\right|^2+\lambda R(c).
-$$
-
-FWI uses the pressure data directly. In frequency-domain form, a common
-PDE-constrained objective is
-
-$$
-\min_c\frac{1}{2}\sum_{\omega,s,r}\left|\hat p_s(\omega,r;c)-\hat p_{sr}^{\mathrm{obs}}(\omega)\right|^2+\lambda R(c).
-$$
-
-In this expression, $\hat p_s(\omega,r;c)$ is not an arbitrary image operator;
-it is the pressure predicted by an acoustic PDE or Helmholtz solver for the
-candidate sound speed.
-
-| Method | Modeling assumption | Optimization target | Appropriate use |
-| --- | --- | --- | --- |
-| CGLS | Fixed straight rays through a reference medium; travel-time delays are linearized in slowness perturbation. | Krylov solve of the weighted regularized least-squares system for $A\delta u\approx b$. | Fast, reproducible sound-speed baseline and regression test for ring-geometry cases. |
-| SIRT | Same straight-ray algebraic model as CGLS, but with simultaneous normalized residual backprojection updates. | Iteratively reduce the weighted residual of $A\delta u\approx b$ with relaxation and smoothing. | Robust baseline when stability matters more than sharp convergence. |
-| SART | Same straight-ray model, updated by ordered transmitter or ray subsets. | Ordered row-action updates that reduce the algebraic travel-time residual subset by subset. | Faster early iterations and sharper straight-ray baselines, with more sensitivity to ordering and relaxation. |
-| Bent-ray | High-frequency travel time follows an eikonal model; rays bend according to the current sound speed or slowness. | Regularized nonlinear travel-time mismatch based on $T_s(r;c)$. | Refraction-aware surrogate comparison when full waveform inversion is too expensive or unavailable. |
-| FWI | Full acoustic wave or Helmholtz propagation; measured data are pressure waveforms or complex pressure samples. | PDE-constrained waveform mismatch over sources, receivers, and frequencies. | High-fidelity reporting when external k-Wave/FWI artifacts or an external FWI command are available. |
-
-`bent_ray_gn` solves a nonlinear Eikonal equation with fast marching and an
-exact discrete Jacobian/adjoint. `rwave_adapter` requires calibrated complex
-pressure and relinearizes finite-frequency Born scattering. Its supplied config
-uses full Green backgrounds from a free-space volume-integral solve; the
-Eikonal/WKB Green approximation remains an explicit option. Neither uses the
-straight-ray projector. These discretizations
-do not guarantee a monotone ranking of image quality or reproduce every option
-of upstream r-Wave. Production FWI calls the pinned WUST MATLAB/CUDA runtime.
-For more detail, see [docs/math_formulation.md](docs/math_formulation.md).
+This describes quadratic CGLS, not an identical objective for all row-action solvers: SIRT uses row normalization, and subset SART need not monotonically decrease a global loss. WUST matches total complex pressure while eliminating source scale per transmitter/frequency. See [mathematical formulation](docs/math_formulation.md).
 
 ## Supported Algorithms
 
-For validated Python/YAML parameters, see the [parameter contract](docs/parameter_contract.md).
-Research Agent consumers can discover physical variants and permitted controls with
-`usct list-algorithms --json` and `usct describe-algorithm <id> --json`;
-see the [Agent API guide](docs/agent_algorithm_api.md).
+| Method | Command id | Required observation | Config |
+|---|---|---|---|
+| CGLS | `straight_cgls` | Travel-time delays, validity/weights | [cgls.yaml](configs/algorithms/cgls.yaml) |
+| SIRT | `straight_sirt` | Travel-time delays, validity/weights | [sirt.yaml](configs/algorithms/sirt.yaml) |
+| SART | `straight_sart` | Travel-time delays, validity/weights | [sart.yaml](configs/algorithms/sart.yaml) |
+| Bent / Eikonal | `bent_ray_gn` | First-arrival times or calibrated delays | [bent_ray.yaml](configs/algorithms/bent_ray.yaml) |
+| Ray-Born / Full-Green | `rwave_adapter` | Complex pressure and source calibration or independent water reference | [rwave.yaml](configs/algorithms/rwave.yaml) |
+| WUST FWI | `fwi_wust` | Total complex pressure, declared convention and mask | [fwi_wust.yaml](configs/algorithms/fwi_wust.yaml) |
 
-| Algorithm | Command name | Mathematical model | Input requirement | Typical use | Config |
-| --- | --- | --- | --- | --- | --- |
-| CGLS | `straight_cgls` | Straight-ray weighted least squares | `USCTCase` with ring geometry and travel-time measurements | Fast sound-speed baseline | `configs/algorithms/cgls.yaml` |
-| SIRT | `straight_sirt` | Simultaneous iterative ray tomography | `USCTCase` with ring geometry and travel-time measurements | Robust iterative sound-speed baseline | `configs/algorithms/sirt.yaml` |
-| SART | `straight_sart` | Ordered/subset algebraic ray update | `USCTCase` with ring geometry and travel-time measurements | Ordered-update straight-ray baseline | `configs/algorithms/sart.yaml` |
-| Bent-ray | `bent_ray_gn` | Nonlinear Eikonal / fast marching | First-arrival times or calibrated delays | Refraction-corrected tomography | `configs/algorithms/bent_ray.yaml` |
-| rWave adapter | `rwave_adapter` | Relinearized finite-frequency Ray-Born | Complex `(frequency,tx,rx)` pressure and calibrated source or independent water reference | Scattering-sensitive pressure inversion | `configs/algorithms/rwave.yaml` |
-| WUST FWI | `fwi_wust` | PDE-level frequency-domain inversion | Total complex pressure, declared convention and mask | CUDA full-wave reconstruction | `configs/algorithms/fwi_wust.yaml` |
+Born variants are `wkb_fixed`, `wkb_nonlinear`, `full_green_fixed`, `full_green_nonlinear`. The supplied YAML selects nonlinear Full-Green; query the chosen variant rather than assuming every entrypoint has the same defaults. WKB sensitivity approximates the derivative of its nonlinear predictor. Eikonal derivatives follow the active stencil, whose changes can be nonsmooth.
 
-More details are in [docs/algorithms.md](docs/algorithms.md).
+Canonical operators live in `usctbench.operators.straight_ray`, `.eikonal`, `.ray_born`. Forward prediction, linearization and adjoint action are separate; **an adjoint is not an inverse**. Legacy `operators.forward.*` / `operators.adjoint.*` are compatibility imports.
 
-### Physics and Agent Validation
+## Installation and Quick Start
 
-Canonical operators live in `usctbench.operators.<physical_operator>`; forward/adjoint compatibility imports remain thin. Production full-wave numerics belong to WUST. See [operator contracts](docs/operator_contract.md).
-
-Native solvers support grouped receiver/frequency validation and OR stopping:
-residual/noise targets, update/objective/validation stagnation, time/call budgets
-and iteration caps. Reports retain the actual stop reason, selected checkpoint
-and work counts. GT metrics are optional and never select iterates by default.
-See [evaluation and stopping](docs/agent_evaluation.md) and the
-[reproducible validation workflow](docs/physics_validation.md).
-
-## Installation
-
-Conda workflow:
+From this repository's checkout:
 
 ```bash
 conda create -n usctbench python=3.10 -y
 conda activate usctbench
 pip install -e ".[dev,viz]"
-```
-
-Pip workflow:
-
-```bash
-pip install -r requirements.txt
-pip install -e .
-```
-
-Check the installation:
-
-```bash
 usct --help
-usct list-algorithms
-pytest -q
-```
-
-For a minimal end-to-end run that writes only to `/tmp`, use:
-
-```bash
+usct list-algorithms --json
 bash examples/synthetic_quickstart.sh
 ```
 
-## Environment and Workspace Layout
+The quickstart writes under `/tmp/usctbench_examples` without MATLAB/GPU. Alternatively run `pip install -r requirements.txt` and `pip install -e ".[viz]"`. Optional `.[performance]` enables compiled native loops.
 
-Use environment variables so local data and generated runs stay outside Git:
-
-```bash
-export USCT_WORKSPACE=/path/to/usct-benchlab
-export USCT_DATA_ROOT=$USCT_WORKSPACE/data/openbreastus
-export USCT_RUN_ROOT=$USCT_WORKSPACE/runs/usctbench_runs
-export USCT_NBP_ZIP_PATH=/path/to/NBPslices2D.zip
-```
-
-Recommended workspace layout:
+## Environment and Data Preparation
 
 ```text
-<workspace>/
-  code/          # this repository
-  data/          # local datasets and converted cases
-  runs/          # benchmark outputs
-  external/      # optional external projects
-  checkpoints/   # local weights or checkpoints
+workspace/
+  code/          # this repo: src/, configs/, tests/, docs/, scripts/
+  data/          # maps and converted USCTCase files
+  runs/          # reconstructions, logs and reports
+  external/      # maintained WUST checkout
+  checkpoints/  # local artifacts, not committed
 ```
-
-`scripts/setup_workspace.sh` can create this layout and repo-local symlinks; it
-does not copy datasets into Git.
-
-## Prepare Datasets
-
-Synthetic demo:
 
 ```bash
-usct data make-synthetic-smoke \
-  --out "$USCT_WORKSPACE/data/synthetic_demo" \
-  --shape 48 \
-  --n-transducers 48
+export USCT_WORKSPACE=/path/to/workspace
+export USCT_DATA_ROOT="$USCT_WORKSPACE/data/openbreastus"
+export USCT_NBP_ZIP_PATH=/path/to/NBPslices2D.zip
+export USCT_RUN_ROOT="$USCT_WORKSPACE/runs"
+mkdir -p "$USCT_RUN_ROOT"
 ```
 
-OpenBreastUS:
+### Simplified ToF Demos
+
+These commands generate property-map-derived straight-ray observations, **not k-Wave pressure**:
 
 ```bash
-usct data inspect-openbreastus \
-  --root "$USCT_DATA_ROOT" \
-  --out "$USCT_RUN_ROOT/openbreastus_index.json"
+usct data make-synthetic-smoke --out "$USCT_WORKSPACE/data/synthetic_demo" --shape 48 --n-transducers 48
 
-usct data make-quality \
-  --root "$USCT_DATA_ROOT" \
-  --out "$USCT_WORKSPACE/data/openbreastus_demo" \
-  --cases-per-density 1 \
-  --converted-shape 256 \
-  --n-transducers 128
+usct data inspect-openbreastus --root "$USCT_DATA_ROOT" --out "$USCT_RUN_ROOT/openbreastus_index.json"
+usct data make-quality --root "$USCT_DATA_ROOT" --out "$USCT_WORKSPACE/data/openbreastus_demo" --cases-per-density 1 --converted-shape 256 --n-transducers 128
+
+usct data inspect-nbpslice2d --zip "$USCT_NBP_ZIP_PATH" --out "$USCT_RUN_ROOT/nbpslice2d_index.json"
+usct data make-nbp-quality --zip "$USCT_NBP_ZIP_PATH" --out "$USCT_WORKSPACE/data/nbpslice2d_demo" --cases-per-type 1 --converted-shape 256 --n-transducers 128
 ```
 
-NBPslice2D:
+Matched Eikonal/Born validation instead uses each model's own observations. NBPslice2D property maps are not built-in waveforms; distinguish OpenBreastUS maps from precomputed wavefields too. See [datasets](docs/datasets.md).
+
+### k-Wave / Existing Pressure
+
+```mermaid
+flowchart LR
+    A[Property maps] --> B[k-Wave simulation outside reconstruction]
+    B --> C[Pressure + acquisition metadata]
+    D[Existing acquisition] --> C
+    C --> E[Travel-time extraction and calibration]
+    C --> F[Complex-frequency conversion]
+    E --> G[CGLS / SIRT / SART / Bent]
+    F --> H[Ray-Born with source/reference calibration]
+    F --> I[WUST FWI with total pressure]
+```
+
+Unified acquisition does not mean identical observations. Each method needs its own feature/calibration path; ToF-only cases cannot run pressure inversion. GT never regenerates production FWI observations.
+
+For the supported WUST-layout MATLAB v7.3 dataset:
 
 ```bash
-usct data inspect-nbpslice2d \
-  --zip "$USCT_NBP_ZIP_PATH" \
-  --out "$USCT_RUN_ROOT/nbpslice2d_index.json"
-
-usct data make-nbp-quality \
-  --zip "$USCT_NBP_ZIP_PATH" \
-  --out "$USCT_WORKSPACE/data/nbpslice2d_demo" \
-  --cases-per-type 1 \
-  --converted-shape 256 \
-  --n-transducers 128
+python -m usctbench.data.waveforms /path/to/acquisition.mat /path/to/pressure_case.h5 \
+  --frequencies-hz 150000 200000 250000 --reference-sound-speed-mps 1500
 ```
 
-See [docs/usage.md](docs/usage.md) and [docs/datasets.md](docs/datasets.md)
-for more complete workflows.
+These frequencies illustrate syntax, not a recommended band. This is not an arbitrary-MAT converter and does not add every algorithm's ToF features. Check water/source calibration for Born. See [importer](src/usctbench/data/waveforms.py) and [physics validation](docs/physics_validation.md).
 
-## Run One Algorithm
+| Quantity | Contract |
+|---|---|
+| Image / geometry | `[y,x]`; speed m/s, coordinates m, cell-edge origin |
+| Pressure | `time_data[time,tx,rx]`, `freq_data[frequency,tx,rx]` |
+| Sampling | Actual time in s, frequency in Hz; explicit Fourier/normalization convention |
+| Validity | Explicit mask; valid zero signals are not missing data |
 
-CGLS:
+## Run Algorithms and Benchmarks
 
 ```bash
 usct run straight_cgls \
   --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
-  --config configs/algorithms/cgls.yaml \
-  --out runs/single_cgls
+  --config configs/algorithms/cgls.yaml --out "$USCT_RUN_ROOT/single_cgls"
+
+usct run bent_ray_gn --case /path/to/tof_case.h5 --config configs/algorithms/bent_ray.yaml --out "$USCT_RUN_ROOT/single_bent"
+usct run rwave_adapter --case /path/to/pressure_case.h5 --config configs/algorithms/rwave.yaml --out "$USCT_RUN_ROOT/single_born"
 ```
 
-SIRT:
-
-```bash
-usct run straight_sirt \
-  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
-  --config configs/algorithms/sirt.yaml \
-  --out runs/single_sirt
-```
-
-SART:
-
-```bash
-usct run straight_sart \
-  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
-  --config configs/algorithms/sart.yaml \
-  --out runs/single_sart
-```
-
-Bent-ray:
-
-```bash
-usct run bent_ray_gn \
-  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
-  --config configs/algorithms/bent_ray.yaml \
-  --out runs/single_bent_ray
-```
-
-rWave adapter:
-
-```bash
-usct run rwave_adapter \
-  --case "$USCT_WORKSPACE/data/physics/example/pressure_case.h5" \
-  --config configs/algorithms/rwave.yaml \
-  --out runs/single_rwave
-```
-
-This case must contain actual complex pressure and source calibration, not a
-speed-map-derived ToF case. Create a pressure pair using the validation workflow;
-`mode: fixed_background` explicitly selects the linear Born reference instead
-of the default nonlinear background updates.
-
-FWI with the pinned WUST CUDA runtime:
-
-```bash
-export USCT_WUST_ROOT=/path/to/approved/WaveformInversionUST
-usct run fwi_wust \
-  --case /path/to/frequency_case.h5 \
-  --config configs/algorithms/fwi_wust.yaml \
-  --out runs/single_fwi
-```
-
-Use an existing total-pressure frequency case, not a travel-time demo. The example config requires explicit sound-speed bounds and PML thickness; its values illustrate syntax, not a calibrated preset. One frequency-schedule entry is one update. Completion is not convergence. See [FWI deployment and input contract](docs/fwi.md).
-
-## Run Benchmarks
-
-Demo suites read these optional case globs:
+For SIRT/SART use `straight_sirt` / `sirt.yaml` or `straight_sart` / `sart.yaml` with the ToF case. [Full usage examples](docs/usage.md).
 
 ```bash
 export USCT_SYNTHETIC_CASE_GLOB="$USCT_WORKSPACE/data/synthetic_demo/cases/*.h5"
-export USCT_NBP_CASE_GLOB="$USCT_WORKSPACE/data/nbpslice2d_demo/cases/*.h5"
 export USCT_OPENBREASTUS_CASE_GLOB="$USCT_WORKSPACE/data/openbreastus_demo/cases/*.h5"
+export USCT_NBP_CASE_GLOB="$USCT_WORKSPACE/data/nbpslice2d_demo/cases/*.h5"
+usct bench --suite configs/benchmarks/synthetic_demo.yaml
+usct bench --suite configs/benchmarks/openbreastus_demo.yaml
+usct bench --suite configs/benchmarks/nbpslice2d_demo.yaml
+
+# These prepared pressure cases must also include ToF for the ray methods.
+export USCT_PRESSURE_CASE_GLOB='/path/to/pressure_cases/*.h5'
+usct bench --suite configs/benchmarks/physics_pressure.yaml
 ```
 
-Run the suites:
+The ToF demo suites also run Bent as a cross-model smoke, not matched-Eikonal validation. ToF and pressure residuals retain separate domains; do not rank them by raw residual magnitude.
+
+## WUST FWI
+
+Production path: **`fwi_wust → maintained WUST runtime → MATLAB/CUDA`**. Use [lucian-dw/WaveformInversionUST](https://github.com/lucian-dw/WaveformInversionUST) at approved SHA `79e347015be64cca88bacf591b4eed0952398800` (runtime `0.2.0-dev.1`, schema 1). Pristine upstream is not interchangeable. WUST remains independent and does not import BenchLab.
 
 ```bash
-usct bench --suite configs/benchmarks/synthetic_demo.yaml
-usct bench --suite configs/benchmarks/nbpslice2d_demo.yaml
-usct bench --suite configs/benchmarks/openbreastus_demo.yaml
+export USCT_WUST_ROOT=/path/to/approved/WaveformInversionUST
+python "$USCT_WUST_ROOT/Runtime/python/wust_runtime.py" describe --json
+usct describe-algorithm fwi_wust --json
+usct run fwi_wust --case /path/to/frequency_case.h5 \
+  --config configs/algorithms/fwi_wust.yaml --out "$USCT_RUN_ROOT/single_fwi"
+export USCT_WUST_CASE_GLOB='/path/to/frequency_cases/*.h5'
 usct bench --suite configs/benchmarks/fwi_wust_demo.yaml
 ```
 
-## Output Files
+Build/verify CUDA MEX on the deployment host. CPU is reference/debug only, not a production fallback. The YAML is not a calibrated preset: resolve appropriate speed bounds, PML and initialization.
 
-Single-algorithm runs write:
+- Existing **total complex pressure**, mask and `pressure_contract` are required; WUST owns sorting, snapping, indexing and pressure canonicalization.
+- WUST eliminates per-TX/per-frequency source scale; Born source calibration is not a mandatory WUST input.
+- One frequency entry is one update. `max_iterations` truncates the schedule; a hard elapsed-time budget is required.
+- Call caps and non-null `update_rtol` are rejected. Schedule completion is not convergence.
+- Loss records are before-update diagnostics; unavailable final-model residuals remain null.
 
-```text
-runs/single_cgls/synthetic_circular_sos/result.h5
-runs/single_cgls/synthetic_circular_sos/metrics.json
-runs/single_cgls/synthetic_circular_sos/metadata.yaml
-runs/single_cgls/synthetic_circular_sos/preview.png
+The old `fwi_kwave_adapter`, diffusion adapter, arbitrary pipeline modules/arguments and MAT result-import contract are not production APIs. See [FWI deployment and contract](docs/fwi.md).
+
+## Parameters and Agent Integration
+
+Typed models are authoritative for Python, YAML and CLI. Unknown fields and conflicting aliases fail explicitly. [Parameter contract](docs/parameter_contract.md) · [Agent API](docs/agent_algorithm_api.md).
+
+| Exposure | Typical settings | Owner |
+|---|---|---|
+| `agent` | Approved variant, speed bounds, regularizer form, selected initialization/update choices | Agent through validated admission |
+| `advanced` | Regularization strength, inner solver/tolerance, smoothing, line search, ROI/maps, expert stopping | Researcher / trusted policy |
+| `internal` | Reference/acquisition facts, runtime paths, MATLAB/GPU backend, cache/scratch | Deployment / data tooling |
+
+Concrete default Agent fields (budgets are separate):
+
+| Method | Allowed algorithm parameters |
+|---|---|
+| CGLS | `sound_speed_bounds_mps`, `regularization`, `robust_loss` |
+| SIRT / SART | `sound_speed_bounds_mps`, `relaxation` |
+| Bent | `sound_speed_bounds_mps`, `initialization`, `regularization` |
+| Nonlinear Born | `sound_speed_bounds_mps`, `mode`, `green_backend`, `initialization`, `regularization`, `regularization_length_wavelengths`, `max_update_mps` |
+| Fixed Born | Same physical selectors/regularizer fields, without `initialization` or `max_update_mps` |
+| WUST | `initialization` (reference/scalar), `initial_sound_speed_mps`, `sound_speed_bounds_mps`, `frequency_schedule_hz`, `max_update_mps` |
+
+`regularization_lambda` is **advanced**, not an Agent knob. Variant selectors cannot conflict. No scientifically calibrated weak/strong or quick/thorough presets are implied.
+
+```bash
+usct list-algorithms --json
+usct describe-algorithm rwave_adapter --variant full_green_nonlinear --json
+usct describe-algorithm straight_cgls --json --case /path/to/case.h5
 ```
 
-Benchmark suites write:
+JSON reports observations, schema/defaults, runtime requirements and iteration units. Case-bound frequencies/calibration are separate from static capability. Use `make_agent_config` for autonomous admission: arbitrary `--config` YAML is an expert API, not a security boundary. Never fill deployment-owned `trusted_parameters` from model output.
 
-```text
-runs/usctbench_runs/synthetic_demo_YYYYMMDDTHHMMSSZ/straight_cgls/synthetic_circular_sos/result.h5
-runs/usctbench_runs/synthetic_demo_YYYYMMDDTHHMMSSZ/straight_cgls/synthetic_circular_sos/metrics.json
-runs/usctbench_runs/synthetic_demo_YYYYMMDDTHHMMSSZ/straight_cgls/synthetic_circular_sos/metadata.yaml
-runs/usctbench_runs/synthetic_demo_YYYYMMDDTHHMMSSZ/straight_cgls/synthetic_circular_sos/preview.png
-runs/usctbench_runs/synthetic_demo_YYYYMMDDTHHMMSSZ/benchmark_summary.csv
-runs/usctbench_runs/synthetic_demo_YYYYMMDDTHHMMSSZ/benchmark_report.md
-```
+## Stopping and Evaluation
 
-`metrics.json` contains per-case image and data-consistency metrics when ground
-truth and forward measurements are available. `metadata.yaml` records the
-algorithm, config path, case id, runtime, status, and measurement provenance.
+`RunControls` separates requested compute from algorithm parameters; `BudgetCaps` can only reduce it. Default Agent admission accepts budgets, not arbitrary convergence thresholds. New controls have **no default `update_rtol`**; legacy expert policies can differ and are recorded as resolved policy.
 
-New CLI/benchmark runs use **non-water tissue RMSE, PSNR and SSIM** as the
-primary image scores. Full-image scores (`full_image_*`) and water-background
-RMSE remain separate. The GT mask is used only after reconstruction, never for
-initialization or stopping; without GT, image scores are unavailable and
-measurement/holdout residuals remain available. Historical figures retain their
-original metric definitions. See [evaluation policy](docs/agent_evaluation.md).
+| Outcome | Example | Meaning |
+|---|---|---|
+| Stationarity / target | `stationary_gradient`, `target_residual` | A numerical condition, not guaranteed image truth/global optimality |
+| Stagnation | `small_model_update`, `objective_plateau` | Little change, not proof of stationarity |
+| Budget / completion | `max_iterations`, `time_budget`, WUST schedule completion | Work stopped/completed, not convergence |
+| Failure | `numerical_failure`, `line_search_failed`, invalid input/runtime | Preserve reasons/logs; do not report successful reconstruction |
+
+Relative updates use the declared variable: full slowness for rays/Eikonal, squared slowness for Born, masked slowness diagnostics for WUST. SART sweeps, GN outer steps and FWI frequency updates have different costs. See [evaluation and stopping](docs/agent_evaluation.md).
+
+With GT, report tissue RMSE/PSNR/SSIM plus full-image and water metrics. GT masks are post-hoc only. Without GT, image scores are unavailable, not zero; use model-consistent residuals where available. Holdouts are optional; validation used for selection is not independent test data.
 
 ## Example Results
 
-The following figures are historical main-branch examples. Their bent/rWave
-columns predate the native physics operators and are not validation of the new
-implementations. See [physics validation](docs/physics_validation.md) for current
-measurements, grids and acceptance boundaries.
+**Default configs are runnable examples, not the reproduction settings for these panels.** The saved study used different budgets, initialization, stopping policies and evaluation inputs. Rendering the saved results is reproducible with the study bundle; rerunning current main with default YAML is not promised to reproduce the historical images. See the [default-versus-study comparison](docs/readme_results.md#default-configs-are-not-the-figure-recipe).
 
-OpenBreastUS four-class comparison:
+Four panels replace the former mixed-surrogate examples. They use preserved eight-case reconstructions, **not new runs of every solver at current HEAD**. Each row includes GT and a saved high-frequency **FWI reference**, not a reconstruction through the new `fwi_wust` API. Tissue PSNR/SSIM and evaluation coordinates are consistent within each row; grayscale limits are shared within each dataset.
 
-![OpenBreastUS FWI and baseline comparison](docs/assets/openbreastus_readme_fwi_vs_surrogate.png)
+### Model-Matched Validation
 
-NBPslice2D, 2D Acoustic Numerical Breast Phantoms for USCT:
+Straight methods use straight-ray ToF; native Bent uses Eikonal ToF; fixed Born uses matched pressure. FWI remains a separate k-Wave reference. This checks distinct models, not shared-observation ranking.
 
-![NBPslice2D FWI and baseline comparison](docs/assets/nbpslice2d_readme_fwi_vs_surrogate.png)
+![OpenBreastUS model-matched results](docs/assets/reconstruction/openbreastus_matched.png)
 
-Different algorithms use different measurement assumptions; interpret result
-panels together with [docs/algorithms.md](docs/algorithms.md) and case
-metadata.
+![NBPslice2D model-matched results](docs/assets/reconstruction/nbpslice2d_matched.png)
 
-## Troubleshooting
+### k-Wave Acquisition Examples
 
-- `algorithm not found`: run `usct list-algorithms` and check the command name.
-- Missing `.h5` or `.mat` data: confirm the dataset conversion command
-  completed and that the relevant environment variable points to an existing
-  path.
-- FWI runtime missing: set `USCT_WUST_ROOT` to the approved clean WUST checkout
-  and verify MATLAB/CUDA availability; see [deployment](docs/fwi.md).
-- NaN/Inf output: inspect `failure_report.md`, check the case units, and lower
-  the iteration count or relaxation in the algorithm config.
-- No cases matched by glob: print the expanded `USCT_*_CASE_GLOB` value and
-  verify that converted cases exist under `data/.../cases/`.
-- `matplotlib` or `scikit-image` missing: install the visualization extras with
-  `pip install -e ".[viz]"`.
+Five native methods share regenerated object/water acquisitions (128 TX/RX), using ToF or complex pressure. Historical FWI has a different acquisition history, frequency schedule and validation policy. Artifacts and budget/stagnation stops remain visible; these are examples, not controlled rankings or imaging-quality ceilings.
 
-## Development
+![OpenBreastUS k-Wave results](docs/assets/reconstruction/openbreastus_kwave.png)
+
+![NBPslice2D k-Wave results](docs/assets/reconstruction/nbpslice2d_kwave.png)
+
+[Provenance and reproduction](docs/readme_results.md) · [Metrics and stop reasons](docs/assets/reconstruction/metrics.csv) · [Hashes and evaluation policy](docs/assets/reconstruction/manifest.json).
+
+## Output Files
+
+```text
+runs/single_cgls/synthetic_circular_sos/
+  result.h5       # reconstruction
+  metrics.json    # available image/data metrics
+  metadata.yaml   # config, provenance, status and execution records
+  preview.png     # visualization
+
+runs/<benchmark_run_id>/
+  <algorithm>/<case_id>/...
+  benchmark_summary.csv
+  benchmark_report.md
+```
+
+Inspect stopping/failure records as well as images. WUST interchange files and logs remain in its run directory, not Git.
+
+## Troubleshooting and Development
+
+- Missing algorithm: check discovery; old FWI and Tiny ids are not public algorithms.
+- No matching cases: check the quoted `USCT_*_CASE_GLOB` and converted files.
+- Rejected pressure input: inspect domain, calibration, axes, mask and Fourier convention; do not relabel ToF as pressure.
+- FWI unavailable: verify the pinned runtime, MATLAB/CUDA/MEX; no silent CPU fallback.
+- NaN/Inf or line-search failure: inspect units and numerical diagnostics before changing settings.
+- Missing plots: install `.[viz]`.
 
 ```bash
-black src tests scripts
-ruff check src tests scripts --fix
-python -m compileall src tests
+black --check src tests scripts
+ruff check src tests scripts
+python -m compileall -q src tests
 pytest -q
 bash scripts/run_smoke.sh
 python scripts/audit_release.py
 ```
 
-See [docs/development.md](docs/development.md) for release checks and
-repository hygiene.
+Normal CI uses hardware-free runtime protocol tests. Real MATLAB CPU integration and GPU deployment validation are separate gates. See [development](docs/development.md).
 
-## Citations / Datasets
+## Citations and License
 
-Please cite the datasets and external tools used in your experiments, including
-OpenBreastUS, NBPslice2D, k-Wave, and WaveformInversionUST when applicable. See
-[docs/references.bib](docs/references.bib).
-
-## License
-
-This repository is released under the MIT License. See [LICENSE](LICENSE).
+Cite the datasets and methods used: OpenBreastUS, NBPslice2D, k-Wave, Eikonal/Ray-Born research and WaveformInversionUST. See [references.bib](docs/references.bib), [algorithms](docs/algorithms.md), and the runtime's own attribution. BenchLab is [MIT licensed](LICENSE); dependencies retain their own licenses.

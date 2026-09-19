@@ -1,409 +1,298 @@
 # usct-benchlab
 
-[English README](README.md)
+[English](README.md) · [使用指南](docs/usage.md) · [算法说明](docs/algorithms.md) · [Agent API](docs/agent_algorithm_api.md)
 
-`usct-benchlab` 专注于 **二维超声声速重建** 的研究级数值基准测试与运行时集成。
-它提供统一输入/输出、数据准备、经典与原生物理模型算法、FWI 适配器、指标和
-可复现的评估报告。当前不提供衰减重建 API，也不声明临床有效性。
+面向科研的**二维超声声速重建算法库**，提供统一数据/结果接口、原生物理算子、数值求解器及独立 WUST 全波反演运行时接入。活跃重建范围为 sound-speed-only；数值与仿体验证不代表临床有效性认证。
 
-## USCT 是什么？
+## 当前 Main 的主要更新
 
-**USCT 本质上是一个 PDE 约束反问题。** 换句话说，换能器发射声波，声压场
-在人体组织或仿体中按照声学波动方程传播，接收阵列记录时间信号；反问题的
-目标是从这些接收信号中恢复介质的空间声学参数。
+- **原生 Bent/Eikonal**：使用非线性 fast-marching 旅行时及离散 Jacobian/伴随，替代此前复用直线投影的 surrogate。
+- **原生 Ray-Born**：支持固定背景与重新线性化的 WKB / Full-Green 压力反演。命令 id 暂保留 `rwave_adapter`，不声称完整复现上游 r-Wave 软件。
+- **保留压力的 k-Wave 数据入口**：明确几何、轴、Fourier 约定、有效掩码及来源；旅行时特征与复压力不再混为同一种观测。
+- **生产 FWI 统一为 `fwi_wust`**：由维护中的 WUST fork 负责频域输入和 MATLAB/CUDA 重建，旧 FWI 执行链及结果导入 API 已移除。
+- **参数与执行契约**：统一 typed 参数定义，区分 Agent/专家/部署权限，记录预算、停止原因，并支持无 GT 时可用的评价。
 
-本仓库的重建目标是声速图 $c(x)$。数据使用统一的 `USCTCase` 格式，
-算法输出使用 `ReconstructionResult`。
+公开算法为下表中的六项，不提供衰减重建入口。`TinyFWIAlgorithm` 只保留为可直接 import 的数学回归测试工具，不属于 CLI/Agent 算法。
 
-## 数学形式
+## USCT 与数学模型
 
-USCT 应被理解为 PDE 驱动的反问题，而不是普通的图像重建任务。声源换能器
-激发声压场，声场在未知介质中传播，接收器测量这些传播后的信号，再由这些
-测量反推介质参数。
+USCT 是一个 **PDE 约束的反问题**：发射器激发声场，接收器记录压力，反演估计声速场 $c(x)$。简化的常密度、无耗散模型为：
 
 $$
-\frac{1}{c(x)^2}\partial_{tt}p_s(t,x)-\Delta p_s(t,x)=q_s(t,x).
+\frac{1}{c(x)^2}\partial_{tt}p_s(t,x)-\Delta p_s(t,x)=q_s(t,x),\qquad d_{sr}(t)=\mathcal M_r p_s(t,\cdot)+\eta_{sr}(t).
 $$
 
-在频域中，对应的 Helmholtz 形式常写为
+| 模型 | 数学关系 | 含义 |
+|---|---|---|
+| 直线传播 | $A\delta s\approx\Delta t$，$\delta s=1/c-1/c_0$ | 固定路径；CGLS/SIRT/SART 使用不同更新方法 |
+| Eikonal | $\lVert\nabla T_s\rVert=1/c$ | 随当前介质变化的首到旅行时 |
+| Born | $\delta\hat p\approx J_m\delta m$，$m=1/c^2$ | 背景场附近的复压力灵敏度 |
+| FWI | 由 Helmholtz 方程求 $\hat p(c)$ | 非线性总压力反演 |
+
+代表性的直线反演目标是：
 
 $$
-\left(\Delta+\omega^2m(x)\right)\hat p_s(\omega,x)=-\hat q_s(\omega,x).
+\min_{\delta s}\frac12\lVert W(A\delta s-\Delta t)\rVert_2^2+\frac{\lambda^2}{2}\lVert L\delta s\rVert_2^2.
 $$
 
-其中 $p_s$ 是声源 $s$ 对应的声压，$q_s$ 是发射源，$c(x)$ 是声速，$m(x)$
-是平方慢度：
-
-$$
-m(x)=\frac{1}{c(x)^2}.
-$$
-
-本仓库中的多数声速重建方法估计的是声速图 $c(x)$，或者慢度图
-
-$$
-u(x)=\frac{1}{c(x)}.
-$$
-
-接收器 $r$ 通过测量算子观测传播后的声压场：
-
-$$
-d_{sr}(t)=\mathcal M_r p_s(t,\cdot)+\eta_{sr}(t).
-$$
-
-不同算法的核心区别在于保留了多少波动物理。FWI 在优化中保留声学 PDE 或
-Helmholtz 求解，并匹配波形或复数频域压力。travel-time baseline 会先把数据
-降维为到时特征，再反演射线或 eikonal 近似；它们更快、更稳定，但舍弃了相位、
-幅度、衍射以及大量有限频物理。
-
-直射线 travel-time 模型使用参考声速 $c_0$ 和固定路径 $\gamma_{sr}$：
-
-$$
-\Delta t_{sr}\approx\int_{\gamma_{sr}}\delta u(x)d\ell.
-$$
-
-慢度扰动为
-
-$$
-\delta u(x)=\frac{1}{c(x)}-\frac{1}{c_0}.
-$$
-
-像素离散化后得到
-
-$$
-A\delta u \approx b.
-$$
-
-CGLS、SIRT 和 SART 求解的都是类似下面的代数射线系统：
-
-$$
-\min_{\delta u}\|W(A\delta u-b)\|_2^2+\lambda^2\|L\delta u\|_2^2.
-$$
-
-上述二次目标对应 CGLS，其中 $W_{ii}=\sqrt{w_i}$。当前 SIRT 的行归一化
-实际引入 $w_i/\sum_jA_{ij}$ 权重；固定松弛系数的子集 SART 在不一致数据上还可能循环。
-共享前向模型不等于严格最小化同一个目标，可选图像平滑也不保证全局损失单调下降。
-详见[反演器数值审计](docs/validation/2026-09-09_inverse_solver_audit_CN.md)。
-
-Bent-ray 方法保留高频 travel-time 模型，路径会随当前介质变化：
-
-$$
-|\nabla T_s(x)|=u(x).
-$$
-
-接收器 travel time 近似为
-
-$$
-t_{sr}\approx T_s(r).
-$$
-
-理想化的非线性 travel-time 目标可以写为
-
-$$
-\min_c\sum_{s,r}\left|t_{sr}^{\mathrm{obs}}-T_s(r;c)\right|^2+\lambda R(c).
-$$
-
-FWI 直接使用波形或频域压力数据：
-
-$$
-\min_c
-\frac{1}{2}\sum_{\omega,s,r}
-\left|
-\hat p_s(\omega,r;c)-\hat p_{sr}^{\mathrm{obs}}(\omega)
-\right|^2
-+\lambda R(c).
-$$
-
-其中 $\hat p_s(\omega,r;c)$ 不是任意图像算子，而是候选声速下由声学 PDE 或
-Helmholtz solver 预测出来的压力。
-
-| 方法 | 建模假设 | 优化目标 | 适用场景 |
-| --- | --- | --- | --- |
-| CGLS | 参考介质中的固定直射线；到时差在线性慢度扰动上近似。 | 对 $A\delta u\approx b$ 做加权正则化最小二乘 Krylov 求解。 | 快速、可复现的声速 baseline 和回归测试。 |
-| SIRT | 与 CGLS 相同的直射线代数模型，但用同步归一化残差反投影更新。 | 通过 relaxation 和 smoothing 迭代降低 $A\delta u\approx b$ 的加权残差。 | 更重视稳定性的迭代 baseline。 |
-| SART | 相同直射线模型，用发射器或射线子集做有序更新。 | 子集 row-action 更新。 | 早期收敛更快，但对排序和 relaxation 更敏感。 |
-| Bent-ray | 高频 travel time 满足 eikonal 近似；射线路径随声速或慢度变化。 | 基于 $T_s(r;c)$ 的正则化非线性 travel-time mismatch。 | Fast-marching 折射走时反演，不描述衍射和多次到达。 |
-| FWI | 完整声学波或 Helmholtz 传播；数据是波形或复数压力。 | 对声源、接收器和频率上的 PDE-constrained waveform mismatch 做优化。 | 有外部 k-Wave/FWI artifact 或外部 FWI 命令时的高保真汇报。 |
-
-`bent_ray_gn` 现在使用真正的 Eikonal/fast-marching 非线性前向及离散伴随；
-`rwave_adapter` 使用复压力与随迭代更新的有限频率 Born 散射算子；配置默认通过
-自由空间体积分方程求解完整 Green 背景，Eikonal/WKB 近似保留为显式选项。
-两者不再依赖直线投影器。这些数值实现不声称完整复现
-上游 r-Wave 的所有功能，也不保证图像质量一定优于直线方法。FWI 路线作为高保真外部
-k-Wave/FWI 结果的适配器。更详细的数学说明见
-[docs/math_formulation.md](docs/math_formulation.md)。
+这描述二次 CGLS，不意味着所有代数更新方法求同一个目标：SIRT 带有行归一化，subset SART 也不保证全局损失单调下降。WUST 使用总复压力，并消除每个发射器/频率的复源尺度。详见[数学说明](docs/math_formulation.md)。
 
 ## 支持的算法
 
-| 算法 | 注册命令 | 数学模型 | 输入要求 | 典型用途 | 配置文件 |
-| --- | --- | --- | --- | --- | --- |
-| CGLS | `straight_cgls` | 直射线加权最小二乘 | 带环形几何和 travel-time 测量的 `USCTCase` | 快速声速 baseline | `configs/algorithms/cgls.yaml` |
-| SIRT | `straight_sirt` | 同步迭代射线层析 | 带环形几何和 travel-time 测量的 `USCTCase` | 稳健的迭代声速 baseline | `configs/algorithms/sirt.yaml` |
-| SART | `straight_sart` | 有序/子集代数射线更新 | 带环形几何和 travel-time 测量的 `USCTCase` | 有序更新直射线 baseline | `configs/algorithms/sart.yaml` |
-| Bent-ray | `bent_ray_gn` | Eikonal / fast marching 非线性到时反演 | 首波到时或经过校准的到时差 | 折射校正 | `configs/algorithms/bent_ray.yaml` |
-| rWave adapter | `rwave_adapter` | 更新背景的有限频率 Ray-Born 散射 | 复压力以及源校准或独立水参考 | 散射敏感反演 | `configs/algorithms/rwave.yaml` |
-| WUST FWI | `fwi_wust` | 频域 PDE 全波反演 | 复数总压力、显式约定及掩码 | MATLAB/CUDA 重建 | `configs/algorithms/fwi_wust.yaml` |
+| 方法 | 命令 id | 观测要求 | 配置 |
+|---|---|---|---|
+| CGLS | `straight_cgls` | 旅行时差、有效性/权重 | [cgls.yaml](configs/algorithms/cgls.yaml) |
+| SIRT | `straight_sirt` | 旅行时差、有效性/权重 | [sirt.yaml](configs/algorithms/sirt.yaml) |
+| SART | `straight_sart` | 旅行时差、有效性/权重 | [sart.yaml](configs/algorithms/sart.yaml) |
+| Bent / Eikonal | `bent_ray_gn` | 首到时或校准后的时延 | [bent_ray.yaml](configs/algorithms/bent_ray.yaml) |
+| Ray-Born / Full-Green | `rwave_adapter` | 复压力及源校准或独立水参考 | [rwave.yaml](configs/algorithms/rwave.yaml) |
+| WUST FWI | `fwi_wust` | 总复压力、明确约定和掩码 | [fwi_wust.yaml](configs/algorithms/fwi_wust.yaml) |
 
-更多算法说明见 [docs/algorithms.md](docs/algorithms.md)。
+Born 变体为 `wkb_fixed`、`wkb_nonlinear`、`full_green_fixed`、`full_green_nonlinear`。提供的 YAML 选择 nonlinear Full-Green；应查询具体变体，不能假设各入口默认相同。WKB 灵敏度是其非线性预测导数的近似；Eikonal 的离散导数依赖当前传播 stencil，分支切换处可能不光滑。
 
-## 安装
+规范算子入口是 `usctbench.operators.straight_ray`、`.eikonal`、`.ray_born`。前向预测、线性化和伴随分别负责不同计算，**伴随不是逆算子**。旧 `operators.forward.*` / `operators.adjoint.*` 仅作兼容导入。
 
-使用 conda：
+## 安装与快速运行
+
+在本仓库 checkout 中执行：
 
 ```bash
 conda create -n usctbench python=3.10 -y
 conda activate usctbench
 pip install -e ".[dev,viz]"
-```
-
-或使用 pip：
-
-```bash
-pip install -r requirements.txt
-pip install -e .
-```
-
-检查安装：
-
-```bash
 usct --help
-usct list-algorithms
-pytest -q
-```
-
-如果只想快速跑通一个端到端示例，并且把生成文件都写到 `/tmp`，可以运行：
-
-```bash
+usct list-algorithms --json
 bash examples/synthetic_quickstart.sh
 ```
 
-## 环境变量和工作区布局
+quickstart 写入 `/tmp/usctbench_examples`，不需要 MATLAB/GPU。也可先 `pip install -r requirements.txt`，再 `pip install -e ".[viz]"`。可选 `.[performance]` 启用原生循环的编译加速。
 
-建议用环境变量管理数据和输出，避免把数据、运行结果或外部工程提交到 Git：
-
-```bash
-export USCT_WORKSPACE=/path/to/usct-benchlab
-export USCT_DATA_ROOT=$USCT_WORKSPACE/data/openbreastus
-export USCT_RUN_ROOT=$USCT_WORKSPACE/runs/usctbench_runs
-export USCT_NBP_ZIP_PATH=/path/to/NBPslices2D.zip
-```
-
-推荐工作区结构：
+## 环境与数据准备
 
 ```text
-<workspace>/
-  code/          # 本仓库
-  data/          # 本地数据集和转换后的 case
-  runs/          # benchmark 输出
-  external/      # 可选外部工程
-  checkpoints/   # 本地权重或 checkpoint
+workspace/
+  code/          # 本仓库：src/、configs/、tests/、docs/、scripts/
+  data/          # 属性图与转换后的 USCTCase
+  runs/          # 重建、日志和报告
+  external/      # 维护中的 WUST checkout
+  checkpoints/   # 本地文件，不提交 Git
 ```
-
-`scripts/setup_workspace.sh` 可以创建这套目录和仓库内的轻量 symlink；它不会
-把数据集复制进 Git。
-
-## 准备数据
-
-合成 demo：
 
 ```bash
-usct data make-synthetic-smoke \
-  --out "$USCT_WORKSPACE/data/synthetic_demo" \
-  --shape 48 \
-  --n-transducers 48
+export USCT_WORKSPACE=/path/to/workspace
+export USCT_DATA_ROOT="$USCT_WORKSPACE/data/openbreastus"
+export USCT_NBP_ZIP_PATH=/path/to/NBPslices2D.zip
+export USCT_RUN_ROOT="$USCT_WORKSPACE/runs"
+mkdir -p "$USCT_RUN_ROOT"
 ```
 
-OpenBreastUS：
+### 简化 ToF Demo
+
+下面生成的是由属性图投影得到的直线模型观测，**不是 k-Wave 压力**：
 
 ```bash
-usct data inspect-openbreastus \
-  --root "$USCT_DATA_ROOT" \
-  --out "$USCT_RUN_ROOT/openbreastus_index.json"
+usct data make-synthetic-smoke --out "$USCT_WORKSPACE/data/synthetic_demo" --shape 48 --n-transducers 48
 
-usct data make-quality \
-  --root "$USCT_DATA_ROOT" \
-  --out "$USCT_WORKSPACE/data/openbreastus_demo" \
-  --cases-per-density 1 \
-  --converted-shape 256 \
-  --n-transducers 128
+usct data inspect-openbreastus --root "$USCT_DATA_ROOT" --out "$USCT_RUN_ROOT/openbreastus_index.json"
+usct data make-quality --root "$USCT_DATA_ROOT" --out "$USCT_WORKSPACE/data/openbreastus_demo" --cases-per-density 1 --converted-shape 256 --n-transducers 128
+
+usct data inspect-nbpslice2d --zip "$USCT_NBP_ZIP_PATH" --out "$USCT_RUN_ROOT/nbpslice2d_index.json"
+usct data make-nbp-quality --zip "$USCT_NBP_ZIP_PATH" --out "$USCT_WORKSPACE/data/nbpslice2d_demo" --cases-per-type 1 --converted-shape 256 --n-transducers 128
 ```
 
-NBPslice2D：
+匹配模型的 Eikonal/Born 验证使用各自模型生成的观测。NBPslice2D 的属性图不等于内置波场；OpenBreastUS 的属性图和预计算波场也要区分。详见[数据集说明](docs/datasets.md)。
+
+### k-Wave / 已有压力数据
+
+```mermaid
+flowchart LR
+    A[介质属性图] --> B[k-Wave 仿真：数据准备而非反演]
+    B --> C[压力与采集信息]
+    D[已有压力采集] --> C
+    C --> E[旅行时提取与校准]
+    C --> F[复频域转换]
+    E --> G[CGLS / SIRT / SART / Bent]
+    F --> H[Ray-Born：源或参考校准]
+    F --> I[WUST FWI：总压力]
+```
+
+统一采集来源不等于统一观测量。各方法仍需匹配的特征/校准流程，ToF-only case 不能直接用于压力反演。生产 FWI 不从 GT 重新生成观测。
+
+对受支持的 WUST 布局 MATLAB v7.3 数据，可以使用：
 
 ```bash
-usct data inspect-nbpslice2d \
-  --zip "$USCT_NBP_ZIP_PATH" \
-  --out "$USCT_RUN_ROOT/nbpslice2d_index.json"
-
-usct data make-nbp-quality \
-  --zip "$USCT_NBP_ZIP_PATH" \
-  --out "$USCT_WORKSPACE/data/nbpslice2d_demo" \
-  --cases-per-type 1 \
-  --converted-shape 256 \
-  --n-transducers 128
+python -m usctbench.data.waveforms /path/to/acquisition.mat /path/to/pressure_case.h5 \
+  --frequencies-hz 150000 200000 250000 --reference-sound-speed-mps 1500
 ```
 
-完整流程见 [docs/usage.md](docs/usage.md) 和
-[docs/datasets.md](docs/datasets.md)。
+频率仅为语法示例，不是推荐频段。这不是任意 MAT 转换器，也不会自动补全所有算法的 ToF 特征；Born 还需检查水参考/源校准。见[压力导入实现](src/usctbench/data/waveforms.py)及[物理验证](docs/physics_validation.md)。
 
-## 运行单个算法
+| 内容 | 约定 |
+|---|---|
+| 图像 / 几何 | `[y,x]`；声速 m/s、坐标 m、像素边缘 origin |
+| 压力 | `time_data[time,tx,rx]`、`freq_data[frequency,tx,rx]` |
+| 采样 | 实际时间 s、频率 Hz，明确 Fourier/归一化约定 |
+| 有效性 | 显式掩码；有效零信号不是缺失值 |
 
-CGLS：
+## 运行算法与 Benchmark
 
 ```bash
 usct run straight_cgls \
   --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
-  --config configs/algorithms/cgls.yaml \
-  --out runs/single_cgls
+  --config configs/algorithms/cgls.yaml --out "$USCT_RUN_ROOT/single_cgls"
+
+usct run bent_ray_gn --case /path/to/tof_case.h5 --config configs/algorithms/bent_ray.yaml --out "$USCT_RUN_ROOT/single_bent"
+usct run rwave_adapter --case /path/to/pressure_case.h5 --config configs/algorithms/rwave.yaml --out "$USCT_RUN_ROOT/single_born"
 ```
 
-SIRT：
-
-```bash
-usct run straight_sirt \
-  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
-  --config configs/algorithms/sirt.yaml \
-  --out runs/single_sirt
-```
-
-SART：
-
-```bash
-usct run straight_sart \
-  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
-  --config configs/algorithms/sart.yaml \
-  --out runs/single_sart
-```
-
-Bent-ray：
-
-```bash
-usct run bent_ray_gn \
-  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
-  --config configs/algorithms/bent_ray.yaml \
-  --out runs/single_bent_ray
-```
-
-rWave adapter：
-
-```bash
-usct run rwave_adapter \
-  --case "$USCT_WORKSPACE/data/physics/example/pressure_case.h5" \
-  --config configs/algorithms/rwave.yaml \
-  --out runs/single_rwave
-```
-
-不能把由声速图投影得到的 ToF 当作 rWave 的复压力输入。压力生成和验证流程见
-[physics validation](docs/physics_validation.md)，算子按前向/伴随分组的接口见
-[operator contracts](docs/operator_contract.md)。无真值时使用独立接收点/频率留出；
-原生循环按残差、停滞、时间/算子调用预算等 OR 条件在线停止，并记录停止原因。
-默认外部 FWI 结果导入不能控制已经结束的 MATLAB 迭代，不会伪造其停止原因。
-
-WUST FWI：
-
-```bash
-export USCT_WUST_ROOT=/path/to/approved/WaveformInversionUST
-usct run fwi_wust \
-  --case /path/to/frequency_case.h5 \
-  --config configs/algorithms/fwi_wust.yaml \
-  --out runs/single_fwi
-```
-
-该入口使用已有复频域总压力数据，不接受旅行时 demo 作为波场。生产后端为 MATLAB/CUDA，CPU 仅供参考验证。每个频率计划项对应一次完整更新；计划完成不等于收敛。配置中的数值只是使用示例，需明确初始化、声速范围及 PML。详见 [FWI 接入说明](docs/fwi.md)。
-
-## 运行 benchmark
-
-demo benchmark 会读取下面这些可选 case glob：
+SIRT/SART 对 ToF case 使用 `straight_sirt` / `sirt.yaml`、`straight_sart` / `sart.yaml`。更多命令见[使用指南](docs/usage.md)。
 
 ```bash
 export USCT_SYNTHETIC_CASE_GLOB="$USCT_WORKSPACE/data/synthetic_demo/cases/*.h5"
-export USCT_NBP_CASE_GLOB="$USCT_WORKSPACE/data/nbpslice2d_demo/cases/*.h5"
 export USCT_OPENBREASTUS_CASE_GLOB="$USCT_WORKSPACE/data/openbreastus_demo/cases/*.h5"
+export USCT_NBP_CASE_GLOB="$USCT_WORKSPACE/data/nbpslice2d_demo/cases/*.h5"
+usct bench --suite configs/benchmarks/synthetic_demo.yaml
+usct bench --suite configs/benchmarks/openbreastus_demo.yaml
+usct bench --suite configs/benchmarks/nbpslice2d_demo.yaml
+
+# 该套件同时运行射线方法，准备好的压力 case 还需要包含 ToF。
+export USCT_PRESSURE_CASE_GLOB='/path/to/pressure_cases/*.h5'
+usct bench --suite configs/benchmarks/physics_pressure.yaml
 ```
 
-运行 benchmark：
+ToF demo 套件中 Bent 属于跨模型 smoke，不是匹配 Eikonal 的数值验证。ToF 与压力残差保留各自观测域，不按残差原始数值大小混排。
+
+## WUST FWI
+
+生产路线为 **`fwi_wust → 维护中的 WUST runtime → MATLAB/CUDA`**。使用 [lucian-dw/WaveformInversionUST](https://github.com/lucian-dw/WaveformInversionUST) 的批准版本 `79e347015be64cca88bacf591b4eed0952398800`（runtime `0.2.0-dev.1`，schema 1）。未经适配的上游 checkout 不能直接替代；WUST 保持独立，不反向依赖 BenchLab。
 
 ```bash
-usct bench --suite configs/benchmarks/synthetic_demo.yaml
-usct bench --suite configs/benchmarks/nbpslice2d_demo.yaml
-usct bench --suite configs/benchmarks/openbreastus_demo.yaml
+export USCT_WUST_ROOT=/path/to/approved/WaveformInversionUST
+python "$USCT_WUST_ROOT/Runtime/python/wust_runtime.py" describe --json
+usct describe-algorithm fwi_wust --json
+usct run fwi_wust --case /path/to/frequency_case.h5 \
+  --config configs/algorithms/fwi_wust.yaml --out "$USCT_RUN_ROOT/single_fwi"
+export USCT_WUST_CASE_GLOB='/path/to/frequency_cases/*.h5'
 usct bench --suite configs/benchmarks/fwi_wust_demo.yaml
 ```
 
-## 输出文件
+在部署机器构建并验证 CUDA MEX。CPU 仅作 reference/debug，不自动回退为生产后端。配置并非经过校准的预设，运行前需确认声速范围、PML 与初始化。
 
-单算法运行会写出：
+- 输入为已有**总复压力**、mask 和 `pressure_contract`；排序、几何 snapping、索引及压力规范化由 WUST 负责。
+- WUST 按 TX/频率消除复源尺度，不要求将 Born 源校准当作其必需输入。
+- 一个频率条目对应一次更新；`max_iterations` 截断 schedule，整个运行需要硬时间预算。
+- 不接受 forward/adjoint 调用上限或非空 `update_rtol`；schedule 完成不等于收敛。
+- 每步 loss 是更新前诊断，缺少的最终模型残差保持 null。
 
-```text
-runs/single_cgls/synthetic_circular_sos/result.h5
-runs/single_cgls/synthetic_circular_sos/metrics.json
-runs/single_cgls/synthetic_circular_sos/metadata.yaml
-runs/single_cgls/synthetic_circular_sos/preview.png
-```
+旧 `fwi_kwave_adapter`、diffusion adapter、任意 pipeline 模块/参数和旧 MAT 结果导入约定不再是生产 API。详见[FWI 部署与契约](docs/fwi.md)。
 
-benchmark 会写出：
+## 参数说明与 Agent 接入
 
-```text
-runs/usctbench_runs/synthetic_demo_YYYYMMDDTHHMMSSZ/straight_cgls/synthetic_circular_sos/result.h5
-runs/usctbench_runs/synthetic_demo_YYYYMMDDTHHMMSSZ/straight_cgls/synthetic_circular_sos/metrics.json
-runs/usctbench_runs/synthetic_demo_YYYYMMDDTHHMMSSZ/straight_cgls/synthetic_circular_sos/metadata.yaml
-runs/usctbench_runs/synthetic_demo_YYYYMMDDTHHMMSSZ/straight_cgls/synthetic_circular_sos/preview.png
-runs/usctbench_runs/synthetic_demo_YYYYMMDDTHHMMSSZ/benchmark_summary.csv
-runs/usctbench_runs/synthetic_demo_YYYYMMDDTHHMMSSZ/benchmark_report.md
-```
+Python、YAML、CLI 使用同一套 typed 定义；未知字段与冲突别名显式拒绝。见[参数契约](docs/parameter_contract.md)和 [Agent API](docs/agent_algorithm_api.md)。
 
-`metrics.json` 保存每个 case 的图像指标和数据一致性指标；
-`metadata.yaml` 记录算法、配置路径、case id、运行时间、状态和测量来源。
+| 分类 | 典型设置 | 负责方 |
+|---|---|---|
+| `agent` | 批准的变体、声速范围、正则化形式、部分初始化/更新选择 | Agent 经验证后提交 |
+| `advanced` | 正则化强度、内层求解与精度、平滑、线搜索、ROI/图像、专家停止策略 | 研究者 / 受信任策略 |
+| `internal` | 测量参考与采集事实、运行时路径、MATLAB/GPU 后端、缓存/临时目录 | 部署与数据工具 |
 
-新 CLI/benchmark 运行以**去水背景的组织区 RMSE、PSNR、SSIM**作为主要图像指标，
-同时单独保留全图指标（`full_image_*`）和水背景 RMSE。GT 掩码仅用于反演结束后的
-评价，不参与初始化、更新或停止；没有 GT 时图像指标不可用，仍可报告测量/留出残差。
-历史示例图保留原有指标定义，不能直接混用。详见[评价规则](docs/agent_evaluation.md)。
+默认 Agent 可提交的具体算法字段如下，计算预算另行传递：
 
-## 示例结果
+| 方法 | 允许的算法参数 |
+|---|---|
+| CGLS | `sound_speed_bounds_mps`、`regularization`、`robust_loss` |
+| SIRT / SART | `sound_speed_bounds_mps`、`relaxation` |
+| Bent | `sound_speed_bounds_mps`、`initialization`、`regularization` |
+| nonlinear Born | `sound_speed_bounds_mps`、`mode`、`green_backend`、`initialization`、`regularization`、`regularization_length_wavelengths`、`max_update_mps` |
+| fixed Born | 同类物理 selector 和正则化字段，但没有 `initialization`、`max_update_mps` |
+| WUST | `initialization`（reference/scalar）、`initial_sound_speed_mps`、`sound_speed_bounds_mps`、`frequency_schedule_hz`、`max_update_mps` |
 
-OpenBreastUS 四类样本对比：
-
-下列两图属于此前主线的历史示例，不能代表本分支新 Eikonal / Ray-Born 实现的验收结果。
-当前独立波场测试见[八样本验证报告](docs/validation/2026-09-08_physics.md)。
-
-![OpenBreastUS FWI and baseline comparison](docs/assets/openbreastus_readme_fwi_vs_surrogate.png)
-
-NBPslice2D，2D Acoustic Numerical Breast Phantoms for USCT：
-
-![NBPslice2D FWI and baseline comparison](docs/assets/nbpslice2d_readme_fwi_vs_surrogate.png)
-
-不同算法使用的测量假设不同，结果解读应结合
-[docs/algorithms.md](docs/algorithms.md) 和每个 case 的 metadata。
-
-## 常见问题
-
-- `algorithm not found`：运行 `usct list-algorithms`，检查注册命令名。
-- 缺少 `.h5` 或 `.mat` 数据：确认数据转换命令已完成，并检查相关环境变量是否指向存在的路径。
-- FWI 运行时不可用：设置 `USCT_WUST_ROOT` 指向批准的干净 WUST 版本，
-  并检查 MATLAB/CUDA 环境，详见 [部署说明](docs/fwi.md)。
-- 输出出现 NaN/Inf：查看 `failure_report.md`，检查 case 单位，并尝试降低迭代次数或 relaxation。
-- glob 没有匹配到 case：打印展开后的 `USCT_*_CASE_GLOB`，确认转换后的 case 位于 `data/.../cases/`。
-- 缺少 `matplotlib` 或 `scikit-image`：运行 `pip install -e ".[viz]"`。
-
-## 开发
+`regularization_lambda` 属于 **advanced**，不是 Agent 可随意调的系数。selector 不得与选定 variant 冲突，也没有未经实验校准的 weak/strong 或 quick/thorough 预设。
 
 ```bash
-black src tests scripts
-ruff check src tests scripts --fix
-python -m compileall src tests
+usct list-algorithms --json
+usct describe-algorithm rwave_adapter --variant full_green_nonlinear --json
+usct describe-algorithm straight_cgls --json --case /path/to/case.h5
+```
+
+JSON 提供输入要求、schema/defaults、运行依赖和迭代单位；case 可用频率/校准与静态能力分开。自主执行应使用 `make_agent_config` admission；任意 `--config` YAML 属于专家入口，不是安全边界。部署方 `trusted_parameters` 不得来自模型输出。
+
+## 停止与评价
+
+`RunControls` 将计算请求与算法参数分开，`BudgetCaps` 只能收紧预算。默认 Agent 提交预算而非任意收敛阈值；新入口**没有默认 `update_rtol`**。旧专家策略可能不同，实际采用的 resolved policy 会保存。
+
+| 结果类型 | 原因例子 | 含义 |
+|---|---|---|
+| 驻点 / 目标满足 | `stationary_gradient`、`target_residual` | 满足某项数值条件，不等于图像真实或全局最优 |
+| 停滞 | `small_model_update`、`objective_plateau` | 变化小，不能单独证明最优性 |
+| 预算 / 完成 | `max_iterations`、`time_budget`、WUST schedule 完成 | 工作停止/完成，不等于收敛 |
+| 失败 | `numerical_failure`、`line_search_failed`、输入/运行时错误 | 保留原因与日志，不伪装为成功重建 |
+
+相对更新按声明变量计算：直线/Eikonal 用完整慢度，Born 用平方慢度，WUST 用 mask 内慢度作诊断。SART 一轮、GN 外迭代和 FWI 频率更新的成本不同。详见[评价和停止](docs/agent_evaluation.md)。
+
+有 GT 时报告组织区 RMSE/PSNR/SSIM，并保留全图及水背景指标；GT mask 仅用于事后评价。无 GT 时图像指标不可用，不填零；使用能够取得的模型一致性残差。留出评估是可选协议，用于选模的 validation 不是独立 test。
+
+## 重建表现
+
+**默认配置是运行示例，不是以下主图的复现实验配置。** 保存的实验采用不同预算、初始化、停止策略及评价输入。有实验数据包时可以重绘这些结果，但不能承诺当前 main 的默认 YAML 会重新反演出历史图像。见[默认配置与主图实验的差异](docs/readme_results.md#default-configs-are-not-the-figure-recipe)。
+
+以下四图替换此前混合 surrogate 的示例，来自保存的八样本实验，**不是在当前 HEAD 重跑全部算法**。每行包含 GT 及保存的高频 **FWI reference**，后者不是新 `fwi_wust` API 的运行证据。每行使用一致的组织区 PSNR/SSIM 规则与评价坐标，每个数据集共享灰度范围。
+
+### 匹配模型验证
+
+直线方法使用 straight-ray ToF；原生 Bent 使用 Eikonal ToF；fixed Born 使用匹配压力数据。FWI 列仍为单独的 k-Wave 参考，不能将这些不同输入按统一采集排名。
+
+![OpenBreastUS 匹配模型重建](docs/assets/reconstruction/openbreastus_matched.png)
+
+![NBPslice2D 匹配模型重建](docs/assets/reconstruction/nbpslice2d_matched.png)
+
+### k-Wave 采集示例
+
+五种原生方法来自共同重生成的 object/water 采集（128 TX/RX），分别使用 ToF 或复压力。历史 FWI 的采集历史、频率安排与留出策略不同。图中保留实际伪影及预算/停滞下的结果，不能据此认定公平排名或算法的成像质量上限。
+
+![OpenBreastUS k-Wave 重建](docs/assets/reconstruction/openbreastus_kwave.png)
+
+![NBPslice2D k-Wave 重建](docs/assets/reconstruction/nbpslice2d_kwave.png)
+
+[来源与重绘说明](docs/readme_results.md) · [指标与停止原因](docs/assets/reconstruction/metrics.csv) · [哈希和评价策略](docs/assets/reconstruction/manifest.json)。
+
+## 输出文件
+
+```text
+runs/single_cgls/synthetic_circular_sos/
+  result.h5       # 重建结果
+  metrics.json    # 可用的图像/数据指标
+  metadata.yaml   # 配置、来源、状态与执行记录
+  preview.png     # 预览图
+
+runs/<benchmark_run_id>/
+  <algorithm>/<case_id>/...
+  benchmark_summary.csv
+  benchmark_report.md
+```
+
+除图像外应检查停止/失败记录；WUST 的交换文件与日志留在 run 目录，不进入 Git。
+
+## 常见问题与开发
+
+- 找不到算法：检查 discovery，旧 FWI 和 Tiny id 不再是公开算法。
+- 没有匹配 case：检查带引号的 `USCT_*_CASE_GLOB` 与转换文件。
+- 压力输入被拒绝：检查观测域、校准、轴、mask 和 Fourier 声明，不把 ToF 改标签冒充压力。
+- FWI 不可用：验证固定版本 WUST、MATLAB/CUDA/MEX，不静默改用 CPU。
+- NaN/Inf 或线搜索失败：先检查单位与数值诊断，再决定是否调整配置。
+- 缺少绘图依赖：安装 `.[viz]`。
+
+```bash
+black --check src tests scripts
+ruff check src tests scripts
+python -m compileall -q src tests
 pytest -q
 bash scripts/run_smoke.sh
 python scripts/audit_release.py
 ```
 
-更多 release 检查和仓库卫生规则见 [docs/development.md](docs/development.md)。
+普通 CI 使用无硬件依赖的运行时协议测试。真实 MATLAB CPU 集成与 GPU 部署验证是独立验收环节。见[开发说明](docs/development.md)。
 
-## 引用 / 数据集
+## 引用与许可证
 
-如果在实验中使用了 OpenBreastUS、NBPslice2D、k-Wave 或
-WaveformInversionUST，请引用相应数据集和外部工具。参考文献见
-[docs/references.bib](docs/references.bib)。
-
-## 许可证
-
-本仓库使用 MIT License 发布。见 [LICENSE](LICENSE)。
+请引用实际使用的数据和方法：OpenBreastUS、NBPslice2D、k-Wave、Eikonal/Ray-Born 研究及 WaveformInversionUST。见 [references.bib](docs/references.bib)、[算法说明](docs/algorithms.md)及运行时自身的来源声明。BenchLab 使用 [MIT License](LICENSE)，外部依赖保留各自许可证。

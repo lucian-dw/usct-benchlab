@@ -4,6 +4,7 @@ User-facing documentation:
 
 - [Mathematical formulation](math_formulation.md)
 - [Usage guide](usage.md)
+- [README reconstruction panels, metrics and provenance](readme_results.md)
 - [Algorithms](algorithms.md)
 - [Typed parameter contract and migrations](parameter_contract.md)
 - [Machine-readable research Agent API](agent_algorithm_api.md)
