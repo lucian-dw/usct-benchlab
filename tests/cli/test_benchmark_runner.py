@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 
 from usctbench.benchmark.runner import run_algorithm_case, run_benchmark_suite
-from usctbench.cli import register_builtin_algorithms
 from usctbench.core.io import write_case_hdf5
 
 
@@ -17,7 +16,6 @@ def test_postprocessing_failure_keeps_completed_numerical_result(
 ):
     from usctbench.benchmark import runner
 
-    register_builtin_algorithms()
     case_path = write_case_hdf5(synthetic_case, tmp_path / "case.h5")
     cfg = tmp_path / "config.yaml"
     cfg.write_text("name: straight_cgls\nparameters:\n  iterations: 2\n")
@@ -80,7 +78,6 @@ def test_runner_supplies_gt_free_shallow_case(synthetic_case, tmp_path, monkeypa
 def test_no_ground_truth_keeps_holdout_scores_without_image_scores(
     synthetic_case, tmp_path
 ):
-    register_builtin_algorithms()
     case = synthetic_case.model_copy(deep=True)
     case.ground_truth.sound_speed_mps = None
     case_path = write_case_hdf5(case, tmp_path / "no_gt.h5")
@@ -108,7 +105,6 @@ def test_no_ground_truth_keeps_holdout_scores_without_image_scores(
 def test_image_region_changes_only_reporting_not_reconstruction(
     synthetic_case, tmp_path
 ):
-    register_builtin_algorithms()
     case_path = write_case_hdf5(synthetic_case, tmp_path / "case.h5")
     outputs = []
     for region in ("tissue", "full_image"):
@@ -162,7 +158,6 @@ def test_line_search_failure_is_not_a_passing_benchmark():
 
 
 def test_run_algorithm_case_writes_standard_artifacts(synthetic_case, tmp_path):
-    register_builtin_algorithms()
     case_path = tmp_path / "case.h5"
     config_path = tmp_path / "cgls.yaml"
     write_case_hdf5(synthetic_case, case_path)
@@ -181,7 +176,6 @@ def test_run_algorithm_case_writes_standard_artifacts(synthetic_case, tmp_path):
 
 
 def test_run_algorithm_case_rejects_config_algorithm_mismatch(synthetic_case, tmp_path):
-    register_builtin_algorithms()
     case_path = tmp_path / "case.h5"
     config_path = tmp_path / "sirt.yaml"
     write_case_hdf5(synthetic_case, case_path)
@@ -199,7 +193,6 @@ def test_run_algorithm_case_rejects_config_algorithm_mismatch(synthetic_case, tm
 
 
 def test_benchmark_suite_runs_synthetic_case(synthetic_case, tmp_path):
-    register_builtin_algorithms()
     case_dir = tmp_path / "cases"
     case_dir.mkdir()
     write_case_hdf5(synthetic_case, case_dir / "case.h5")
@@ -232,7 +225,6 @@ def test_benchmark_suite_runs_synthetic_case(synthetic_case, tmp_path):
 def test_benchmark_suite_resolves_config_relative_to_suite_file(
     synthetic_case, tmp_path
 ):
-    register_builtin_algorithms()
     case_dir = tmp_path / "cases"
     config_dir = tmp_path / "configs"
     case_dir.mkdir()

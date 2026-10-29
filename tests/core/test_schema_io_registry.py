@@ -12,10 +12,8 @@ from usctbench.core.io import (
     write_case_hdf5,
 )
 from usctbench.core.registry import (
-    clear_registry,
     get_algorithm,
     list_algorithms,
-    register_algorithm,
 )
 from usctbench.core.schema import (
     AlgorithmConfig,
@@ -122,14 +120,13 @@ def test_sound_speed_contract_has_no_material_absorption_output(written_case, tm
         read_case_hdf5(written_case)
 
 
-def test_registry_registers_and_instantiates_algorithm():
-    clear_registry()
-    register_algorithm("dummy", DummyAlgorithm)
-
-    assert [entry.name for entry in list_algorithms()] == ["dummy"]
-    assert get_algorithm("dummy").name == "dummy"
-
-    clear_registry()
+def test_package_import_exposes_static_algorithms():
+    names = [entry.name for entry in list_algorithms()]
+    assert names == sorted(names)
+    for name in names:
+        assert get_algorithm(name).name == name
+    with pytest.raises(KeyError, match="unknown algorithm"):
+        get_algorithm("missing")
 
 
 def test_case_schema_rejects_feature_shape_mismatch(synthetic_case):

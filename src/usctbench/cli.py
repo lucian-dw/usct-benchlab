@@ -25,20 +25,6 @@ from usctbench.data.synthetic import make_synthetic_smoke_subset
 from usctbench.core.registry import get_algorithm_entry, list_algorithms
 
 
-def register_builtin_algorithms() -> None:
-    """Register built-in algorithms exactly once for CLI use."""
-
-    from usctbench.algorithms.bent_ray import register_bent_ray_algorithm
-    from usctbench.algorithms.fwi import register_fwi_algorithms
-    from usctbench.algorithms.ray import register_ray_algorithms
-    from usctbench.algorithms.rwave import register_rwave_algorithm
-
-    register_ray_algorithms(replace=True)
-    register_bent_ray_algorithm(replace=True)
-    register_rwave_algorithm(replace=True)
-    register_fwi_algorithms(replace=True)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="usct", description="USCT benchmark command-line interface."
@@ -201,7 +187,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    register_builtin_algorithms()
     parser = build_parser()
     args = parser.parse_args(argv)
 

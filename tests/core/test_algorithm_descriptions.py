@@ -7,7 +7,7 @@ import pytest
 from pydantic import create_model
 
 from usctbench.algorithms.parameters import InnerOptions, Parameters, parameter
-from usctbench.cli import main, register_builtin_algorithms
+from usctbench.cli import main
 from usctbench.core.algorithm_specs import (
     SPECS,
     agent_schema,
@@ -22,7 +22,6 @@ from usctbench.data.synthetic import make_sound_speed_case
 
 @pytest.mark.parametrize("algorithm_id", sorted(SPECS))
 def test_schema_defaults_permissions_and_variant_identity(algorithm_id):
-    register_builtin_algorithms()
     entry = get_algorithm_entry(algorithm_id)
     for variant in entry.specification.variants:
         description = entry.describe(variant.id)
@@ -94,7 +93,6 @@ def test_agent_types_enums_cross_checks_and_budget_boundary():
         run_controls={"max_iterations": 3},
         budget_caps={"max_iterations": 1},
     )
-    register_builtin_algorithms()
     case = make_sound_speed_case(shape=(8, 8), n_transducers=8)
     result = get_algorithm("straight_cgls").run(case, config)
     assert result.status == "success", result.failure_reason

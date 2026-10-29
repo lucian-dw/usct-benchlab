@@ -14,7 +14,6 @@ from usctbench.algorithms.ray import (
 )
 from usctbench.core.config import coerce_bool
 from usctbench.data.calibration import fit_water_source
-from usctbench.core.registry import register_algorithm
 from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, USCTCase
 from usctbench.core.stopping import BudgetExhausted
 from usctbench.operators.ray_born import RayBornForward, RayBornOperator
@@ -500,17 +499,4 @@ class RWaveAdapter:
         )
 
 
-def register_rwave_algorithm(*, replace: bool = False) -> None:
-    from usctbench.core.algorithm_specs import SPECS
-
-    register_algorithm(
-        "rwave_adapter",
-        RWaveAdapter,
-        specification=SPECS["rwave_adapter"],
-        description="Native relinearized Ray-Born complex-pressure inversion.",
-        tags=("ray-born", "frequency", "scattering"),
-        replace=replace,
-    )
-
-
-__all__ = ["RWaveAdapter", "register_rwave_algorithm"]
+__all__ = ["RWaveAdapter"]

@@ -13,7 +13,6 @@ from usctbench.algorithms.configuration import (
 )
 from usctbench.algorithms.parameters import CGLSParameters, SIRTParameters
 from usctbench.benchmark.runner import load_algorithm_config
-from usctbench.cli import register_builtin_algorithms
 from usctbench.core.registry import get_algorithm
 from usctbench.core.schema import AlgorithmConfig
 from usctbench.data.synthetic import make_sound_speed_case
@@ -42,7 +41,6 @@ def assert_admission_paths(tmp_path, name, parameters, accepted, *, algorithm=No
     config = AlgorithmConfig(name=name, parameters=parameters)
     path = tmp_path / "admission.yaml"
     path.write_text(yaml.safe_dump(config.model_dump(mode="json")))
-    register_builtin_algorithms()
     if algorithm is None:
         algorithm = get_algorithm(name)
     case = make_sound_speed_case(shape=(8, 8), n_transducers=8)
@@ -236,7 +234,6 @@ def test_yaml_python_and_typed_object_share_validation(tmp_path):
     "name", ["straight_cgls", "straight_sirt", "straight_sart", "bent_ray_gn"]
 )
 def test_typed_boundary_preserves_default_reconstruction(name):
-    register_builtin_algorithms()
     case = make_sound_speed_case(shape=(8, 8), n_transducers=8, inclusion_mps=1490)
     algorithm = get_algorithm(name)
     config = AlgorithmConfig(

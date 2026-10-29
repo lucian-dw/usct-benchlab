@@ -115,3 +115,17 @@ facts. Black, Ruff and diff whitespace checks passed for this unit.
 
 Next: replace legacy config aliases and dict roundtrips with one prepared typed
 configuration, independent deployment settings and resolved run controls.
+
+## P4: static algorithm discovery
+
+Completed: importing usctbench now exposes the maintained algorithms from one
+static factory/specification table. Removed repeated CLI registration, mutable
+replacement/clear hooks and the untyped legacy-description fallback. Algorithms
+no longer register themselves; callers and tests use the ordinary package API.
+
+Validation: full local CPU suite 586 passed (19.94 s), Black and Ruff passed.
+The public-import test instantiates every maintained entry without CLI setup.
+No numerical implementation or defaults changed in this unit.
+
+Next: make the configuration payload stay typed through execution and unify
+request budgets with independent host limits.

@@ -16,7 +16,6 @@ from usctbench.algorithms.ray import (
     speed_bounds,
 )
 from usctbench.core.config import coerce_bool
-from usctbench.core.registry import register_algorithm
 from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, USCTCase
 from usctbench.core.stopping import BudgetExhausted
 from usctbench.operators.eikonal import EikonalForward
@@ -476,17 +475,4 @@ class BentRayGNAdapter:
         )
 
 
-def register_bent_ray_algorithm(*, replace: bool = False) -> None:
-    from usctbench.core.algorithm_specs import SPECS
-
-    register_algorithm(
-        "bent_ray_gn",
-        BentRayGNAdapter,
-        specification=SPECS["bent_ray_gn"],
-        description="Native first-arrival Eikonal Gauss-Newton inversion.",
-        tags=("travel-time", "refraction", "eikonal"),
-        replace=replace,
-    )
-
-
-__all__ = ["BentRayGNAdapter", "register_bent_ray_algorithm"]
+__all__ = ["BentRayGNAdapter"]

@@ -21,3 +21,7 @@ __all__ = [
     "ReconstructionResult",
     "USCTCase",
 ]
+
+from .core.registry import get_algorithm, get_algorithm_entry, list_algorithms
+
+__all__ += ["get_algorithm", "get_algorithm_entry", "list_algorithms"]
