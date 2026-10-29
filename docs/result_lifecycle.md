@@ -1,22 +1,20 @@
 # Numerical results and optional reports
 
-`run_algorithm_case` separates preparation, solve, save, evaluation and preview.
-The solver receives shared observations/geometry with an empty ground-truth object.
-Ground truth remains available only to post-reconstruction evaluation.
+The public run function prepares input, calls the numerical algorithm without GT,
+saves arrays, publishes the run record and only then evaluates/plots.
 
-`result.h5` is written before scoring or plotting. `metadata.yaml` and
-`metrics.json` record each stage's status and the actual exception message when a
-stage fails. A failed evaluation or preview does not overwrite the numerical HDF5
-or change a completed solver result into a numerical failure. A failed numerical
-save is a failed run; it is not replaced with an empty successful-looking file.
+- result.h5: numerical arrays and solver-side metrics at save time.
+- run.json: resolved config, status, failure stage/message, work, time and artifacts.
+- index.json: numerical-success index, published only after arrays and run record.
+- metrics.json: latest numerical and optional evaluation records.
+- preview.png: optional visualization, with its own stage status.
 
-The run time measures preparation and solving, including failed attempts. The
-`process_peak_rss_mib` field measures the current process's cumulative RSS peak,
-not incremental per-case allocation; macOS bytes and Linux KiB are converted
-explicitly. Do not use it as a per-case GPU-memory measurement.
+A reporting failure retains the numerical image. A failed numerical save is not
+published as success. A failed solve may preserve a last complete checkpoint;
+that does not turn its failure into convergence. A timed-out external process may
+return no image. evaluate reports these distinctions without rerunning physics.
 
-Image SSIM is the local-window metric over complete valid windows, up to 7 pixels.
-If none fit, the score is null with `ssim_status=unavailable_no_complete_window`.
-`global_ssim` remains a separately named statistic, never a silent substitute.
-Perfect-reconstruction PSNR is null with `psnr_status=perfect_reconstruction`.
-These image metric records can be serialized as standard JSON without infinity.
+Runtime includes preparation and solve. process_peak_rss_mib is the current
+process's cumulative peak RSS, not incremental per-case or GPU memory.
+
+See [evaluation](evaluation.md) for image metrics and missing-GT semantics.

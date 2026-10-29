@@ -167,6 +167,8 @@ class WUSTFWIAlgorithm:
             complete = reason == "schedule_complete"
             metrics = {
                 "forward_model": "WUST_Helmholtz",
+                "observation_domain": "complex_pressure",
+                "observation_units": case.metadata["pressure_contract"]["data_units"],
                 "final_data_residual": None,
                 "stop_reason": "schedule_complete" if complete else "max_iterations",
                 "termination_category": "completion" if complete else "budget",

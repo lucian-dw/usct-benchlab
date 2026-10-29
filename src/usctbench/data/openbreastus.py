@@ -1,659 +1,111 @@
-"""OpenBreastUS tree inspection helpers.
-
-The real dataset layout can vary across local mirrors. These helpers avoid
-hard-coded path assumptions by producing a conservative index from the files
-that are actually present.
-"""
-
-from __future__ import annotations
+"""Explicit OpenBreastUS file selection and separate format inspection."""
 
 import json
-import os
-import re
-from collections import defaultdict
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
-import numpy as np
+import h5py
+from scipy.io import whosmat
 
-from .conversion import convert_kwave_channel_mat, convert_speed_mat_volume
-
-from .conversion import kwave_channel_mat_metadata, speed_mat_metadata
-
-INSPECTOR_VERSION = "0.1"
-SUPPORTED_SUFFIXES = {
-    ".h5",
-    ".hdf5",
-    ".mat",
-    ".npy",
-    ".npz",
-    ".json",
-    ".yaml",
-    ".yml",
-    ".txt",
-    ".csv",
-}
-DATA_SUFFIXES = {".h5", ".hdf5", ".mat", ".npy", ".npz"}
+from .conversion import convert_speed_mat_volume
 
 
-def inspect_openbreastus(
-    root: str | Path, out: str | Path | None = None
-) -> dict[str, Any]:
-    """Inspect a local OpenBreastUS tree and optionally write an index JSON."""
-
-    root_path = Path(root).expanduser().resolve()
-    if not root_path.exists():
-        raise FileNotFoundError(f"OpenBreastUS root does not exist: {root_path}")
-    if not root_path.is_dir():
-        raise NotADirectoryError(f"OpenBreastUS root is not a directory: {root_path}")
-
-    files = _candidate_files(root_path)
-    grouped: dict[str, list[Path]] = defaultdict(list)
-    for file_path in files:
-        grouped[_case_id(root_path, file_path)].append(file_path)
-
-    cases = [
-        _case_record(root_path, case_id, paths)
-        for case_id, paths in sorted(grouped.items())
-    ]
-    density_counts: dict[str, int] = defaultdict(int)
-    suffix_counts: dict[str, int] = defaultdict(int)
-    role_counts: dict[str, int] = defaultdict(int)
-    capability_counts: dict[str, int] = defaultdict(int)
-    for case in cases:
-        density_counts[case["density_class"]] += 1
-        for file_record in case["files"]:
-            suffix_counts[file_record["suffix"]] += 1
-        for role in case["roles"]:
-            role_counts[role] += 1
-        for name, value in case["capabilities"].items():
-            if isinstance(value, bool) and value:
-                capability_counts[name] += 1
-
-    warnings = []
-    if not cases:
-        warnings.append(
-            "No candidate OpenBreastUS data files were found under the root."
-        )
-    if all(case["density_class"] == "unknown" for case in cases):
-        warnings.append(
-            "No density classes could be inferred from paths; smoke subset will use unknown density."
-        )
-
-    index = {
-        "schema_version": INSPECTOR_VERSION,
-        "root": str(root_path),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "summary": {
-            "num_cases": len(cases),
-            "num_files": len(files),
-            "density_counts": dict(sorted(density_counts.items())),
-            "suffix_counts": dict(sorted(suffix_counts.items())),
-            "role_counts": dict(sorted(role_counts.items())),
-            "capability_counts": dict(sorted(capability_counts.items())),
-        },
-        "cases": cases,
-        "warnings": warnings,
-    }
-
-    if out is not None:
-        out_path = Path(out).expanduser()
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(
-            json.dumps(index, indent=2, sort_keys=True), encoding="utf-8"
-        )
-    return index
-
-
-def write_schema_report(index: dict[str, Any], path: str | Path) -> Path:
-    """Write a human-readable schema inspection report."""
-
-    out = Path(path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    lines = [
-        "# OpenBreastUS schema inspection",
-        "",
-        f"- Root: {index.get('root', '')}",
-        f"- Cases: {index.get('summary', {}).get('num_cases', 0)}",
-        f"- Files: {index.get('summary', {}).get('num_files', 0)}",
-        f"- Density counts: {index.get('summary', {}).get('density_counts', {})}",
-        "",
-        "## Warnings",
-        "",
-    ]
-    warnings = index.get("warnings") or []
-    lines.extend(f"- {warning}" for warning in warnings)
-    if not warnings:
-        lines.append("- None")
-    lines.extend(["", "## Case preview", ""])
-    for case in index.get("cases", [])[:20]:
-        lines.append(
-            f"- `{case['case_id']}`: density={case['density_class']}, "
-            f"files={len(case['files'])}, roles={case['roles']}, "
-            f"capabilities={case.get('capabilities', {})}, frequencies_hz={case['available_frequencies_hz']}"
-        )
-        for limitation in case.get("limitations", []):
-            lines.append(f"  - limitation: {limitation}")
-    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return out
-
-
-def _candidate_files(root: Path) -> list[Path]:
-    return sorted(
-        path
-        for path in root.rglob("*")
-        if path.is_file()
-        and path.suffix.lower() in SUPPORTED_SUFFIXES
-        and not _is_hidden(path, root)
-    )
-
-
-def _is_hidden(path: Path, root: Path) -> bool:
-    rel = path.relative_to(root)
-    return any(part.startswith(".") for part in rel.parts)
-
-
-def _case_id(root: Path, file_path: Path) -> str:
-    rel = file_path.relative_to(root)
-    if len(rel.parts) >= 2:
-        return _slug("/".join(rel.parts[:-1]))
-    return _slug(file_path.stem)
-
-
-def _case_record(root: Path, case_id: str, paths: list[Path]) -> dict[str, Any]:
-    files = [_file_record(root, path) for path in sorted(paths)]
-    roles = sorted({role for file in files for role in file["roles"]})
-    frequencies = sorted({freq for file in files for freq in file["frequencies_hz"]})
-    capabilities = _case_capabilities(files)
-    return {
-        "case_id": case_id,
-        "density_class": _density_class(paths),
-        "split": _split(paths),
-        "roles": roles,
-        "available_frequencies_hz": frequencies,
-        "capabilities": capabilities,
-        "limitations": _case_limitations(capabilities),
-        "files": files,
-    }
-
-
-def _file_record(root: Path, path: Path) -> dict[str, Any]:
-    rel = path.relative_to(root).as_posix()
-    schema = _schema(path)
-    roles = sorted(set(_roles(path)) | set(_schema_roles(schema)))
-    return {
-        "path": rel,
-        "suffix": path.suffix.lower(),
-        "size_bytes": path.stat().st_size,
-        "roles": roles,
-        "frequencies_hz": _frequencies_hz(rel),
-        "shape": _shape_from_schema(schema),
-        "schema": schema,
-    }
-
-
-def _case_capabilities(files: list[dict[str, Any]]) -> dict[str, Any]:
-    roles = {role for file in files for role in file["roles"]}
-    has_sound_speed = "sound_speed" in roles
-    has_wavefield = "wavefield" in roles
-    has_reference = "reference" in roles
-    has_geometry = "geometry" in roles
-    has_mask = "mask" in roles
-    has_kwave_channel_mat = any(
-        bool(file.get("schema", {}).get("kwave_channel_mat")) for file in files
-    )
-    has_speed_mat_volume = any(
-        "sound_speed" in file["roles"]
-        and file["suffix"] == ".mat"
-        and isinstance(file.get("schema"), dict)
-        and bool((file["schema"].get("largest_3d_dataset") or {}).get("dataset"))
-        and bool((file["schema"].get("largest_3d_dataset") or {}).get("shape"))
-        and not bool(file["schema"].get("kwave_channel_mat"))
-        for file in files
-    )
-    conversion_modes = []
-    if has_kwave_channel_mat:
-        conversion_modes.append("kwave_channel_mat_to_feature_case")
-    if has_speed_mat_volume:
-        conversion_modes.append("speed_map_to_straight_ray_surrogate")
-    if has_wavefield and has_reference and has_geometry:
-        conversion_modes.append("frequency_reference_features")
-    return {
-        "has_sound_speed": has_sound_speed,
-        "has_wavefield": has_wavefield,
-        "has_reference": has_reference,
-        "has_geometry": has_geometry,
-        "has_mask": has_mask,
-        "has_kwave_channel_mat": has_kwave_channel_mat,
-        "has_speed_mat_volume": has_speed_mat_volume,
-        "convertible_to_usct_case": bool(conversion_modes),
-        "conversion_modes": conversion_modes,
-    }
-
-
-def _case_limitations(capabilities: dict[str, Any]) -> list[str]:
-    limitations = []
-    modes = set(capabilities.get("conversion_modes", []))
-    if (
-        "speed_map_to_straight_ray_surrogate" in modes
-        and "frequency_reference_features" not in modes
-    ):
-        limitations.append(
-            "speed-map-only case: conversion uses surrogate straight-ray travel-time features, not measured RF/wavefield data"
-        )
-    if "kwave_channel_mat_to_feature_case" in modes:
-        limitations.append(
-            "k-Wave simulation case: source pressure is simulated, not raw measured OpenBreastUS RF data"
-        )
-    if capabilities.get("has_wavefield") and not capabilities.get("has_reference"):
-        limitations.append(
-            "wavefield-like data found without an identified water/reference file"
-        )
-    if capabilities.get("has_wavefield") and not capabilities.get("has_geometry"):
-        limitations.append(
-            "wavefield-like data found without identified geometry/transducer metadata"
-        )
-    if not capabilities.get("convertible_to_usct_case"):
-        limitations.append(
-            "no supported automatic USCTCase conversion mode was identified"
-        )
-    return limitations
-
-
-def _density_class(paths: list[Path]) -> str:
-    text = " ".join(path.as_posix().lower() for path in paths)
-    patterns = [
-        ("dense", ("dense", "density_high", "high_density", "heterogeneous")),
-        ("fatty", ("fatty", "adipose", "density_low", "low_density")),
-        ("scattered", ("scattered", "medium_density", "density_medium")),
-        ("homogeneous", ("homogeneous", "uniform")),
-    ]
-    for label, needles in patterns:
-        if any(needle in text for needle in needles):
-            return label
-    match = re.search(r"density[_-]?([a-z0-9]+)", text)
-    if match:
-        return match.group(1)
-    return "unknown"
-
-
-def _split(paths: list[Path]) -> str:
-    text = " ".join(path.as_posix().lower() for path in paths)
-    for split in (
-        "train",
-        "training",
-        "val",
-        "valid",
-        "validation",
-        "test",
-        "mini",
-        "smoke",
-    ):
-        if f"/{split}/" in text or f"_{split}_" in text:
-            return (
-                "val"
-                if split in {"valid", "validation"}
-                else "train" if split == "training" else split
-            )
-    return "unknown"
-
-
-def _roles(path: Path) -> list[str]:
-    text = path.name.lower()
-    roles = []
-    if any(token in text for token in ("reference", "water", "baseline", "background")):
-        roles.append("reference")
-    if any(
-        token in text for token in ("sound_speed", "soundspeed", "speed", "sos", "c0")
-    ):
-        roles.append("sound_speed")
-    if any(token in text for token in ("attenuation", "atten", "alpha")):
-        roles.append("ignored_raw_quantity")
-    if any(
-        token in text
-        for token in (
-            "wavefield",
-            "pressure",
-            "rf",
-            "signal",
-            "sinogram",
-            "measurement",
-        )
-    ):
-        roles.append("wavefield")
-    if any(
-        token in text
-        for token in ("geometry", "transducer", "probe", "sensor", "receiver")
-    ):
-        roles.append("geometry")
-    if "mask" in text or "roi" in text:
-        roles.append("mask")
-    if path.suffix.lower() in DATA_SUFFIXES and not roles:
-        roles.append("unknown_data")
-    return sorted(set(roles)) or ["metadata"]
-
-
-def _frequencies_hz(text: str) -> list[float]:
-    frequencies = []
-    for value, unit in re.findall(r"(\d+(?:\.\d+)?)\s*([kKmM]?[hH][zZ])", text):
-        scale = 1.0
-        unit_lower = unit.lower()
-        if unit_lower.startswith("k"):
-            scale = 1.0e3
-        elif unit_lower.startswith("m"):
-            scale = 1.0e6
-        frequencies.append(float(value) * scale)
-    return sorted(set(frequencies))
-
-
-def _schema(path: Path) -> dict[str, Any]:
-    suffix = path.suffix.lower()
-    if suffix == ".npy":
+def inspect_openbreastus(root):
+    """Report stored array names/shapes without inferring physics or classes."""
+    root = Path(root).expanduser().resolve(strict=True)
+    files = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in {".mat", ".h5", ".hdf5"}:
+            continue
+        record = {"path": path.relative_to(root).as_posix(), "arrays": []}
         try:
-            array = np.load(path, mmap_mode="r")
-            return {
-                "format": "npy",
-                "shape": list(array.shape),
-                "dtype": str(array.dtype),
-            }
-        except Exception as exc:
-            return {"format": "npy", "read_error": f"{type(exc).__name__}: {exc}"}
-    if suffix == ".npz":
-        try:
-            with np.load(path) as archive:
-                return {
-                    "format": "npz",
-                    "arrays": {
-                        name: {
-                            "shape": list(archive[name].shape),
-                            "dtype": str(archive[name].dtype),
-                        }
-                        for name in archive.files
-                    },
-                }
-        except Exception as exc:
-            return {"format": "npz", "read_error": f"{type(exc).__name__}: {exc}"}
-    if suffix in {".h5", ".hdf5", ".mat"}:
-        try:
-            import h5py
-        except ModuleNotFoundError as exc:
-            return {
-                "format": "hdf5" if suffix != ".mat" else "mat",
-                "read_error": f"ModuleNotFoundError: {exc}",
-            }
-        try:
-            datasets: dict[str, dict[str, Any]] = {}
-            with h5py.File(path, "r") as handle:
+            if h5py.is_hdf5(path):
+                with h5py.File(path, "r") as handle:
 
-                def visitor(name: str, obj: Any) -> None:
-                    if hasattr(obj, "shape") and obj.shape is not None:
-                        datasets[name] = {
-                            "shape": list(obj.shape),
-                            "dtype": str(getattr(obj, "dtype", "")),
-                            "ndim": len(obj.shape),
-                            "roles": _roles(Path(name)),
-                        }
+                    def visit(name, obj):
+                        if isinstance(obj, h5py.Dataset):
+                            record["arrays"].append(
+                                {
+                                    "name": name,
+                                    "shape": list(obj.shape),
+                                    "dtype": str(obj.dtype),
+                                }
+                            )
 
-                handle.visititems(visitor)
-            schema: dict[str, Any] = {
-                "format": "hdf5" if suffix != ".mat" else "mat-v7.3-hdf5",
-                "datasets": datasets,
-            }
-            try:
-                schema["largest_3d_dataset"] = speed_mat_metadata(path)
-            except Exception as exc:
-                schema["largest_3d_dataset"] = {
-                    "read_error": f"{type(exc).__name__}: {exc}"
-                }
-            try:
-                schema["kwave_channel_mat"] = kwave_channel_mat_metadata(path)
-            except Exception as exc:
-                schema["kwave_channel_mat"] = {
-                    "read_error": f"{type(exc).__name__}: {exc}"
-                }
-            return schema
-        except Exception as exc:
-            return {
-                "format": "hdf5" if suffix != ".mat" else "mat_or_unsupported",
-                "read_error": f"{type(exc).__name__}: {exc}",
-            }
-    return {"format": suffix.lstrip(".") or "unknown"}
-
-
-def _shape_from_schema(schema: dict[str, Any]) -> Any:
-    if "shape" in schema:
-        return schema["shape"]
-    if "arrays" in schema:
-        return {name: value["shape"] for name, value in schema["arrays"].items()}
-    if "datasets" in schema:
-        return {name: value["shape"] for name, value in schema["datasets"].items()}
-    if "largest_3d_dataset" in schema:
-        largest = schema["largest_3d_dataset"] or {}
-        return largest.get("shape")
-    return None
-
-
-def _schema_roles(schema: dict[str, Any]) -> list[str]:
-    if schema.get("kwave_channel_mat"):
-        return ["sound_speed", "wavefield", "geometry"]
-    return []
-
-
-def _slug(value: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
-    slug = slug.strip("_")
-    return slug or "case"
+                    handle.visititems(visit)
+            else:
+                record["arrays"] = [
+                    {"name": name, "shape": list(shape), "dtype": dtype}
+                    for name, shape, dtype in whosmat(path)
+                ]
+        except (OSError, ValueError, NotImplementedError) as exc:
+            record["read_error"] = f"{type(exc).__name__}: {exc}"
+        files.append(record)
+    return {"root": str(root), "files": files}
 
 
 def prepare_openbreastus(
-    root: str | Path,
-    out: str | Path,
+    root,
+    out,
     *,
-    cases_per_density: int = 1,
-    symlink_sources: bool = True,
-    convert_speed_mat: bool = True,
-    converted_shape: tuple[int, int] = (64, 64),
-    spacing_m: tuple[float, float] = (1.0e-3, 1.0e-3),
-    n_transducers: int = 32,
-    sample_axis: int = 2,
-    image_axes: str = "yx",
-    sound_speed_units: str = "m/s",
-    case_ids: list[str] | None = None,
-    sample_indices: list[int] | None = None,
-) -> dict[str, Any]:
-    """Prepare explicit files/slices as property-map ToF cases without copying sources."""
+    files,
+    sample_indices,
+    spacing_m,
+    sample_axis=2,
+    image_axes="yx",
+    sound_speed_units="m/s",
+    converted_shape=(64, 64),
+    n_transducers=32,
+    reference_sound_speed_mps=1500.0,
+):
+    """Convert declared speed volumes/slices to model-generated ToF cases.
 
-    if cases_per_density <= 0:
-        raise ValueError("cases_per_density must be positive")
-
-    root_path = Path(root).expanduser().resolve()
-    out_path = Path(out).expanduser().resolve()
-    out_path.mkdir(parents=True, exist_ok=True)
-
-    index = inspect_openbreastus(root_path, out_path / "openbreastus_index.json")
-    selected = _select_cases(index["cases"], cases_per_density=cases_per_density)
-    if case_ids is not None:
-        selected = [case for case in index["cases"] if case["case_id"] in case_ids]
-        missing = set(case_ids) - {case["case_id"] for case in selected}
-        if missing:
-            raise ValueError(f"OpenBreastUS cases not found: {sorted(missing)}")
-
-    source_root = out_path / "sources"
-    if symlink_sources:
-        source_root.mkdir(parents=True, exist_ok=True)
-        for case in selected:
-            case_dir = source_root / case["case_id"]
-            case_dir.mkdir(parents=True, exist_ok=True)
-            for file_record in case["files"]:
-                source = root_path / file_record["path"]
-                link = case_dir / Path(file_record["path"]).name
-                if link.exists() or link.is_symlink():
-                    link.unlink()
-                try:
-                    link.symlink_to(os.path.relpath(source, link.parent))
-                    file_record["source_link"] = str(link.relative_to(out_path))
-                except OSError:
-                    file_record["smoke_link"] = None
-
-    converted_cases = []
-    if convert_speed_mat:
-        converted_root = out_path / "cases"
-        for case in selected:
-            for file_record in case["files"]:
-                source = root_path / file_record["path"]
-                if _is_kwave_channel_mat(file_record):
-                    converted_cases.extend(
-                        convert_kwave_channel_mat(
-                            source,
-                            converted_root,
-                            case_id_prefix=case["case_id"],
-                            output_shape=converted_shape,
-                            n_transducers=n_transducers,
-                        )
-                    )
-                elif _is_speed_mat_volume(file_record):
-                    converted_cases.extend(
-                        convert_speed_mat_volume(
-                            source,
-                            converted_root,
-                            indices=sample_indices or [0],
-                            index_metadata={},
-                            case_id_prefix=case["case_id"],
-                            output_shape=converted_shape,
-                            spacing_m=spacing_m,
-                            n_transducers=n_transducers,
-                            sample_axis=sample_axis,
-                            image_axes=image_axes,
-                            sound_speed_units=sound_speed_units,
-                        )
-                    )
-
+    Pressure import is a separate operation. No density labels, sample groups,
+    source links or physical units are inferred from file names.
+    """
+    root = Path(root).expanduser().resolve(strict=True)
+    out = Path(out).expanduser().resolve()
+    selected = [(root / name).resolve(strict=True) for name in files]
+    if len(set(selected)) != len(selected):
+        raise ValueError("Duplicate OpenBreastUS input files")
+    # Distinct relative names retain their path components in generated IDs.
+    prefixes = [
+        p.relative_to(root).with_suffix("").as_posix().replace("/", "__")
+        for p in selected
+    ]
+    if len(set(prefixes)) != len(prefixes):
+        raise ValueError("Input files would produce duplicate case IDs")
+    out.mkdir(parents=True, exist_ok=True)
+    cases = []
+    for source, prefix in zip(selected, prefixes):
+        cases.extend(
+            convert_speed_mat_volume(
+                source,
+                out / "cases",
+                indices=sample_indices,
+                case_id_prefix=prefix,
+                output_shape=converted_shape,
+                spacing_m=spacing_m,
+                n_transducers=n_transducers,
+                reference_sound_speed_mps=reference_sound_speed_mps,
+                sample_axis=sample_axis,
+                image_axes=image_axes,
+                sound_speed_units=sound_speed_units,
+            )
+        )
     manifest = {
-        "cases": [
-            {"case_id": c["case_id"], "path": c["path"]} for c in converted_cases
-        ],
-        "source_root": str(root_path),
+        "source_root": str(root),
+        "cases": cases,
         "settings": {
+            "files": list(files),
+            "sample_indices": list(sample_indices),
             "shape": list(converted_shape),
             "spacing_m": list(spacing_m),
-            "n_transducers": n_transducers,
-            "sample_indices": sample_indices or [0],
             "sample_axis": sample_axis,
             "image_axes": image_axes,
             "sound_speed_units": sound_speed_units,
+            "n_transducers": n_transducers,
+            "reference_sound_speed_mps": reference_sound_speed_mps,
         },
     }
-    manifest_path = out_path / "manifest.json"
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
-    )
-    write_schema_report(index, out_path / "schema_inspection_report.md")
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest
-
-
-def _capability_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
-    convertible = [
-        case["case_id"]
-        for case in cases
-        if case.get("capabilities", {}).get("convertible_to_usct_case")
-    ]
-    limitations = {
-        case["case_id"]: case.get("limitations", [])
-        for case in cases
-        if case.get("limitations")
-    }
-    modes: dict[str, int] = defaultdict(int)
-    for case in cases:
-        for mode in case.get("capabilities", {}).get("conversion_modes", []):
-            modes[mode] += 1
-    return {
-        "convertible_cases": convertible,
-        "conversion_mode_counts": dict(sorted(modes.items())),
-        "case_limitations": limitations,
-    }
-
-
-def _select_cases(
-    cases: list[dict[str, Any]], *, cases_per_density: int
-) -> list[dict[str, Any]]:
-    by_density: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for case in sorted(cases, key=lambda item: item["case_id"]):
-        by_density[case.get("density_class", "unknown")].append(case)
-
-    selected = []
-    for density in sorted(by_density):
-        ranked = sorted(
-            by_density[density],
-            key=lambda item: (
-                -_conversion_priority(item),
-                item["case_id"],
-            ),
-        )
-        selected.extend(ranked[:cases_per_density])
-    return selected
-
-
-def _conversion_priority(case: dict[str, Any]) -> int:
-    modes = set(case.get("capabilities", {}).get("conversion_modes", []))
-    if "kwave_channel_mat_to_feature_case" in modes:
-        return 30
-    if "frequency_reference_features" in modes:
-        return 20
-    if "speed_map_to_straight_ray_surrogate" in modes:
-        return 10
-    return 0
-
-
-def _has_canonical_openbreastus_class_volume(case: dict[str, Any]) -> bool:
-    return any(
-        _canonical_openbreastus_class_ranges(file_record) is not None
-        for file_record in case.get("files", [])
-    )
-
-
-def _canonical_openbreastus_class_ranges(
-    file_record: dict[str, Any],
-) -> list[tuple[int, int, int]] | None:
-    """Infer OpenBreastUS four-class ranges for canonical train/test speed volumes.
-
-    The public speed-map mirror is commonly stored as `breast_train_speed.mat`
-    with one 3-D dataset, often ordered by class in four contiguous blocks.
-    This inference is only a fallback for quality panels; explicit class
-    metadata should be preferred whenever it is available.
-    """
-
-    if not _is_speed_mat_volume(file_record):
-        return None
-    path = str(file_record.get("path", "")).lower()
-    largest = file_record.get("schema", {}).get("largest_3d_dataset") or {}
-    dataset = str(largest.get("dataset", "")).lower()
-    if "breast_" not in path and not dataset.startswith("breast_"):
-        return None
-    shape = largest.get("shape") or []
-    sample_axis = largest.get("sample_axis")
-    if sample_axis is None or len(shape) != 3:
-        return None
-    case_count = int(shape[int(sample_axis)])
-    if case_count < 4 or case_count % 4 != 0:
-        return None
-    class_size = case_count // 4
-    return [
-        (class_id, (class_id - 1) * class_size, class_id * class_size)
-        for class_id in range(1, 5)
-    ]
-
-
-def _is_kwave_channel_mat(file_record: dict[str, Any]) -> bool:
-    return bool(file_record.get("schema", {}).get("kwave_channel_mat"))
-
-
-def _is_speed_mat_volume(file_record: dict[str, Any]) -> bool:
-    largest = file_record.get("schema", {}).get("largest_3d_dataset") or {}
-    return (
-        "sound_speed" in file_record.get("roles", [])
-        and file_record.get("suffix") == ".mat"
-        and bool(largest.get("dataset"))
-        and bool(largest.get("shape"))
-        and not _is_kwave_channel_mat(file_record)
-    )

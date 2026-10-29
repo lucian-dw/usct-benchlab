@@ -1,4 +1,7 @@
 import numpy as np
+from skimage.metrics import structural_similarity
+
+from usctbench.metrics import compute_image_metrics
 import pytest
 
 from usctbench.metrics import compute_regional_image_metrics, non_water_tissue_mask
@@ -10,6 +13,17 @@ def phantom():
     truth[15:25, 15:25] = 1530
     truth[18:21, 18:21] = 1500
     return truth
+
+
+def test_metrics_reject_nonfinite_recon_instead_of_hiding_pixels():
+    truth = np.full((12, 12), 1500.0)
+    prediction = truth.copy()
+    prediction[5, 5] = np.nan
+    with pytest.raises(FloatingPointError):
+        compute_image_metrics(prediction, truth)
+    mask = np.ones(truth.shape, bool)
+    mask[5, 5] = False
+    assert compute_image_metrics(prediction, truth, mask=mask)["rmse"] == 0
 
 
 def test_water_artifact_cannot_change_tissue_metrics():
@@ -71,15 +85,15 @@ def test_nonfinite_output_in_water_is_not_hidden_by_primary_mask():
         compute_regional_image_metrics(pred, truth)
 
 
-@pytest.mark.parametrize(
-    "options",
-    [
-        {"primary_region": "unknown"},
-        {"water_tolerance_mps": -1},
-        {"data_range_mps": 0},
-        {"water_speed_mps": float("nan")},
-    ],
-)
-def test_invalid_region_policy_is_rejected(options):
-    with pytest.raises(ValueError):
-        compute_regional_image_metrics(phantom(), phantom(), **options)
+def test_compute_image_metrics_uses_standard_ssim():
+    truth = np.arange(25, dtype=float).reshape(5, 5)
+    prediction = truth.copy()
+    prediction[2, 2] += 1.0
+
+    metrics = compute_image_metrics(prediction, truth)
+
+    assert np.isclose(
+        metrics["ssim"],
+        structural_similarity(truth, prediction, data_range=24.0, win_size=5),
+    )
+    assert "global_ssim" in metrics

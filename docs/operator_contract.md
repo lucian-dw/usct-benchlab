@@ -1,80 +1,58 @@
-# Forward and adjoint contract
+# Operator contract
 
-## Arrays, variables and inner products
+## Layout and units
 
-Images are `[row=y, col=x]`; coordinates, cell-edge origins and spacing are in
-meters. The canonical pressure shapes are **`(time, tx, rx)`** and
-**`(frequency, tx, rx)`**. External MATLAB/k-Wave axes must be declared and
-converted, not inferred from square arrays. Pressure transforms use actual sample
-times, including a nonzero start time:
+| Quantity | BenchLab convention |
+| --- | --- |
+| Image, mask | [row=y, col=x] |
+| Grid shape / spacing / origin | [ny,nx] / [dy,dx] in m / outer pixel edge [y,x] in m |
+| Element positions | [element, yx] in m |
+| Travel time | [tx,rx], seconds |
+| Pressure | [frequency,tx,rx], complex; units explicitly declared |
+| Time pressure | [tx,rx,time], with actual sample times |
+| Source spectrum | prepared [frequency,tx], complex |
+| WUST boundary | positions changed once to [x,y]; images stay [y,x] |
+
+## Canonical numerical modules
+
+- **operators/straight_ray.py**: one CSR Siddon matrix. Forward $Ax$ and adjoint
+  $A^\top y$ share identical ordering and lengths.
+- **operators/eikonal.py**: fast marching and its local linearization. A stored
+  active-stencil tape supplies forward sensitivities and reverse adjoint.
+- **operators/ray_born.py** and **volume_integral.py**: complex pressure fields and Born
+  sensitivities. Full-Green differentiates the discrete volume-integral solve;
+  WKB uses a continuum sensitivity approximation.
+- **operators/model_space.py**: bilinear coefficient basis $B$ and reduced $JB$.
+- **operators/regularization.py**: fine-grid penalties and exact transposes.
+
+A linear operator exposes forward and adjoint. A nonlinear forward exposes
+linearize(model), returning its value, Jacobian and derivative kind.
+Jacobians act on **perturbations of the declared variable**, not an arbitrary
+sound-speed increment.
+
+## Inner products
+
+Arrays use Euclidean sums. A real model and complex data satisfy
 
 $$
-P(\omega)=\Delta t\sum_n p(t_n)e^{+i\omega t_n},
-\qquad p(t)=\operatorname{Re}(P(\omega)e^{-i\omega t}).
+\Re\langle Jv,z\rangle_\mathbb C=\langle v,J^\ast z\rangle_\mathbb R.
 $$
 
-`forward(model)` predicts observations. `linearize(model)` returns the current
-prediction, Jacobian, and a `derivative_kind` label. A Jacobian's `forward(dm)`
-maps image perturbations to data perturbations. Its `adjoint(d)` is the transpose
-under Euclidean array inner products, with real-model/complex-data pairing:
+Pixel area is already included in the Born kernel and ray lengths in the
+straight matrix; callers must not multiply either again. Weights are precision
+weights; weighted least squares uses $\sqrt w$ in an augmented system.
 
-$$
-\operatorname{Re}\langle J\delta m,z\rangle
-=\langle\delta m,J^*z\rangle.
-$$
+Unknowns are straight $\delta s$ [s/m], Eikonal $s$ [s/m], Born $m$ [s²/m²],
+and WUST $s$ [s/m]. Speed conversion and box projection belong to solver updates.
 
-Pixel area and propagation units are inside the operator. Statistical precision
-weights and ROI restrictions are applied by solvers. An adjoint is not an inverse.
+Invalid observations are masked before arithmetic, not filled with valid zeros.
+An actual zero measurement remains valid. Holdouts never enter training
+normalization or source fitting. Observed masks are not GT-derived support.
 
-## Organization
+## Boundaries
 
-| Physics | Forward module | Adjoint module | Model |
-| --- | --- | --- | --- |
-| Straight rays | `operators/forward/straight_ray.py` | `operators/adjoint/straight_ray.py` | Slowness perturbation, s/m |
-| Refraction / Eikonal | `operators/forward/eikonal.py` | `operators/adjoint/eikonal.py` | Absolute slowness, s/m |
-| Finite-frequency Ray-Born | `operators/forward/ray_born.py` | `operators/adjoint/ray_born.py` | Squared slowness or its perturbation, s^2/m^2 |
-| Full-wave Helmholtz bridge | `operators/forward/fwi.py` | `operators/adjoint/fwi.py` | Squared slowness, s^2/m^2 |
+Prepared numerical objects are reused internally. Public inputs validate shape,
+units, coordinates and conventions. Internal import paths point to canonical
+operators, not historical forward/adjoint wrappers.
 
-The historical `algorithms.ray.StraightRayProjector` import remains compatible;
-the numerical implementation is in the operator layer. Bent-ray and Ray-Born
-do not use this projector to make their predictions or report residuals.
-
-## Exact and approximate derivatives
-
-Straight rays have an exact linear transpose. Eikonal differentiation follows
-the causal active stencil; finite differences are checked away from first-arrival
-branch changes. Ray-Born has an exact frozen complex transpose, but its continuum
-Born derivative is only approximate for the optional discrete Eikonal/WKB background.
-The `volume_integral` backend instead differentiates the discrete full Green
-model, verified by finite differences as well as a conjugate-adjoint test.
-The metadata explicitly distinguishes these claims. Native nonlinear Ray-Born
-recomputes propagation for trial models; descent is measured on that nonlinear
-training objective. Failure to find a descent step remains an explicit failure.
-
-The finite-frequency correlation-delay composition additionally requires a
-stationary, interior, locally resolved peak before exposing its implicit
-derivative. For correlation $C(\tau)$, a bound
-$M_3=\sum_f a_f|Q_f|\omega_f^3$ implies
-$|C'''|\leq M_3$. Requiring $-C''(\tau)>2\Delta\tau M_3$ certifies strict
-concavity in the neighborhood excluded from the sampled competitor search.
-Clipped or unfinished peak refinement is invalid. This is conservative local
-quality control, not a proof of a unique global maximum; distant peak switches
-remain nonsmooth and require nonlinear acceptance checks.
-
-## Full-wave runtime
-
-Production FWI is `fwi_wust`. WUST owns the Helmholtz forward/adjoint and source-projected gradients; BenchLab calls its external protocol, not a matrix-export bridge. Slowness is the optimization variable; the update is full slowness in s/m with L2 norm over the declared update mask. Relative updates are diagnostics, not convergence stops. See [fwi.md](fwi.md).
-
-## Sources and independent references
-
-Pressure cases can store `source_spectrum`, `water_reference_time`, and complex
-`water_reference`. Ray-Born uses the analytic Green function's source convention;
-the Helmholtz bridge uses a discrete right-hand-side convention. These source
-numbers are not interchangeable. Each model fits its own calibration from an
-independent water acquisition, or requires a supplied calibrated spectrum.
-Training-only source fitting is a separate API and cannot borrow held-out
-specimen data. An independent water acquisition at a held-out specimen frequency
-is allowed only when explicitly declared independent.
-
-Tests separate (1) executable plumbing, (2) adjoint/derivative identities,
-(3) independent k-Wave image validation. Passing one does not establish the next.
+[Mathematics](math_formulation.md) · [test index](physics_validation.md)

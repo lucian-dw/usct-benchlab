@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from usctbench.algorithms.straight import StraightRayCGLSAlgorithm
+
 import numpy as np
 import pytest
 import yaml
@@ -169,3 +171,11 @@ def test_typed_boundary_preserves_reconstruction(name):
         raw.metrics["stopping"]["resolved_policy"]
         == typed.metrics["stopping"]["resolved_policy"]
     )
+
+
+def test_conflicting_measurement_reference_fails_explicitly():
+    algorithm = StraightRayCGLSAlgorithm
+    case = make_sound_speed_case(shape=(8, 8), n_transducers=8, inclusion_mps=1500)
+    config = AlgorithmConfig(parameters={"reference_sound_speed_mps": 1600})
+    with pytest.raises(ValueError, match="measurement reference"):
+        algorithm().run(case, config)

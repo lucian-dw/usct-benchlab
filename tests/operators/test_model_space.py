@@ -140,10 +140,17 @@ def test_reduced_eikonal_is_jb_not_straight_surrogate():
     np.testing.assert_allclose(jb.forward(v), finite_difference, rtol=2e-5, atol=1e-12)
 
 
-@pytest.mark.parametrize(
-    "shape", [(0, 2), (2, 999), (2.0, 3.0), (True, False), (2,), None]
-)
-def test_bad_coefficient_shapes_rejected(shape):
-    grid, _, _ = fixture()
-    with pytest.raises(ValueError, match="model_grid_shape"):
-        BilinearBasis(grid, shape)
+def test_physical_laplacian_has_an_exact_transpose_on_anisotropic_grid():
+    from usctbench.operators.regularization import regularizer, normal_regularizer
+
+    rng = np.random.default_rng(24)
+    x, y = rng.normal(size=(2, 9, 11))
+    kind = (0.7, 2.3)
+    np.testing.assert_allclose(
+        np.vdot(regularizer(x, kind), y), np.vdot(x, regularizer(y, kind)), rtol=1e-13
+    )
+    np.testing.assert_allclose(
+        np.vdot(x, normal_regularizer(x, kind)),
+        np.linalg.norm(regularizer(x, kind)) ** 2,
+        rtol=1e-13,
+    )

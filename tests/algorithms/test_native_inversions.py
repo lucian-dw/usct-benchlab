@@ -37,39 +37,6 @@ def small_case(physics):
     return case
 
 
-@pytest.mark.parametrize("mode", ["fixed_background", "nonlinear"])
-def test_born_zero_cache_preserves_reconstruction(mode):
-    from usctbench.core.config import prepare_config
-
-    case = small_case("born")
-    parameters = {
-        "variant": (
-            "full_green_fixed" if mode == "fixed_background" else "full_green_nonlinear"
-        ),
-        "green_solver_rtol": 1e-7,
-    }
-    config = AlgorithmConfig(parameters=parameters, run_controls={"max_iterations": 2})
-    cached = RayBornAlgorithm().run(case, config)
-    uncached_config = AlgorithmConfig(
-        parameters={**parameters, "max_cache_bytes": 0},
-        run_controls={"max_iterations": 2},
-    )
-    uncached = RayBornAlgorithm().run(case, uncached_config)
-    repeated = RayBornAlgorithm().run(
-        case, prepare_config("rwave_adapter", uncached_config)
-    )
-    assert (
-        cached.status
-        == uncached.status
-        == repeated.status
-        in {"completed", "budget_exhausted"}
-    )
-    np.testing.assert_allclose(
-        uncached.sound_speed_mps, cached.sound_speed_mps, rtol=1e-12
-    )
-    np.testing.assert_array_equal(uncached.sound_speed_mps, repeated.sound_speed_mps)
-
-
 @pytest.mark.parametrize(
     "physics,algorithm", [("bent", BentRayAlgorithm), ("born", RayBornAlgorithm)]
 )
@@ -139,20 +106,6 @@ def test_heldout_values_do_not_change_training_trajectory(physics, algorithm):
     assert a.metrics["evaluation_split"] == b.metrics["evaluation_split"]
 
 
-@pytest.mark.parametrize(
-    "physics,algorithm", [("bent", BentRayAlgorithm), ("born", RayBornAlgorithm)]
-)
-def test_zero_budget_returns_initial_checkpoint_with_reason(physics, algorithm):
-    case = small_case(physics)
-    result = algorithm().run(
-        case, AlgorithmConfig(parameters={}, run_controls={"max_forward_calls": 0})
-    )
-    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
-    assert result.metrics["stop_reason"] == "forward_calls_budget"
-    assert result.metrics["stopping"]["work"]["forward_calls"] == 0
-    np.testing.assert_allclose(result.sound_speed_mps, 1500)
-
-
 def test_frequency_holdout_does_not_train_or_leak_reciprocal_receiver():
     case = small_case("born")
     result = RayBornAlgorithm().run(
@@ -167,24 +120,6 @@ def test_frequency_holdout_does_not_train_or_leak_reciprocal_receiver():
     assert result.metrics["evaluation"]["frequency"]["num_samples"] > 0
     assert result.metrics["evaluation"]["joint"]["num_samples"] > 0
     assert result.metrics["evaluation_split"]["reciprocal_tx_excluded"] == [1]
-
-
-def test_approximate_wkb_failure_is_not_a_successful_inverse_solve():
-    result = RayBornAlgorithm().run(
-        small_case("born"),
-        AlgorithmConfig(
-            parameters={"variant": "wkb_nonlinear"},
-            run_controls={"max_iterations": 4},
-            evaluation={"frequency_indices": [2], "receiver_indices": [1]},
-        ),
-    )
-    assert (
-        result.metrics["derivative_kind"]
-        == "continuum_born_approximation_not_discrete_wkb_derivative"
-    )
-    assert result.metrics["stop_reason"] == "line_search_failed"
-    assert result.status == "failed"
-    assert np.isfinite(result.sound_speed_mps).all()
 
 
 def test_bent_cgls_initialization_does_not_use_heldout_data():

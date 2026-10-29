@@ -2,9 +2,7 @@ import numpy as np
 import pytest
 
 from usctbench.data.phase_delay import phase_slope_delays
-from usctbench.data.arrival import arrival_observation_metadata, water_relative_delays
-from usctbench.core.provenance import case_measurement_metadata
-from usctbench.metrics import compute_image_metrics
+from usctbench.data.arrival import water_relative_delays
 
 
 def test_phase_initialization_uses_only_three_training_frequencies():
@@ -49,17 +47,6 @@ def test_bounded_water_lag_sign_nonzero_time_origin_and_missing_traces():
     )
     assert np.isnan(delays[0, 1]) and not valid[0, 1] and weights[0, 1] == 0
     np.testing.assert_allclose(delays[valid], 0.71e-6, atol=2e-8)
-
-
-def test_metrics_reject_nonfinite_recon_instead_of_hiding_pixels():
-    truth = np.full((12, 12), 1500.0)
-    prediction = truth.copy()
-    prediction[5, 5] = np.nan
-    with pytest.raises(FloatingPointError):
-        compute_image_metrics(prediction, truth)
-    mask = np.ones(truth.shape, bool)
-    mask[5, 5] = False
-    assert compute_image_metrics(prediction, truth, mask=mask)["rmse"] == 0
 
 
 @pytest.mark.parametrize("shift", [-0.71e-6, 0.93e-6])
@@ -135,11 +122,6 @@ def test_source_trigger_is_not_confused_with_recording_time_origin(picker):
     np.testing.assert_array_equal(valid, bv)
     np.testing.assert_allclose(a, b, atol=1e-15, rtol=0)
     np.testing.assert_allclose(weights, bw)
-    metadata = arrival_observation_metadata(bqc)
-    restored = case_measurement_metadata(metadata)["tof_observation_contract"]
-    assert restored["source_onset_s"] == 0.005
-    assert restored["sign"] == "object_minus_water"
-    assert "not_inverse_noise_variance" in restored["weight_meaning"]
     assert valid.all()
 
 

@@ -50,18 +50,27 @@ def _prepare(args):
             inclusion_radius_m=args.inclusion_radius_m,
         )
     elif args.dataset == "openbreastus":
-        if not args.root or args.spacing_m is None:
-            raise ValueError("OpenBreastUS requires --root and explicit --spacing-m")
+        if (
+            not args.root
+            or args.spacing_m is None
+            or not args.files
+            or args.sample_indices is None
+        ):
+            raise ValueError(
+                "OpenBreastUS requires --root, --files, --sample-indices and --spacing-m"
+            )
         openbreastus.prepare_openbreastus(
             args.root,
             args.out,
-            cases_per_density=args.cases_per_class,
+            files=args.files,
+            sample_indices=args.sample_indices,
             converted_shape=tuple(args.shape),
             spacing_m=tuple(args.spacing_m),
             n_transducers=args.n_transducers,
             sample_axis=args.sample_axis,
             image_axes=args.image_axes,
             sound_speed_units=args.sound_speed_units,
+            reference_sound_speed_mps=args.reference_sound_speed_mps,
         )
     else:
         if not args.root:
@@ -200,6 +209,17 @@ def build_parser():
     p.add_argument("--cases-per-class", type=int, default=1)
     p.add_argument("--spacing-m", type=float, nargs=2, metavar=("DY", "DX"))
     p.add_argument("--sample-axis", type=int, choices=(0, 1, 2), default=2)
+    p.add_argument(
+        "--files",
+        nargs="+",
+        help="Explicit OpenBreastUS volume paths relative to --root",
+    )
+    p.add_argument(
+        "--sample-indices",
+        type=int,
+        nargs="+",
+        help="Explicit zero-based slice indices",
+    )
     p.add_argument("--image-axes", choices=("yx", "xy"), default="yx")
     p.add_argument("--sound-speed-units", choices=("m/s", "km/s"), default="m/s")
     p.add_argument("--reference-sound-speed-mps", type=float, default=1500)

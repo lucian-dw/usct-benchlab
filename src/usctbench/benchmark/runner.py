@@ -167,6 +167,8 @@ def evaluate(directory):
                 "measurement_provenance", "unknown"
             ),
             forward_model=metrics.get("forward_model"),
+            observation_domain=metrics.get("observation_domain"),
+            observation_units=metrics.get("observation_units"),
             primary_image_region=metrics.get("primary_image_region"),
             failure_stage=failures[0][0] if failures else None,
             message=failures[0][1] if failures else record.get("failure_reason"),

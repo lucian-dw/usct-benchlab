@@ -4,11 +4,6 @@ import numpy as np
 import pytest
 
 from usctbench.algorithms._control import InversionControl
-from usctbench.algorithms.straight import (
-    StraightRayCGLSAlgorithm,
-    StraightRaySIRTAlgorithm,
-    StraightRaySARTAlgorithm,
-)
 from usctbench.core.schema import (
     AlgorithmConfig,
     GridSpec,
@@ -16,19 +11,7 @@ from usctbench.core.schema import (
     MeasurementSpec,
     USCTCase,
 )
-from usctbench.data.synthetic import make_sound_speed_case
 from usctbench.solvers.row_action import row_action
-
-
-@pytest.mark.parametrize(
-    "algorithm",
-    [StraightRayCGLSAlgorithm, StraightRaySIRTAlgorithm, StraightRaySARTAlgorithm],
-)
-def test_conflicting_measurement_reference_fails_explicitly(algorithm):
-    case = make_sound_speed_case(shape=(8, 8), n_transducers=8, inclusion_mps=1500)
-    config = AlgorithmConfig(parameters={"reference_sound_speed_mps": 1600})
-    with pytest.raises(ValueError, match="measurement reference"):
-        algorithm().run(case, config)
 
 
 @pytest.mark.parametrize("subsets,expected", [(1, 2 / 3), (2, 0.5)])

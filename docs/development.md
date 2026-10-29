@@ -1,59 +1,32 @@
 # Development
 
-This document records the release hygiene commands for `usct-benchlab`.
+1. Install Python 3.10+ and run pip install -e ".[dev,viz]".
+2. Read [AGENTS.md](../AGENTS.md), the affected implementation, callers and tests.
+3. Change the complete path: input, numerical behavior, output, docs and relevant tests.
+4. Format and run the corresponding verification:
 
-## Format and Lint
-
-```bash
+~~~bash
 black src tests scripts
-ruff check src tests scripts --fix
-```
-
-## Compile and Test
-
-```bash
-python -m compileall src tests
+ruff check src tests scripts
 pytest -q
-```
+~~~
 
-Tests are organized by behavior, not by experiment date. Keep independent
-forward/adjoint checks, dense solver references, real bug regressions, data-split
-isolation, stopping/budget behavior, and CLI/release contracts. Parameterize only
-when a case exercises a distinct code path or numerical failure mode; avoid full
-Cartesian products of methods, units, penalties, and invalid arguments when
-representative combinations cover the same contract. Do not replace removed
-parameter combinations with hidden loops merely to lower the displayed count.
+5. Record actual verification and the next unit, inspect git diff --check, then commit.
 
-One-off sweeps, run launchers, copied source snapshots, and their logs belong in
-the external run workspace, not in `src/` or `tests/`. Preserve raw observations,
-final results, software versions, and confirmed failure evidence. Delete only
-regenerable caches or verified redundant/failed startup files; never clean an
-active run's source or checkpoints. Consolidate superseded progress notes into
-the final report instead of accumulating another archive tree.
+Default CI runs this CPU pytest suite once. No MATLAB/GPU or external dataset is
+required. Public numerical references live with operators/solvers, not source-text
+or historical-output certification scripts. See [test index](physics_validation.md).
 
-## CLI Smoke
+Manual cross-repository acceptance:
 
-```bash
-usct --help
-usct list-algorithms
-bash examples/synthetic_quickstart.sh /tmp/usct-example
-```
+~~~bash
+python scripts/validate_wust_integration.py --runtime /path/to/WaveformInversionUST \
+  --matlab /path/to/matlab --backend cpu --out /absolute/new/acceptance-directory
+~~~
 
-## Generated files
+Use --backend gpu for the CUDA MEX gate. Fixture generation is separate from
+one formal reconstruct invocation. WUST native simulation has its own explicit
+small MATLAB/native comparison in Runtime/tests/test_native_pipeline.m.
 
-The `.gitignore` excludes data, runs and scientific array files. Check the staged
-diff before committing. Optional inspection commands:
-
-```bash
-git ls-files | grep -E '\.(h5|hdf5|mat|npy|npz|zarr|pt|pth|ckpt|pkl)$' || true
-grep -RIn "/home/example\|/Users/example" README.md docs configs scripts src tests .env.example || true
-```
-
-The first command should print nothing. The second command is an example path
-pattern check; adapt the user names for local audits.
-
-## Git Hygiene
-
-Commit source, configs, tests, docs, scripts, and small README figures. Do not
-commit raw datasets, generated benchmark runs, external repositories, or model
-checkpoints.
+No data, runtime scratch, compiled binaries or research outputs belong in Git.
+Historical material is indexed in [research_index.md](research_index.md).

@@ -1,5 +1,8 @@
 """Admission and stopping semantics, independent of image quality."""
 
+import json
+from usctbench.core.stopping import BudgetExhausted
+
 import numpy as np
 import pytest
 from pydantic import ValidationError
@@ -79,29 +82,6 @@ def test_one_small_step_or_pre_minimum_steps_do_not_stop():
     assert monitor.record()["completed_iterations"] == 5
 
 
-def test_controls_round_trip_and_no_ambiguous_legacy_stopping():
-    config = AlgorithmConfig(run_controls=RunControls(max_iterations=7))
-    assert (
-        AlgorithmConfig.model_validate_json(
-            config.model_dump_json()
-        ).run_controls.max_iterations
-        == 7
-    )
-    from usctbench.core.config import prepare_config
-
-    with pytest.raises(ValidationError):
-        prepare_config("straight_cgls", AlgorithmConfig(parameters={"stopping": {}}))
-
-
-@pytest.mark.parametrize("native", [4, 5, 10, 30, 50, 120, 200])
-@pytest.mark.parametrize("partial", [{"max_elapsed_s": 60}, {"update_rtol": 1e-5}, {}])
-def test_partial_controls_inherit_method_iterations(native, partial):
-    assert (
-        RunControls(**partial).capped(default_iterations=native).max_iterations
-        == native
-    )
-
-
 @pytest.mark.parametrize("cap, expected", [(100, 30), (10, 10), (0, 0)])
 def test_cap_cannot_increase_inherited_default(cap, expected):
     policy = RunControls().capped(
@@ -160,3 +140,153 @@ def test_stage_change_resets_update_patience_not_global_iteration_budget():
     assert record["stage_id"] == record["selected_stage_id"] == "d"
     assert record["resolved_policy"]["max_iterations"] == 4
     assert [x["stage_id"] for x in monitor.history] == ["a", "a", "b", "c", "d"]
+
+
+def monitor(**kwargs):
+    policy = RunControls(
+        **{
+            "max_iterations": 50,
+            "min_iterations": 1,
+            "update_patience": 1,
+            "restore_best_validation": True,
+            **kwargs,
+        }
+    )
+    return StopMonitor(policy, WorkLedger(policy, clock=lambda: 0.0))
+
+
+def observe(m, i, **kwargs):
+    args = dict(residual_norm=1.0, observed_norm=2.0, objective=0.5)
+    args.update(kwargs)
+    return m.observe(i, np.array([i + 1.0]), **args)
+
+
+def test_or_rules_record_all_triggers_with_priority():
+    m = monitor(max_iterations=1, target_relative_residual=0.6, noise_norm=1.0)
+    assert observe(m, 0) is None
+    assert observe(m, 1) == "target_residual"
+    assert m.record()["triggered_rules"] == [
+        "target_residual",
+        "noise_discrepancy",
+        "max_iterations",
+    ]
+    assert m.record()["quality_target_met"] is True
+    assert m.history[0]["quality_triggered_rules"] == []
+    assert m.history[1]["quality_triggered_rules"] == [
+        "target_residual",
+        "noise_discrepancy",
+    ]
+    json.dumps(m.record(), allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    "kwargs,second,reason",
+    [
+        ({"max_iterations": 0}, {}, "max_iterations"),
+        ({"update_rtol": 0.01}, {"update_relative": 0.001}, "small_model_update"),
+        ({"objective_patience": 1, "objective_rtol": 1e-6}, {}, "objective_plateau"),
+        ({"max_iterations": 5}, {"residual_norm": 0, "objective": 0}, "exact_data_fit"),
+    ],
+)
+def test_stop_reasons(kwargs, second, reason):
+    m = monitor(**kwargs)
+    if kwargs.get("max_iterations") == 0:
+        assert observe(m, 0) == reason
+    else:
+        observe(m, 0)
+        assert observe(m, 1, **second) == reason
+    record = m.record()
+    assert record["quality_target_met"] is (reason == "exact_data_fit")
+
+
+def test_validation_restores_best_not_last_state():
+    m = monitor(validation_patience=2, objective_rtol=None)
+    observe(m, 0, validation_relative=0.9)
+    observe(m, 1, validation_relative=0.5)
+    observe(m, 2, validation_relative=0.7)
+    assert observe(m, 3, validation_relative=0.8) == "validation_plateau"
+    state, index = m.selected_state()
+    assert index == 1
+    np.testing.assert_array_equal(state, [2.0])
+    assert m.record()["completed_iterations"] == 3
+
+
+@pytest.mark.parametrize("restore_best_validation", [True, False])
+def test_quality_target_tracks_selected_checkpoint_not_termination(
+    restore_best_validation,
+):
+    m = monitor(
+        max_iterations=1,
+        target_relative_residual=0.3,
+        restore_best_validation=restore_best_validation,
+    )
+    assert observe(m, 0, validation_relative=0.1, residual_norm=1) is None
+    assert (
+        observe(m, 1, validation_relative=0.2, residual_norm=0.5) == "target_residual"
+    )
+    state, index = m.selected_state()
+    assert index == (0 if restore_best_validation else 1)
+    np.testing.assert_array_equal(state, [index + 1.0])
+    record = m.record()
+    assert record["quality_target_met"] is (not restore_best_validation)
+    assert record["selected_iteration"] == index
+    assert record["reason"] == "target_residual"
+    assert record["triggered_rules"] == ["target_residual", "max_iterations"]
+    assert m.history[0]["quality_triggered_rules"] == []
+    assert m.history[1]["quality_triggered_rules"] == ["target_residual"]
+    json.dumps({"record": record, "history": m.history}, allow_nan=False)
+
+
+def test_budgets_checked_before_operator_call():
+    policy = RunControls(max_forward_calls=1)
+    ledger = WorkLedger(policy)
+    assert ledger.call("linear_forward", lambda: 7) == 7
+    with pytest.raises(BudgetExhausted, match="forward_calls_budget"):
+        ledger.call("linear_forward", lambda: pytest.fail("budget overrun"))
+    assert ledger.counts["forward_calls"] == 1
+    with pytest.raises(BudgetExhausted, match="time_budget"):
+        WorkLedger(RunControls(max_elapsed_s=0)).call("adjoint", lambda: 0)
+
+
+def test_numerical_failure_preserves_last_complete_state():
+    m = monitor()
+    observe(m, 0)
+    assert observe(m, 1, objective=np.nan) == "numerical_failure"
+    state, index = m.selected_state()
+    assert index == 0
+    assert state[0] == 1
+
+
+def test_termination_is_sticky_and_cannot_replace_checkpoint():
+    m = monitor(max_iterations=1)
+    observe(m, 0)
+    observe(m, 1)
+    before = m.record()
+    assert m.finish("numerical_failure") == "max_iterations"
+    assert observe(m, 2, objective=np.nan) == "max_iterations"
+    assert m.record() == before
+    assert m.record()["termination_category"] == "budget"
+    assert m.record()["quality_target_met"] is False
+
+
+def test_control_rejected_objective_cannot_mismatch_image_and_prediction():
+    from usctbench.algorithms._control import InversionControl
+    from usctbench.core.schema import AlgorithmConfig
+    from usctbench.data.synthetic import make_sound_speed_case
+
+    case = make_sound_speed_case(shape=(4, 4), n_transducers=4)
+    obs = np.ones((4, 4))
+    from usctbench.core.config import prepare_config
+
+    cfg = prepare_config(
+        "straight_cgls", AlgorithmConfig(run_controls={"max_iterations": 4})
+    )
+    control = InversionControl(case, cfg, obs, default_iterations=4)
+    initial = np.zeros((4, 4))
+    control.observe(0, initial, initial, objective=1)
+    control.observe(1, np.ones((4, 4)), obs, objective=np.nan)
+    selected, metrics = control.output(initial)
+    np.testing.assert_array_equal(selected, initial)
+    assert metrics["data_residual_norm"] == 4
+    assert metrics["stop_reason"] == "numerical_failure"
+    assert metrics["stopping"]["termination_category"] == "failure"

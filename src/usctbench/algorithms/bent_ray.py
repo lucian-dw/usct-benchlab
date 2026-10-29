@@ -388,6 +388,9 @@ class BentRayAlgorithm:
             {
                 "backend": "native_eikonal_fast_marching",
                 "eikonal_order": forward.spatial_order,
+                "forward_model": "eikonal",
+                "observation_domain": "travel_time",
+                "observation_units": "s",
                 "model_parameterization": (
                     {"kind": "pixels"} if basis is None else basis.metadata()
                 ),

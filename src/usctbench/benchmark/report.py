@@ -8,6 +8,8 @@ FIELDS = (
     "case_id",
     "measurement_provenance",
     "forward_model",
+    "observation_domain",
+    "observation_units",
     "status",
     "stop_reason",
     "runtime_s",
@@ -39,12 +41,13 @@ def write_summary(records, directory):
         "residuals are different observables, not a shared ranking. Hold-out scores",
         "used for selection are validation, not independent test scores.",
         "",
-        "| Algorithm | Case | Status | Stop | Time (s) | Region | RMSE (m/s) | PSNR (dB) | SSIM |",
-        "| --- | --- | --- | --- | ---: | --- | ---: | ---: | ---: |",
+        "| Algorithm | Case | Observation (units) | Status | Stop | Time (s) | Region | RMSE (m/s) | PSNR (dB) | SSIM |",
+        "| --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | ---: |",
     ]
     columns = (
         "algorithm",
         "case_id",
+        "observation",
         "status",
         "stop_reason",
         "runtime_s",
@@ -62,6 +65,10 @@ def write_summary(records, directory):
         return str(value).replace("|", "\\|").replace("\n", " ")
 
     for row in records:
+        row = {
+            **row,
+            "observation": f"{row.get('observation_domain', 'unknown')} ({row.get('observation_units', 'unknown')})",
+        }
         lines.append("| " + " | ".join(cell(row.get(key)) for key in columns) + " |")
         if row.get("message"):
             lines.append(

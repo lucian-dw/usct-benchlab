@@ -1,111 +1,72 @@
-# Datasets
+# Datasets and observations
 
-`usct-benchlab` keeps raw datasets outside Git and converts selected examples
-to standard `USCTCase` HDF5 files.
+## Three paths
 
-## Synthetic Demo
+~~~text
+property map + declared grid/geometry/c0
+  -> build_surrogate_tof_case -> ToF USCTCase -> ray algorithms
 
-Synthetic cases are deterministic and suitable for local smoke tests:
+recorded or k-Wave pressure + actual time/geometry/units
+  -> convert_kwave_pressure_mat -> time/frequency USCTCase
+  -> explicit water-relative arrival extraction -> ray algorithms
+  -> calibrated complex pressure -> Born
+  -> total complex pressure -> WUST
 
-```bash
-usct data make-synthetic-smoke \
-  --out "$USCT_WORKSPACE/data/synthetic_demo" \
-  --shape 48 \
-  --n-transducers 48
-```
+matched operator fixture
+  -> forward(model) -> synthetic observation -> numerical regression
+~~~
 
-The converter writes HDF5 cases under:
+Surrogate generation receives the explicit medium; reconstruction receives only
+observations and a declared initial/reference model. The runner removes the GT
+field before numerical execution.
 
-```text
-$USCT_WORKSPACE/data/synthetic_demo/cases/
-```
+## Conventions
 
-## OpenBreastUS
+Images, spacing and pixel-edge origins use [y,x]. Positions use [element,yx].
+RF uses [tx,rx,time], spectrum [frequency,tx,rx], and prepared sources [frequency,tx].
+Distances are meters, speeds m/s, times seconds and frequencies Hz. Imported
+pressure retains units and transform normalization in metadata.
 
-Inspect:
+The positive-sign DTFT is evaluated at the requested frequencies and **actual**
+sample times, including nonzero start time:
 
-```bash
-usct data inspect-openbreastus \
-  --root "$USCT_DATA_ROOT" \
-  --out "$USCT_RUN_ROOT/openbreastus_index.json"
-```
+$$
+P(f)=\Delta t\sum_n p(t_n)e^{+2\pi ift_n}.
+$$
 
-Create demo cases:
+No nearest FFT-bin substitution is made. WUST owns conversion to its negative-sign
+transform, frequency sorting and transducer snapping. Pressure ratios and
+scattered fields are not total-pressure WUST inputs.
 
-```bash
-usct data prepare-openbreastus \
-  --root "$USCT_DATA_ROOT" \
-  --out "$USCT_WORKSPACE/data/openbreastus_demo" \
-  --cases-per-density 1 \
-  --converted-shape 256 \
-  --n-transducers 128
-```
+## Property-map readers
 
-The conversion records source paths and measurement assumptions in case
-metadata. Raw OpenBreastUS files should not be committed.
+OpenBreastUS: inspect independently; select volume files and zero-based slices
+explicitly. Declare sample axis, in-plane orientation, speed units and output
+spacing. No inferred density groups or silent source links.
 
-## NBPslice2D
+NBPslices2D 2025: property maps contain sos/den/att/y/label. The maintained speed
+reader uses sos and label/type; unused absorption maps are not reconstructed.
+The related measurement collections are separate inputs, not assumed present.
 
-Set the ZIP path:
+Continuous maps are resampled at physical cell centers; labels use nearest
+neighbors. Missing labels remain missing. Missing source coordinates are not
+replaced by invented spacing. Unrelated output files are retained.
 
-```bash
-export USCT_NBP_ZIP_PATH=/path/to/NBPslices2D.zip
-```
+## Pressure and arrival preparation
 
-Inspect:
+[waveforms.py](../src/usctbench/data/waveforms.py) preserves selected channel
+slabs, measured time samples and geometry while controlling memory use.
+[arrival.py](../src/usctbench/data/arrival.py) provides bounded correlation,
+envelope and AIC extraction against independent water observations. Each picker
+records its QC and valid mask; no picker guarantees Eikonal-model equivalence.
 
-```bash
-usct data inspect-nbpslice2d \
-  --zip "$USCT_NBP_ZIP_PATH" \
-  --out "$USCT_RUN_ROOT/nbpslice2d_index.json"
-```
+[calibration.py](../src/usctbench/data/calibration.py) normalizes source shapes
+and fits complex source scales from independent water using explicit training
+masks. A completely held-out frequency may require separately supplied source
+calibration. Specimen validation pressure must not fill that gap.
 
-Create demo cases:
+WUST fits its own per-source/per-frequency scale from admitted specimen
+receivers; it does not require the Born source spectrum.
 
-```bash
-usct data prepare-nbpslice2d \
-  --zip "$USCT_NBP_ZIP_PATH" \
-  --out "$USCT_WORKSPACE/data/nbpslice2d_demo" \
-  --cases-per-type 1 \
-  --converted-shape 256 \
-  --n-transducers 128
-```
-
-NBPslice2D slices are acoustic property maps. Converted cases generate
-the feature fields required by the classical baselines.
-
-## Data Hygiene
-
-The repository ignores:
-
-```text
-data/
-runs/
-external/
-checkpoints/
-*.h5
-*.hdf5
-*.mat
-*.npy
-*.npz
-*.pt
-*.ckpt
-```
-
-Only source, configs, tests, docs, and small README figures belong in Git.
-
-## Imported quantities
-
-The case schema imports sound speed and supported pressure/ToF observations.
-Additional raw NBPslices2D `att`/`y` and k-Wave material maps are intentionally
-ignored; they are not converted into reconstruction labels or features. Density
-metadata and geometry handling remain unchanged. Older attenuation-bearing
-BenchLab HDF5 files have no compatibility guarantee; see [parameter contract](parameter_contract.md).
-
-## Persisted Measurements
-
-Case HDF5 measurement datasets share one field table in `core/io.py` for both
-reading and writing. Arrays retain their values, masks and complex dtype. Axis
-attributes explicitly distinguish `time,tx,rx`, `frequency,tx,rx` and `tx,rx`;
-ToF uses seconds. Pressure units come from acquisition metadata and otherwise
-remain `unknown`. Provenance is never inferred from a dataset name or free text.
+See [usage](usage.md) for supported import commands and [evaluation](evaluation.md)
+for provenance and data-isolation rules.

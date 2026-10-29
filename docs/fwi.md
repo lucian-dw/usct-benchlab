@@ -12,10 +12,10 @@ Python environment, and MATLAB on the host. Build WUST's CUDA MEX for GPU use.
 Select CPU or GPU explicitly; there is no automatic backend fallback.
 
 ```bash
-export USCT_WUST_ROOT=/path/to/WaveformInversionUST
-python "$USCT_WUST_ROOT/Runtime/python/wust_runtime.py" describe --json
+export WUST_RUNTIME_ROOT=/path/to/WaveformInversionUST
+python "$WUST_RUNTIME_ROOT/Runtime/python/wust_runtime.py" describe --json
 usct run fwi_wust --case /path/to/frequency_case.h5 \
-  --config configs/algorithms/fwi_wust.yaml --out runs/single_fwi
+  --config configs/algorithms/fwi_wust.yaml --backend cpu --out runs/single_fwi
 ```
 
 The example profile is not experimentally calibrated. Resolve bounds and PML for
@@ -58,7 +58,7 @@ One update optimizes full slowness `s=1/c`, measured in s/m, and records
 activate a convergence threshold. Schedule completion is completion, not
 convergence. Truncation reports `max_iterations`. The mandatory elapsed-time
 deadline covers preparation, launch, solve and result reading; timeout kills the
-owned process group and reports failure, not a completed image. Forward/adjoint
+owned process group and reports time-budget exhaustion without a completed image. Forward/adjoint
 caps and non-null `update_rtol` are unsupported.
 
 ## Outputs and validation
@@ -74,10 +74,12 @@ checks a non-square grid, masks, Fourier sign, physical schedule and loss decrea
 
 ```bash
 python scripts/validate_wust_integration.py \
-  --runtime "$USCT_WUST_ROOT" --matlab /path/to/matlab \
+  --runtime "$WUST_RUNTIME_ROOT" --matlab /path/to/matlab \
   --backend cpu --out /absolute/new/acceptance-directory
 ```
 
 It runs fixture generation separately, then one reconstruction. Choose `--backend
 gpu` for the GPU gate. Small CPU/GPU acceptance proves this declared numerical
 path, not clinical validity or deployment-scale performance.
+Use `--fixture /absolute/existing/fixture-directory` to reuse the same coherent
+observations and initial map across backends instead of regenerating the fixture.

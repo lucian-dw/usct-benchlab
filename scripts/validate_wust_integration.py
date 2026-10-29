@@ -2,9 +2,9 @@
 """Manual BenchLab/WUST acceptance: one fixture generation, one reconstruction."""
 
 import argparse
-import importlib.util
 import json
 from pathlib import Path
+import sys
 import time
 
 from usctbench.algorithms.fwi.algorithm import WUSTFWIAlgorithm
@@ -26,15 +26,20 @@ def main():
     parser.add_argument("--matlab", default="matlab")
     parser.add_argument("--backend", choices=["gpu", "cpu"], default="cpu")
     parser.add_argument("--timeout-s", type=float, default=180)
+    parser.add_argument(
+        "--fixture", type=Path, help="Reuse a prepared coherent fixture directory"
+    )
     args = parser.parse_args()
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=False)
-    fixture_module = args.runtime / "Runtime/tests/integration_runtime.py"
-    spec = importlib.util.spec_from_file_location("wust_integration", fixture_module)
-    fixture = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(fixture)
+    sys.path.insert(0, str(args.runtime.resolve() / "Runtime/tests"))
+    import integration_runtime as fixture
+
     started = time.monotonic()
-    path = fixture.create_fixture(args.out / "fixture", args.matlab)
+    if args.fixture is None:
+        path = fixture.create_fixture(args.out / "fixture", args.matlab)
+    else:
+        path = args.fixture.resolve() / "coherent.json"
     fixture_seconds = time.monotonic() - started
     doc, arrays = read_artifact(path, "wust.frequency_input")
     grid = doc["metadata"]["grid"]
@@ -72,14 +77,14 @@ def main():
         },
     )
     write_case_hdf5(case, args.out / "case.h5")
-    _, initial = read_artifact(args.out / "fixture/initial.json", "wust.initial_model")
+    _, initial = read_artifact(path.parent / "initial.json", "wust.initial_model")
     config = AlgorithmConfig(
         name="fwi_wust",
         run_controls={"max_elapsed_s": args.timeout_s, "max_iterations": 2},
         parameters={
             "sound_speed_bounds_mps": [1300.0, 1800.0],
             "stencil_bounds_mps": [1400.0, 1700.0],
-            "pml_m": 0.003,
+            "pml_m": 0.004,
             "frequency_schedule_hz": [100000.0, 100000.0, 120000.0],
             "source_batch_size": 2,
             "update_mask": initial["update_mask"].tolist(),
@@ -109,7 +114,7 @@ def main():
         "shape": list(case.grid.shape),
         "fixture_seconds": fixture_seconds,
         "reconstruction_seconds": result.runtime_s,
-        "fixture_matlab_invocations": 1,
+        "fixture_matlab_invocations": int(args.fixture is None),
         "reconstruction_matlab_invocations": 1,
         "stop_reason": result.metrics["stop_reason"],
         "environment": result.metrics["wust"]["environment"],

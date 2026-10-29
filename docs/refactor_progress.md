@@ -1,8 +1,10 @@
 # P1-P6 refactor execution record
 
 The approved plan and per-file actions are in the maintainer's
-`USCT_REFACTOR_HANDOFF` development package. This document records implementation,
-not completion of the entire plan. Both repositories use branch
+`USCT_REFACTOR_HANDOFF` development package, now copied to the sibling
+research_archive/handoff directory. P1-P6 implementation and the small acceptance
+gates are complete; earlier checkpoints below retain their original scope.
+Both repositories use branch
 `codex/full-refactor-p1-p6`; the original worktrees and experiment data are untouched.
 
 ## P1: data and result boundaries
@@ -189,3 +191,57 @@ Ruff and git diff --check pass; Black formatted the changed modules.
 
 Next: finish WUST P5 hardware validation, then P6 consolidates test ownership,
 current docs, examples and final installation/integration acceptance.
+
+## P6: current docs, test ownership and final acceptance
+
+Implemented:
+
+- Rewrote both READMEs and current usage, data, math, parameters, Agent, operator,
+  evaluation and development docs. Added one migration changelog. Historical
+  pictures remain in the external archive, not default-setting claims.
+- OpenBreastUS now takes explicit files and slice indices through CLI and Python;
+  it does not infer four classes or create symlink/index workarounds. This closes
+  the remaining P4 automatic-selection path found while verifying the new docs.
+- Reports retain the observation domain and units beside provenance/model. ToF
+  and pressure residuals are not presented as a shared score. Missing GT remains
+  an unavailable metric, not a fabricated number.
+- Consolidated tests into their owning operator, solver, I/O, evaluation and CLI
+  modules. Kept independent LS/KKT/adjoint/FD/hold-out references; removed repeated
+  budget matrices, one duplicate dense Born remainder and historical interface
+  assertions. Archived FMM grid-refinement studies and retained one Snell case
+  plus derivatives for both spatial orders.
+- The manual two-repo gate accepts an existing coherent fixture, enabling CPU/GPU
+  comparison with zero new fixture-generation calls. Production reconstruction
+  is still a single MATLAB invocation. No new imaging campaign was launched.
+
+Executed validation:
+
+- Fresh Python 3.12 environment without system-site packages: editable dev/viz
+  installation succeeded; pip check reports no broken requirements; full pytest
+  **346 passed in 13.06 s**. Installed CLI discovery/help, synthetic quickstart,
+  evaluate and the three-algorithm synthetic suite succeeded.
+- A100 Python 3.13: **346 passed in 4.31 s** with the intended source tree.
+  An initial invocation outside the repo could not import tests.helpers; rerunning
+  with the repo as cwd corrected the invocation, not the numerical code.
+- Black: 87 maintained Python files pass; Ruff, compileall and diff checks pass.
+- A100 Full-Green CPU/GPU forward relative difference 1.34297e-13; Jacobian
+  difference 1.26625e-11; GPU real-inner-product adjoint error 1.59902e-16.
+- BenchLab -> WUST CPU gate: one reconstruction process, two updates, 23x27
+  non-square grid, 11.09 s including startup. GPU: the same saved fixture,
+  one reconstruction process, 15.25 s. Both report max_iterations, not convergence.
+- WUST CPU/GPU gradient, source batching, RF ingestion, FIR and native independent
+  simulation gates passed; details are in WUST's execution record. CPU and GPU
+  gates saved /tmp/usct_refactor_p6_integration_{cpu,gpu}/gate.json on A100.
+- Local evidence copies are in sibling evidence/p6. No tracked scientific arrays,
+  runtime binaries or files over 2 MB. Seven generated WUST schemas are unchanged
+  by regeneration. Public docs have no personal absolute paths or broken local
+  links (the external archive intentionally requires the sibling directory).
+
+Environment notes: the first system-site installation inherited an unrelated
+Conda solver conflict; the clean environment above passes. Earlier rsync copies
+retained removed source files; the exact removed-file allowlist was moved into
+the isolated A100 research_archive/sync_cleanup, without touching original jobs,
+data or checkouts. Neither environment issue was hidden by changing assertions.
+
+Next: maintainer review of the two local refactor branches. No push, PR, merge,
+large-data rerun or clinical validation is included in this delivery.

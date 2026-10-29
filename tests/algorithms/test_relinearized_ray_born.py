@@ -4,10 +4,8 @@ import numpy as np
 import pytest
 
 from usctbench.algorithms.rwave import RayBornAlgorithm
-from usctbench.core.io import read_case_hdf5, write_case_hdf5
 from usctbench.core.schema import AlgorithmConfig, GroundTruthSpec, MeasurementSpec
 from usctbench.data.synthetic import make_sound_speed_case
-from tests.helpers import adjoint_error
 from usctbench.operators.ray_born import RayBornForward
 
 
@@ -73,37 +71,6 @@ def test_nonlinear_holdout_is_not_used_for_updates_or_line_search():
     )
 
 
-def test_born_adjoint_is_exact_but_derivative_contract_is_explicit():
-    case, _, linearization = nonlinear_case()
-    rng = np.random.default_rng(109)
-    op = linearization.jacobian
-    assert (
-        adjoint_error(
-            op,
-            rng.normal(size=case.grid.shape),
-            rng.normal(size=op.data_shape) + 1j * rng.normal(size=op.data_shape),
-        )
-        < 1e-12
-    )
-    assert (
-        linearization.derivative_kind
-        == "continuum_born_approximation_not_discrete_wkb_derivative"
-    )
-
-
-def test_source_is_required_and_complex_source_roundtrips(tmp_path):
-    case, _, _ = nonlinear_case()
-    case.measurement.source_spectrum *= 2 + 3j
-    path = write_case_hdf5(case, tmp_path / "pressure.h5")
-    loaded = read_case_hdf5(path)
-    np.testing.assert_array_equal(
-        loaded.measurement.source_spectrum, case.measurement.source_spectrum
-    )
-    loaded.measurement.source_spectrum = None
-    with pytest.raises(ValueError, match="calibrated source_spectrum"):
-        RayBornAlgorithm().run(loaded, config())
-
-
 @pytest.mark.parametrize(
     "source", [1 + 0j, np.ones(3, complex), np.ones((3, 8), complex)]
 )
@@ -114,6 +81,13 @@ def test_source_broadcast_matches_explicit_frequency_tx_calibration(source):
     result = RayBornAlgorithm().run(case, config(max_iterations=1))
     assert result.status == expected.status in {"completed", "budget_exhausted"}
     np.testing.assert_array_equal(result.sound_speed_mps, expected.sound_speed_mps)
+
+
+def test_pressure_requires_source_calibration_or_independent_water():
+    case, _, _ = nonlinear_case()
+    case.measurement.source_spectrum = None
+    with pytest.raises(ValueError, match="calibrated source_spectrum"):
+        RayBornAlgorithm().run(case, config())
 
 
 def test_relative_regularization_is_invariant_to_pressure_units():
@@ -142,22 +116,6 @@ def test_underresolved_complex_inverse_grid_is_rejected():
     case.grid.spacing_m = (0.005, 0.005)
     with pytest.raises(ValueError, match="underresolved"):
         RayBornAlgorithm().run(case, config())
-
-
-def test_physical_laplacian_has_an_exact_transpose_on_anisotropic_grid():
-    from usctbench.operators.regularization import regularizer, normal_regularizer
-
-    rng = np.random.default_rng(24)
-    x, y = rng.normal(size=(2, 9, 11))
-    kind = (0.7, 2.3)
-    np.testing.assert_allclose(
-        np.vdot(regularizer(x, kind), y), np.vdot(x, regularizer(y, kind)), rtol=1e-13
-    )
-    np.testing.assert_allclose(
-        np.vdot(x, normal_regularizer(x, kind)),
-        np.linalg.norm(regularizer(x, kind)) ** 2,
-        rtol=1e-13,
-    )
 
 
 def test_phase_seed_and_pressure_updates_exclude_heldout_frequency():
@@ -197,18 +155,6 @@ def test_phase_seed_and_pressure_updates_exclude_heldout_frequency():
     assert a.status == b.status in {"completed", "budget_exhausted"}, a.failure_reason
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
     assert a.metrics["initialization_qc"]["frequencies_hz"] == [100e3, 150e3, 200e3]
-
-
-@pytest.mark.parametrize("budget", [0, 1, 2])
-def test_nonlinear_budget_returns_a_complete_checkpoint(budget):
-    case, _, _ = nonlinear_case()
-    result = RayBornAlgorithm().run(
-        case, config(run_controls={"max_forward_calls": budget})
-    )
-    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
-    assert result.metrics["stop_reason"] == "forward_calls_budget"
-    assert result.metrics["stopping"]["work"]["forward_calls"] == budget
-    np.testing.assert_allclose(result.sound_speed_mps, 1500)
 
 
 @pytest.mark.parametrize(

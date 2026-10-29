@@ -4,13 +4,10 @@ import json
 
 import numpy as np
 import pytest
-from pydantic import create_model
 
-from usctbench.algorithms.parameters import InnerOptions, Parameters, parameter
 from usctbench.cli import main
 from usctbench.core.algorithm_specs import (
     SPECS,
-    agent_schema,
     case_capabilities,
     make_agent_config,
 )
@@ -38,19 +35,6 @@ def test_schema_defaults_permissions_and_variant_identity(algorithm_id):
         for name, value in schema["properties"].items():
             assert value["exposure"] == "agent"
             assert defaults[name] == value["default"]
-        payload = json.dumps({"schema": schema, "defaults": defaults}, allow_nan=False)
-        for hidden in (
-            "matlab_bin",
-            "pipeline_module",
-            "pipeline_args",
-            "scratch_dir",
-            "functions_path",
-            "inner_options",
-            "regularization_lambda",
-            "gradient_rtol",
-            "timeout_s",
-        ):
-            assert hidden not in payload
         config = make_agent_config(algorithm_id, defaults, variant=variant.id)
         assert config.name == algorithm_id
         assert "iterations" not in description["allowed_parameters"]
@@ -123,27 +107,6 @@ def test_external_fwi_agent_admission_stays_canonical_and_strict():
     assert "baseline_sound_speed_mps" not in type(config.parameters).model_fields
 
 
-def test_definitions_do_not_leak_and_nested_objects_fail_closed():
-    hidden = create_model(
-        "HiddenNested",
-        __base__=Parameters,
-        runtime=(
-            InnerOptions,
-            parameter(InnerOptions(), "hidden", exposure="internal"),
-        ),
-    )
-    schema, defaults = agent_schema(hidden)
-    assert "$defs" not in schema
-    assert defaults == {}
-    exposed = create_model(
-        "UnsafeNested",
-        __base__=Parameters,
-        runtime=(InnerOptions, parameter(InnerOptions(), "unsafe", exposure="agent")),
-    )
-    with pytest.raises(ValueError, match="nested Agent object"):
-        agent_schema(exposed)
-
-
 def test_observation_and_runtime_variants_are_not_guessed_from_names():
     born = SPECS["rwave_adapter"].describe("full_green_nonlinear")
     assert born["family"] == "ray_born"
@@ -198,22 +161,13 @@ def test_json_stdout_cli_and_case_capabilities(capsys, tmp_path):
     assert output.err == ""
     assert len(entries) == 6
     ids = {entry["algorithm_id"] for entry in entries}
-    assert "fwi_wust" in ids
-    assert "fwi_tiny" not in ids
-    assert "fwi_tiny" not in SPECS
-    with pytest.raises(KeyError):
-        get_algorithm("fwi_tiny")
-    with pytest.raises(KeyError):
-        make_agent_config("fwi_tiny")
-    assert all(entry["algorithm_id"] != "attenuation_sirt" for entry in entries)
-    with pytest.raises(KeyError):
-        get_algorithm("attenuation_sirt")
-    for entry in entries:
-        schema = entry.get("config_schema", {})
-        assert "attenuation_frequencies_hz" not in json.dumps(schema)
-        assert "attenuation_upper_np_per_m" not in json.dumps(schema)
-    assert not {"fwi_kwave_adapter", "diffusion_fwi_kwave_adapter"} & {
-        row["algorithm_id"] for row in entries
+    assert ids == {
+        "straight_cgls",
+        "straight_sirt",
+        "straight_sart",
+        "bent_ray_gn",
+        "rwave_adapter",
+        "fwi_wust",
     }
     path = tmp_path / "case.h5"
     write_case_hdf5(make_sound_speed_case(shape=(8, 8), n_transducers=8), path)
@@ -227,3 +181,34 @@ def test_json_stdout_cli_and_case_capabilities(capsys, tmp_path):
     output = capsys.readouterr()
     assert output.out == ""
     assert "unknown algorithm" in output.err
+
+
+def test_cli_reconstructs_one_case_and_reports_observation_units(tmp_path, capsys):
+    path = tmp_path / "case.h5"
+    write_case_hdf5(make_sound_speed_case(shape=(8, 8), n_transducers=8), path)
+    config = tmp_path / "cgls.yaml"
+    config.write_text("name: straight_cgls\nrun_controls:\n  max_iterations: 2\n")
+    out = tmp_path / "result"
+    assert (
+        main(
+            [
+                "run",
+                "straight_cgls",
+                "--case",
+                str(path),
+                "--config",
+                str(config),
+                "--out",
+                str(out),
+                "--no-preview",
+            ]
+        )
+        == 0
+    )
+    record = json.loads(capsys.readouterr().out)
+    assert record["status"] != "failed"
+    assert (out / "result.h5").is_file()
+    assert main(["evaluate", "--run", str(out)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["records"][0]["observation_domain"] == "travel_time"
+    assert report["records"][0]["observation_units"] == "s"

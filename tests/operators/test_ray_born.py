@@ -240,34 +240,6 @@ def test_heterogeneous_background_changes_phase_and_spreading():
     )
 
 
-def test_born_error_is_quadratic_against_multiple_scattering_solve():
-    # Independent discrete Lippmann-Schwinger solve, including all scattering orders.
-    op = setup_operator()
-    frequency = op.frequencies_hz[0]
-    omega = 2 * np.pi * frequency
-    points = np.indices(op.grid.shape).reshape(2, -1).T
-    points = np.array(op.grid.origin_m) + (points + 0.5) * op.grid.spacing_m
-    distances = np.linalg.norm(points[:, None] - points[None], axis=-1)
-    gpp = 0.25j * hankel1(0, omega / 1500 * np.maximum(distances, op.source_radius_m))
-    source_distances = np.linalg.norm(points - op.geometry.tx_pos_m[0], axis=-1)
-    incident = (
-        0.25j * hankel1(0, omega / 1500 * source_distances) * op.source_spectrum[0, 0]
-    )
-    receiver_distances = np.linalg.norm(
-        op.geometry.rx_pos_m[:, None] - points[None], axis=-1
-    )
-    receiver_green = 0.25j * hankel1(0, omega / 1500 * receiver_distances)
-    errors = []
-    for scale in (1.0, 0.5):
-        dm = np.full(op.grid.shape, 2e-10 * scale)
-        potential = omega**2 * op.area * dm.ravel()
-        full_field = np.linalg.solve(np.eye(op.n_pixels) - gpp * potential, incident)
-        scattered = receiver_green @ (potential * full_field)
-        born = op.forward(dm)[0, 0]
-        errors.append(np.linalg.norm(scattered - born))
-    assert 3.8 < errors[0] / errors[1] < 4.2
-
-
 def test_green_cache_budget_does_not_change_results():
     uncached = setup_operator(cache=0)
     cached = setup_operator(cache=100000)

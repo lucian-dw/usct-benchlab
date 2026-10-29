@@ -394,6 +394,11 @@ class RayBornAlgorithm:
                     else "finite_frequency_ray_born"
                 ),
                 "background_relinearization": mode == "nonlinear",
+                "forward_model": green_settings["green_backend"],
+                "observation_domain": "complex_pressure",
+                "observation_units": case.metadata.get("pressure_contract", {}).get(
+                    "data_units", case.metadata.get("frequency_data_units", "unknown")
+                ),
                 "nonlinear_prediction_model": (
                     green_settings["green_backend"]
                     if mode == "nonlinear"

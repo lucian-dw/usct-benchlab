@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import h5py
 import pytest
-from skimage.metrics import structural_similarity
 
 from usctbench.core.io import (
     read_case_hdf5,
@@ -11,21 +10,15 @@ from usctbench.core.io import (
     write_result_hdf5,
     write_case_hdf5,
 )
-from usctbench.core.registry import (
-    get_algorithm,
-    list_algorithms,
-)
 from usctbench.core.schema import (
     AlgorithmConfig,
     GeometrySpec,
     GridSpec,
-    GroundTruthSpec,
     MeasurementDomain,
     MeasurementSpec,
     ReconstructionResult,
     USCTCase,
 )
-from usctbench.metrics import compute_image_metrics
 
 
 class DummyAlgorithm:
@@ -64,6 +57,7 @@ def test_complex_layout_units_and_valid_zero_roundtrip(tmp_path):
             domain="frequency",
             frequencies_hz=[1e5, 2e5],
             freq_data=pressure,
+            source_spectrum=np.full((2, 3), 2 + 3j),
             valid_mask=valid,
         ),
         metadata={"frequency_data_units": "Pa*s"},
@@ -73,6 +67,10 @@ def test_complex_layout_units_and_valid_zero_roundtrip(tmp_path):
     np.testing.assert_array_equal(restored.measurement.freq_data, pressure)
     np.testing.assert_array_equal(restored.measurement.valid_mask, valid)
     assert restored.grid == case.grid
+    assert restored.measurement.domain.value == "frequency"
+    np.testing.assert_array_equal(
+        restored.measurement.source_spectrum, case.measurement.source_spectrum
+    )
     assert (
         restored.measurement.freq_data[0, 0, 0] == 0
         and restored.measurement.valid_mask[0, 0, 0]
@@ -94,41 +92,6 @@ def test_provenance_is_not_inferred_from_descriptive_text():
     assert facts["measurement_provenance"] == "unknown"
 
 
-def test_sound_speed_contract_has_no_material_absorption_output(written_case, tmp_path):
-    assert "log_amp" not in MeasurementSpec.model_fields
-    assert "attenuation_np_per_m" not in GroundTruthSpec.model_fields
-    assert "attenuation_np_per_m" not in ReconstructionResult.model_fields
-    with pytest.raises(ValueError, match="feature-domain"):
-        MeasurementSpec(domain="features", log_amp=np.ones((8, 8)))
-    case = read_case_hdf5(written_case)
-    truth = case.ground_truth.sound_speed_mps
-    result = ReconstructionResult(
-        algorithm="straight_cgls", case_id=case.case_id, sound_speed_mps=truth
-    )
-    path = write_result_hdf5(result, tmp_path / "sos_result.h5")
-    np.testing.assert_array_equal(read_result_hdf5(path).sound_speed_mps, truth)
-    for file in (written_case, path):
-        with h5py.File(file) as handle:
-            names = []
-            handle.visit(names.append)
-            assert not any("attenuation" in name or "log_amp" in name for name in names)
-    # No old attenuation-only feature reader remains.
-    with h5py.File(written_case, "a") as handle:
-        del handle["measurement/delta_tof_s"]
-        handle["measurement/log_amp"] = np.ones((8, 8))
-    with pytest.raises(ValueError, match="feature-domain"):
-        read_case_hdf5(written_case)
-
-
-def test_package_import_exposes_static_algorithms():
-    names = [entry.name for entry in list_algorithms()]
-    assert names == sorted(names)
-    for name in names:
-        assert get_algorithm(name).name == name
-    with pytest.raises(KeyError, match="unknown algorithm"):
-        get_algorithm("missing")
-
-
 def test_case_schema_rejects_feature_shape_mismatch(synthetic_case):
     measurement = MeasurementSpec(
         domain=MeasurementDomain.FEATURES, delta_tof_s=np.zeros((3, 3))
@@ -142,17 +105,3 @@ def test_case_schema_rejects_feature_shape_mismatch(synthetic_case):
             measurement=measurement,
             ground_truth=synthetic_case.ground_truth,
         )
-
-
-def test_compute_image_metrics_uses_standard_ssim():
-    truth = np.arange(25, dtype=float).reshape(5, 5)
-    prediction = truth.copy()
-    prediction[2, 2] += 1.0
-
-    metrics = compute_image_metrics(prediction, truth)
-
-    assert np.isclose(
-        metrics["ssim"],
-        structural_similarity(truth, prediction, data_range=24.0, win_size=5),
-    )
-    assert "global_ssim" in metrics

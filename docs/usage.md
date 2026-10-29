@@ -1,241 +1,175 @@
-# Usage Guide
-
-This guide shows the normal workflow for installation, dataset
-preparation, single-algorithm runs, benchmark runs, and output inspection.
+# Usage
 
 ## Install
 
-Conda:
-
-```bash
-conda create -n usctbench python=3.10 -y
-conda activate usctbench
+~~~bash
 pip install -e ".[dev,viz]"
-```
+usct list-algorithms --json
+~~~
 
-Pip:
+NumPy/SciPy/HDF5/Pydantic/YAML/scikit-image are core dependencies. Plotting is
+optional. Numba acceleration is available through the performance extra.
+Choose exactly one matching CuPy extra (cuda11 or cuda12) when using Full-Green
+on CUDA. WUST has its own MATLAB/MEX dependencies.
 
-```bash
-pip install -e ".[viz]"
-```
+## Workspace
 
-Verify:
+Keep source, data, runs and external runtimes separate, for example:
 
-```bash
-usct --help
-usct list-algorithms
-pytest -q
-```
+~~~text
+workspace/
+  usct-benchlab/
+  WaveformInversionUST/
+  data/
+  runs/
+  research_archive/
+~~~
 
-## Workspace Setup
+No Python API depends on a personal workspace path. CLI deployment flags may use
+WUST_RUNTIME_ROOT, WUST_MATLAB_EXECUTABLE, WUST_BACKEND and CUDA_VISIBLE_DEVICES.
+Suite YAML supports explicit environment substitutions.
 
-Use a workspace outside Git for data and generated runs:
+## Prepare a deterministic synthetic case
 
-```bash
-export USCT_WORKSPACE=/path/to/usct-benchlab
-export USCT_DATA_ROOT=$USCT_WORKSPACE/data/openbreastus
-export USCT_RUN_ROOT=$USCT_WORKSPACE/runs/usctbench_runs
-export USCT_NBP_ZIP_PATH=/path/to/NBPslices2D.zip
-```
+~~~bash
+usct data prepare --dataset synthetic --out data/synthetic_demo \
+  --shape 32 32 --n-transducers 32 --reference-sound-speed-mps 1500 \
+  --inclusion-mps 1450 --inclusion-radius-m 0.006
+usct inspect data/synthetic_demo/cases/synthetic_circular_sos.h5
+~~~
 
-Prepare directories:
+No RNG is used here. Random holdout selection, if requested, uses evaluation.seed.
 
-```bash
-bash scripts/setup_workspace.sh
-```
+## OpenBreastUS property maps
 
-The setup script creates workspace directories and lightweight repo-local
-symlinks such as `data/raw/openbreastus` and `runs/current`. It does not copy
-datasets into Git and it does not make generated runs tracked files.
+First inspect stored arrays, then specify the actual volume, axes, units and
+desired output spacing. The following spacing/axes are examples, not inferred
+dataset metadata:
 
-## Synthetic Demo
+~~~bash
+usct inspect /path/to/OpenBreastUS --dataset openbreastus
+usct data prepare --dataset openbreastus --root /path/to/OpenBreastUS \
+  --files breast_test_speed.mat --sample-indices 0 200 500 700 \
+  --sample-axis 2 --image-axes yx --sound-speed-units m/s \
+  --spacing-m 0.0003 0.0003 --shape 256 256 --n-transducers 64 \
+  --out data/openbreastus_demo
+~~~
 
-Create deterministic local cases:
+The output manifest records source files and slice indices. No four-class labels
+are guessed from index ranges. This path generates straight-ray ToF, not raw
+OpenBreastUS pressure.
 
-```bash
-usct data make-synthetic-smoke \
-  --out "$USCT_WORKSPACE/data/synthetic_demo" \
-  --shape 48 \
-  --n-transducers 48
-```
+## NBPslice2D property maps
 
-Set the case glob:
+~~~bash
+usct inspect /path/to/NBPslices2D.zip --dataset nbpslice2d
+usct data prepare --dataset nbpslice2d --root /path/to/NBPslices2D.zip \
+  --cases-per-class 1 --shape 128 128 --n-transducers 64 \
+  --out data/nbpslice2d_demo
+~~~
 
-```bash
-export USCT_SYNTHETIC_CASE_GLOB="$USCT_WORKSPACE/data/synthetic_demo/cases/*.h5"
-```
+The format reader uses explicit stored type/label and format units. Inspect
+manifest.json for the selected cases. Python prepare_nbpslice2d also accepts
+explicit case_ids. This is likewise a property-map surrogate.
 
-## OpenBreastUS Demo
+## Import pressure and extract arrivals
 
-Inspect the dataset tree:
+For the supported k-Wave MAT layout, declare stored channel axes:
 
-```bash
-usct data inspect-openbreastus \
-  --root "$USCT_DATA_ROOT" \
-  --out "$USCT_RUN_ROOT/openbreastus_index.json"
-```
+~~~bash
+usct data import-pressure --input /path/to/acquisition.mat \
+  --out data/pressure_case.h5 --channel-axes tx,rx,time \
+  --reference-sound-speed-mps 1500 --frequencies-hz 150000 250000 350000
+~~~
 
-Create one case per density class when available:
+Coordinates/time must exist in the acquisition, or supply an explicit GridSpec
+YAML through --grid. Optional --water-dataset names independent water traces.
+The importer retains RF, absolute time, source data and selected complex
+frequencies; it does not generate observations from the GT map.
 
-```bash
-usct data prepare-openbreastus \
-  --root "$USCT_DATA_ROOT" \
-  --out "$USCT_WORKSPACE/data/openbreastus_demo" \
-  --cases-per-density 1 \
-  --converted-shape 256 \
-  --n-transducers 128
-```
+Arrival features are a separate explicit preparation step:
 
-Set the case glob:
+~~~python
+from usctbench.core.io import read_case_hdf5, write_case_hdf5
+from usctbench.core.schema import MeasurementSpec
+from usctbench.data.arrival import water_relative_delays, arrival_observation_metadata
+import numpy as np
 
-```bash
-export USCT_OPENBREASTUS_CASE_GLOB="$USCT_WORKSPACE/data/openbreastus_demo/cases/*.h5"
-```
+case = read_case_hdf5("data/pressure_case.h5")
+m = case.measurement
+assert m.water_reference_time is not None
+distances = np.linalg.norm(
+    case.geometry.tx_pos_m[:, None] - case.geometry.rx_pos_m[None, :], axis=-1
+)
+# These window settings must match the recorded source pulse, not GT.
+delay, valid, weights, qc = water_relative_delays(
+    m.time_data.transpose(2, 0, 1), m.water_reference_time.transpose(2, 0, 1),
+    m.time_axis_s, distances, reference_speed_mps=1500,
+    picker="xcorr", source_onset_s=0.0, pulse_duration_s=15e-6,
+)
+features = case.model_copy(update={
+    "measurement": MeasurementSpec(domain="features", delta_tof_s=delay,
+                                   valid_mask=valid, ray_weights=weights),
+    "metadata": {**case.metadata, **arrival_observation_metadata(qc)},
+})
+write_case_hdf5(features, "data/tof_case.h5")
+~~~
 
-## NBPslice2D Demo
+See [datasets](datasets.md) for the exact callable and required arrays; do not
+substitute a speed-map surrogate for missing water/RF observations.
 
-Inspect the ZIP:
+## Run algorithms
 
-```bash
-usct data inspect-nbpslice2d \
-  --zip "$USCT_NBP_ZIP_PATH" \
-  --out "$USCT_RUN_ROOT/nbpslice2d_index.json"
-```
+Each command below uses an already prepared case and an exact output directory.
+Choose the file whose observation matches the algorithm:
 
-Create one case per A/B/C/D class when available:
+~~~bash
+usct run straight_cgls --case data/tof_case.h5 --config configs/algorithms/cgls.yaml --out runs/cgls
+usct run straight_sirt --case data/tof_case.h5 --config configs/algorithms/sirt.yaml --out runs/sirt
+usct run straight_sart --case data/tof_case.h5 --config configs/algorithms/sart.yaml --out runs/sart
+usct run bent_ray_gn --case data/first_arrival_case.h5 --config configs/algorithms/bent_ray.yaml --out runs/bent
+usct run rwave_adapter --case data/pressure_case.h5 --config configs/algorithms/rwave.yaml --out runs/born
+usct run fwi_wust --case data/pressure_case.h5 --config configs/algorithms/fwi_wust.yaml \
+  --runtime-root /path/to/WaveformInversionUST --matlab-executable /path/to/matlab \
+  --backend cpu --out runs/fwi
+~~~
 
-```bash
-usct data prepare-nbpslice2d \
-  --zip "$USCT_NBP_ZIP_PATH" \
-  --out "$USCT_WORKSPACE/data/nbpslice2d_demo" \
-  --cases-per-type 1 \
-  --converted-shape 256 \
-  --n-transducers 128
-```
+The FWI example needs a grid admitting the configured PML, declared pressure
+conventions and bounds appropriate to its supplied initialization.
+[FWI deployment](fwi.md) explains those requirements. CPU/GPU is explicit.
 
-Set the case glob:
+## Benchmarks and saved results
 
-```bash
-export USCT_NBP_CASE_GLOB="$USCT_WORKSPACE/data/nbpslice2d_demo/cases/*.h5"
-```
-
-## Run CGLS
-
-```bash
-usct run straight_cgls \
-  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
-  --config configs/algorithms/cgls.yaml \
-  --out runs/single_cgls
-```
-
-## Run SIRT
-
-```bash
-usct run straight_sirt \
-  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
-  --config configs/algorithms/sirt.yaml \
-  --out runs/single_sirt
-```
-
-## Run SART
-
-```bash
-usct run straight_sart \
-  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
-  --config configs/algorithms/sart.yaml \
-  --out runs/single_sart
-```
-
-## Run Bent-Ray
-
-```bash
-usct run bent_ray_gn \
-  --case "$USCT_WORKSPACE/data/synthetic_demo/cases/synthetic_circular_sos.h5" \
-  --config configs/algorithms/bent_ray.yaml \
-  --out runs/single_bent_ray
-```
-
-`bent_ray_gn` uses a nonlinear fast-marching Eikonal model and its discrete adjoint.
-
-## Run rWave Adapter
-
-```bash
-usct run rwave_adapter \
-  --case "$USCT_WORKSPACE/data/physics/example/pressure_case.h5" \
-  --config configs/algorithms/rwave.yaml \
-  --out runs/single_rwave
-```
-
-`rwave_adapter` requires complex pressure plus source calibration or independent
-water pressure. See [physics validation](physics_validation.md) to generate and
-import a pressure pair. ToF-only cases are rejected explicitly.
-
-## Run WUST FWI
-
-```bash
-export USCT_WUST_ROOT=/path/to/approved/WaveformInversionUST
-usct run fwi_wust \
-  --case /path/to/frequency_case.h5 \
-  --config configs/algorithms/fwi_wust.yaml \
-  --out runs/single_fwi
-```
-
-Prepare an existing complex total-pressure case and install the exact approved WUST runtime described in [fwi.md](fwi.md). CUDA is required for production; CPU is a reference backend. No GT-generated measurements or automatic resize are used.
-
-## Run Benchmark
-
-Synthetic:
-
-```bash
+~~~bash
 usct bench --suite configs/benchmarks/synthetic_demo.yaml
-```
-
-NBPslice2D:
-
-```bash
-usct bench --suite configs/benchmarks/nbpslice2d_demo.yaml
-```
-
-OpenBreastUS:
-
-```bash
 usct bench --suite configs/benchmarks/openbreastus_demo.yaml
-```
+usct bench --suite configs/benchmarks/nbpslice2d_demo.yaml
+usct evaluate --run runs/cgls
+~~~
 
-FWI:
+All suite paths, including glob, configs and output root, are relative to the
+suite file, not the shell directory. No matched cases is an error.
 
-```bash
-usct bench --suite configs/benchmarks/fwi_wust_demo.yaml
-```
+~~~python
+from usctbench.core.io import read_result_hdf5
+from usctbench.viz import write_preview_png
 
+result = read_result_hdf5("runs/cgls/result.h5")
+print(result.sound_speed_mps.shape)
+write_preview_png(result.sound_speed_mps, "runs/cgls/manual_preview.png")
+~~~
 
-Run all available demos:
+Use run.json for final execution/reporting states and metrics.json for evaluation.
+The HDF5 arrays are saved before optional scoring/plotting.
 
-```bash
-bash scripts/run_demo_benchmarks.sh
-```
+## Troubleshooting
 
-## Inspect Outputs
-
-Single runs write:
-
-```text
-runs/single_cgls/synthetic_circular_sos/result.h5
-runs/single_cgls/synthetic_circular_sos/metrics.json
-runs/single_cgls/synthetic_circular_sos/metadata.yaml
-runs/single_cgls/synthetic_circular_sos/preview.png
-```
-
-Benchmark runs write:
-
-```text
-runs/usctbench_runs/<run_id>/<algorithm>/<case_id>/result.h5
-runs/usctbench_runs/<run_id>/<algorithm>/<case_id>/metrics.json
-runs/usctbench_runs/<run_id>/<algorithm>/<case_id>/metadata.yaml
-runs/usctbench_runs/<run_id>/<algorithm>/<case_id>/preview.png
-runs/usctbench_runs/<run_id>/benchmark_summary.csv
-runs/usctbench_runs/<run_id>/benchmark_report.md
-```
-
-Start with `benchmark_report.md` for a readable summary, then inspect
-`metrics.json` and `preview.png` for individual algorithm/case behavior.
+- Unknown algorithm/parameter: use list-algorithms and describe-algorithm; removed
+  aliases are not silently ignored.
+- Missing data or empty glob: inspect the preparation manifest and suite-relative paths.
+- Missing FWI runtime: pass runtime root/MATLAB/backend explicitly; describe is
+  static, while probe is an explicit WUST diagnostic.
+- NaN/Inf: inspect failure stage/message and the actual valid mask. Do not replace
+  invalid samples with valid zeros.
+- Missing preview: install the viz extra; numerical results remain available.
+- Null SSIM/PSNR or absent GT: inspect metric status, not just the scalar field.

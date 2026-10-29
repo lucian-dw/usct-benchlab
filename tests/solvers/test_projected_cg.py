@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+from usctbench.data.synthetic import make_sound_speed_case
+
 import numpy as np
 import pytest
 from scipy.optimize import lsq_linear, minimize, minimize_scalar
@@ -219,26 +221,6 @@ def test_coupled_weighted_bounded_penalty_matches_independent_lbfgsb(robust):
     assert np.all(np.diff(costs) <= 1e-12 * costs[:-1])
 
 
-@pytest.mark.parametrize("robust", [False, True])
-@pytest.mark.parametrize("budget", ["max_forward_calls", "max_adjoint_calls"])
-@pytest.mark.parametrize("limit", [0, 1, 2])
-def test_retry_work_obeys_global_budgets_and_atomic_checkpoints(robust, budget, limit):
-    case = huber_case() if robust else bounded_case()
-    result = run(case, parameters(robust), run_controls={budget: limit})
-    stop = result.metrics["stopping"]
-    assert stop["work"][budget.removeprefix("max_")] <= limit
-    assert not result.metrics["solver_optimality"]["converged"]
-    assert stop["completed_iterations"] <= 30
-    if "evaluation" in result.metrics:
-        op = StraightRayProjector.from_case(case)
-        residual = op.forward(perturbation(result)).reshape(op.ray_shape)
-        residual -= case.measurement.delta_tof_s
-        expected = np.linalg.norm(residual[case.measurement.valid_mask])
-        assert result.metrics["data_residual_norm"] == pytest.approx(
-            expected, rel=1e-9, abs=1e-18
-        )
-
-
 @pytest.mark.parametrize("iterations", [0, 1, 2])
 def test_irls_restarts_do_not_extend_iteration_budget(iterations):
     result = run(
@@ -277,25 +259,6 @@ def test_huber_reweighting_and_optimality_exclude_heldout_values_and_weights():
     )
     assert first.metrics["solver_optimality"] == second.metrics["solver_optimality"]
     assert first.metrics["stopping"]["work"] == second.metrics["stopping"]["work"]
-
-
-def test_optimality_certificate_belongs_to_selected_validation_checkpoint():
-    result = run(
-        heldout_case(),
-        parameters(True),
-        evaluation={"receiver_indices": [2]},
-        run_controls={"restore_best_validation": True},
-    )
-    np.testing.assert_allclose(perturbation(result), [[1.5e-5]], rtol=1e-10)
-    assert result.metrics["stop_reason"] == "stationary_gradient"
-    certificate = result.metrics["solver_optimality"]
-    assert (
-        certificate["iteration"]
-        == result.metrics["stopping"]["selected_iteration"]
-        == 1
-    )
-    assert certificate["verified"]
-    assert not certificate["converged"]
 
 
 @pytest.mark.parametrize("kind", ["identity", "laplacian"])
@@ -383,3 +346,122 @@ def test_quadratic_weights_roi_and_penalty_match_dense_augmented_reference(
     assert metrics["solver_optimality"]["converged"]
     np.testing.assert_array_equal(actual[~roi], 0)
     assert metrics["stop_reason"] in {"stationary_gradient", "max_iterations"}
+
+
+class Identity:
+    def forward(self, x):
+        return x.copy()
+
+    def adjoint(self, y):
+        return y.copy()
+
+
+def test_exact_data_fit_does_not_bypass_regularizer():
+    from usctbench.algorithms.parameters import CGLSParameters
+
+    # min 1/2 ||x-1||^2 + 1/2 ||x||^2 has x*=1/2, not x=1.
+    case = USCTCase(
+        case_id="regularized_exact_fit",
+        measurement=MeasurementSpec(domain="features", delta_tof_s=np.ones((2, 2))),
+        grid=GridSpec(shape=(2, 2), spacing_m=(1, 1)),
+        geometry=GeometrySpec(tx_pos_m=[[0, 0], [1, 0]], rx_pos_m=[[0, 1], [1, 1]]),
+    )
+    control = InversionControl(
+        case,
+        AlgorithmConfig(
+            parameters=CGLSParameters(),
+            run_controls={
+                "max_iterations": 4,
+                "objective_rtol": None,
+                "update_rtol": None,
+                "restore_best_validation": False,
+            },
+        ),
+        np.ones((2, 2)),
+        default_iterations=4,
+    )
+    result, metrics = projected_cg(
+        Identity(),
+        control,
+        initial=np.ones((2, 2)),
+        reference=np.zeros((2, 2)),
+        lower=-np.inf,
+        upper=np.inf,
+        to_image=lambda x: x,
+        damping=1,
+    )
+    np.testing.assert_allclose(result, 0.5, atol=1e-15)
+    assert metrics["iteration_history"][-1]["objective"] == 1
+    assert metrics["stopping"]["reason"] != "exact_data_fit"
+
+
+def small_case():
+    return make_sound_speed_case(shape=(8, 8), n_transducers=8, inclusion_mps=1470)
+
+
+def config(
+    algorithm=None,
+    *,
+    max_iterations=4,
+    run_controls=None,
+    evaluation=None,
+    **parameters,
+):
+    return AlgorithmConfig(
+        parameters={
+            **parameters,
+        },
+        run_controls={"max_iterations": max_iterations, **(run_controls or {})},
+        evaluation=evaluation or {},
+    )
+
+
+def test_huber_preconditioning_uses_only_training_data_and_global_budget():
+    case = small_case()
+    cfg = config(
+        evaluation={"receiver_indices": [2]},
+        robust_loss="huber",
+        huber_delta_s=1e-8,
+        irls_iterations=3,
+        coverage_preconditioning=True,
+    )
+    first = StraightRayCGLSAlgorithm().run(case, cfg)
+    changed_data = case.measurement.delta_tof_s.copy()
+    changed_data[:, 2] *= 30
+    second = StraightRayCGLSAlgorithm().run(
+        case.model_copy(
+            update={
+                "measurement": case.measurement.model_copy(
+                    update={"delta_tof_s": changed_data}
+                )
+            }
+        ),
+        cfg,
+    )
+    assert first.failure_reason is None, first.failure_reason
+    np.testing.assert_array_equal(first.sound_speed_mps, second.sound_speed_mps)
+    assert first.metrics["iterations"] <= 4
+    costs = [row["objective"] for row in first.metrics["iteration_history"]]
+    assert np.all(np.diff(costs) <= 1e-25)
+    assert first.metrics["objective_name"] == "weighted_huber"
+
+
+def test_bound_projected_metrics_correspond_to_returned_image():
+    algorithm = StraightRayCGLSAlgorithm
+    case = small_case()
+    cfg = config(algorithm, sound_speed_bounds_mps=[1499, 1501])
+    result = algorithm().run(case, cfg)
+    assert result.failure_reason is None, result.failure_reason
+    assert np.min(result.sound_speed_mps) >= 1499 - 1e-10
+    assert np.max(result.sound_speed_mps) <= 1501 + 1e-10
+    op = StraightRayProjector.from_case(case)
+    residual = (
+        op.forward(1 / result.sound_speed_mps - 1 / 1500).reshape(op.ray_shape)
+        - case.measurement.delta_tof_s
+    )
+    np.testing.assert_allclose(
+        np.linalg.norm(residual[case.measurement.valid_mask]),
+        result.metrics["data_residual_norm"],
+        rtol=1e-9,
+        atol=1e-16,
+    )

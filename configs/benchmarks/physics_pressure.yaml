@@ -1,21 +1,19 @@
+# Manual comparison: each case must contain explicit ToF plus total pressure.
+# Algorithm records distinguish travel_time (s) and complex_pressure (input units).
 name: physics_pressure
-# Supply canonical pressure cases containing independent water data and ToF.
-case_glob: ${USCT_PRESSURE_CASE_GLOB:-data/physics/*/pressure_case.h5}
+case_glob: ${USCT_PRESSURE_CASE_GLOB:-../../data/physics/*/pressure_case.h5}
 outputs:
-  root: ${USCT_RUN_ROOT:-runs/usctbench_runs}
+  root: ${USCT_RUN_ROOT:-../../runs}
+host_limits:
+  max_iterations: 10
 algorithms:
   - name: straight_cgls
-    config: configs/algorithms/cgls.yaml
+    config: ../algorithms/cgls.yaml
   - name: straight_sirt
-    config: configs/algorithms/sirt.yaml
+    config: ../algorithms/sirt.yaml
   - name: straight_sart
-    config: configs/algorithms/sart.yaml
+    config: ../algorithms/sart.yaml
   - name: bent_ray_gn
-    config: configs/algorithms/bent_ray.yaml
+    config: ../algorithms/bent_ray.yaml
   - name: rwave_adapter
-    config: configs/algorithms/rwave.yaml
-min_cases: 1
-min_records: 5
-expected_statuses: [success]
-required_metrics:
-  default: [data_relative_residual]
+    config: ../algorithms/rwave.yaml

@@ -115,7 +115,7 @@ def test_reader_does_not_intercept_caller_oserror(tmp_path):
     assert caught.value is error
 
 
-def test_openbreastus_conversion_preserves_unrelated_case_files(tmp_path, monkeypatch):
+def test_openbreastus_conversion_preserves_unrelated_case_files(tmp_path):
     from usctbench.data import openbreastus
 
     root, out = tmp_path / "input", tmp_path / "output"
@@ -123,10 +123,21 @@ def test_openbreastus_conversion_preserves_unrelated_case_files(tmp_path, monkey
     (out / "cases").mkdir(parents=True)
     saved = out / "cases" / "unrelated.h5"
     saved.write_bytes(b"existing user result")
-    monkeypatch.setattr(
-        openbreastus, "inspect_openbreastus", lambda *args: {"cases": []}
+    with h5py.File(root / "speed.mat", "w") as handle:
+        handle["speed"] = np.full((8, 9, 2), 1490.0)
+    manifest = openbreastus.prepare_openbreastus(
+        root,
+        out,
+        files=["speed.mat"],
+        sample_indices=[1],
+        spacing_m=(0.001, 0.002),
+        converted_shape=(8, 9),
+        n_transducers=8,
     )
-    openbreastus.prepare_openbreastus(root, out, symlink_sources=False)
+    assert len(manifest["cases"]) == 1
+    case = read_case_hdf5(manifest["cases"][0]["path"])
+    np.testing.assert_allclose(case.ground_truth.sound_speed_mps, 1490)
+    assert case.grid.shape == (8, 9)
     assert saved.read_bytes() == b"existing user result"
 
 

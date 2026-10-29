@@ -1,20 +1,11 @@
 # Documentation
 
-User-facing documentation:
-
-- [Mathematical formulation](math_formulation.md)
-- [Usage guide](usage.md)
-- [Historical research and reconstruction panels](research_index.md)
-- [Algorithms](algorithms.md)
-- [Typed parameter contract and migrations](parameter_contract.md)
-- [Machine-readable research Agent API](agent_algorithm_api.md)
-- [Forward and adjoint contract](operator_contract.md)
-- [Truth-free evaluation and online stopping](agent_evaluation.md)
-- [Physics validation and references](physics_validation.md)
-- [Datasets](datasets.md)
-- [FWI adapter](fwi.md)
-- [Development and release checks](development.md)
-- [References](references.bib)
-
-Historical figures are in the sibling research archive. Raw datasets, generated
-runs, checkpoints and large scientific arrays remain outside Git.
+- [Usage](usage.md): installation, prepare, run, evaluate, plotting and troubleshooting.
+- [Algorithms](algorithms.md) and [mathematics](math_formulation.md): observations, unknowns and objectives.
+- [Datasets](datasets.md): explicit source, units, coordinates and conversion.
+- [Operator contract](operator_contract.md) and [Born kernel](ray_born_reference.md).
+- [Agent API](agent_algorithm_api.md) and [parameters](parameter_contract.md).
+- [Evaluation](evaluation.md) and [result lifecycle](result_lifecycle.md).
+- [WUST FWI](fwi.md): independent runtime deployment and invocation.
+- [Development](development.md), [numerical test index](physics_validation.md).
+- [References](references.bib) and [research archive](research_index.md).

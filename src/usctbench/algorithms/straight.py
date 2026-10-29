@@ -170,6 +170,9 @@ def reconstruct(case, config, algorithm):
     metrics.update(
         {
             "backend": "native_siddon_straight_ray",
+            "forward_model": "straight_ray",
+            "observation_domain": "travel_time",
+            "observation_units": "s",
             "model_parameterization": (
                 {"kind": "pixels"} if basis is None else basis.metadata()
             ),

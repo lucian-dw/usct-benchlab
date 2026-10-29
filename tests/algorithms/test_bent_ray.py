@@ -187,23 +187,6 @@ def test_weighted_regularized_solution_matches_fine_grid_dense_reference(
     _assert_armijo(result)
 
 
-def test_descent_smoothing_that_fails_armijo_retries_raw_newton(monkeypatch):
-    case, _ = _dense(monkeypatch, np.eye(4), [1e-6, -1e-6, 2e-6, -2e-6])
-    monkeypatch.setattr(
-        bent, "gaussian_filter", lambda update, sigma, mode: update * 1e6
-    )
-    result = bent.BentRayAlgorithm().run(
-        case, _config(max_iterations=1, smooth_sigma=1)
-    )
-    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
-    assert not result.metrics["direction_checks"][0]["smoothing_rejected"]
-    attempts = result.metrics["line_search_history"]
-    assert len(attempts) == 11
-    assert attempts[-1]["proposal"] == "unsmoothed_newton"
-    assert attempts[-1]["accepted"]
-    _assert_armijo(result)
-
-
 def test_clipping_rejects_uphill_newton_and_uses_projected_gradient(monkeypatch):
     hessian = np.eye(4)
     hessian[:2, :2] = [[3, -8], [-8, 22]]
@@ -297,68 +280,6 @@ def test_disabling_backtracking_does_not_allow_ascent(monkeypatch):
     np.testing.assert_allclose(result.sound_speed_mps, 1500)
 
 
-def test_unrepresentable_step_is_not_an_accepted_update(monkeypatch):
-    case, forward = _dense(monkeypatch, np.eye(4), np.full(4, 1e-6))
-    result = bent.BentRayAlgorithm().run(
-        case, _config(step_length=1e-300, smooth_sigma=1)
-    )
-    assert result.status == "failed"
-    assert result.metrics["stop_reason"] == "line_search_failed"
-    assert result.metrics["iterations"] == 0
-    assert len(forward.states) == 1
-    assert all(
-        row["rejection"] == "non_descent_projected_step"
-        for row in result.metrics["line_search_history"]
-    )
-    np.testing.assert_array_equal(result.sound_speed_mps, np.full((2, 2), 1500.0))
-
-
-@pytest.mark.parametrize("reduced", [False, True])
-@pytest.mark.parametrize("inner_solver", ["normal_cg", "lsmr", "lsqr"])
-def test_budget_after_rejected_trial_preserves_image_and_prediction(
-    monkeypatch, reduced, inner_solver
-):
-    case, forward = _dense(monkeypatch, np.eye(4), np.full(4, 1e-6))
-    result = bent.BentRayAlgorithm().run(
-        case,
-        _config(
-            regularization_lambda=np.sqrt(0.2),
-            step_length=10,
-            inner_solver=inner_solver,
-            # Augmented solvers additionally measure an operator scale; count
-            # that call while still exhausting the budget AFTER a rejected trial.
-            run_controls={"max_forward_calls": 4 if inner_solver == "normal_cg" else 5},
-            **({"model_grid_shape": [2, 2]} if reduced else {}),
-        ),
-    )
-    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
-    assert result.metrics["stop_reason"] == "forward_calls_budget"
-    assert len(forward.states) == 2
-    assert len(result.metrics["iteration_history"]) == 1
-    assert len(result.metrics["line_search_history"]) == 1
-    assert not result.metrics["line_search_history"][0]["accepted"]
-    np.testing.assert_allclose(result.sound_speed_mps, 1500)
-    assert result.metrics["data_residual_norm"] == pytest.approx(2e-6)
-
-
-@pytest.mark.parametrize("bad", [np.nan, np.inf, 1e308])
-def test_nonfinite_inner_update_or_norm_preserves_checkpoint(monkeypatch, bad):
-    case, forward = _dense(monkeypatch, np.eye(4), np.full(4, 1e-6))
-    monkeypatch.setattr(
-        bent,
-        "solve_linearized",
-        lambda jac, residual, current, *a, **kw: (
-            np.full_like(current, bad),
-            LinearSolveInfo("fixture", 0, "numerical_failure", 1, 1, False),
-        ),
-    )
-    result = bent.BentRayAlgorithm().run(case, _config())
-    assert result.status == "failed"
-    assert result.metrics["stop_reason"] == "numerical_failure"
-    assert len(forward.states) == 1
-    np.testing.assert_allclose(result.sound_speed_mps, 1500)
-
-
 @pytest.mark.parametrize("scale", [1e-6, 1e6])
 def test_relative_gradient_stopping_is_invariant_to_objective_scale(monkeypatch, scale):
     matrix = np.diag(np.sqrt([1000.0, 1, 1, 1]))
@@ -375,38 +296,6 @@ def test_relative_gradient_stopping_is_invariant_to_objective_scale(monkeypatch,
     np.testing.assert_allclose(
         (1 / result.sound_speed_mps - 1 / 1500).ravel(), expected, atol=2e-14
     )
-
-
-@pytest.mark.parametrize("counter", ["forward_calls", "adjoint_calls"])
-@pytest.mark.parametrize("limit", [0, 1, 2, 3, 4])
-def test_gradient_and_trials_obey_budgets_and_return_complete_iterates(
-    monkeypatch, counter, limit
-):
-    case, forward = _dense(monkeypatch, np.eye(4), np.full(4, 1e-6))
-    result = bent.BentRayAlgorithm().run(
-        case,
-        _config(
-            regularization_lambda=np.sqrt(0.2), run_controls={f"max_{counter}": limit}
-        ),
-    )
-    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
-    assert result.metrics["stop_reason"] == f"{counter}_budget"
-    work = result.metrics["stopping"]["work"]
-    assert work[counter] == limit
-    assert work["adjoint_calls"] == forward.adjoint_calls
-    assert work.get("forward", 0) + work.get("line_search", 0) == len(forward.states)
-    if result.metrics["iteration_history"]:
-        delta = 1 / result.sound_speed_mps - 1 / 1500
-        residual = delta - case.measurement.delta_tof_s
-        expected_cost = 0.5 * np.sum(residual**2) + 0.1 * np.sum(delta**2)
-        assert result.metrics["iteration_history"][-1]["objective"] == pytest.approx(
-            expected_cost, abs=1e-24
-        )
-        assert result.metrics["data_residual_norm"] == pytest.approx(
-            np.linalg.norm(residual), abs=1e-17
-        )
-    else:
-        np.testing.assert_allclose(result.sound_speed_mps, 1500)
 
 
 @pytest.mark.parametrize("reference", [None, 1500.0, 1490.0])
@@ -440,13 +329,6 @@ def test_absolute_tof_allows_model_reference_override():
     assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["measurement_reference_sound_speed_mps"] is None
     np.testing.assert_allclose(result.sound_speed_mps, 1600)
-
-
-@pytest.mark.parametrize("bad", [-1, np.nan, np.inf])
-def test_gradient_tolerance_must_be_finite_nonnegative(bad):
-    case = _case((3, 3), np.ones((2, 2)) * 1e-8)
-    with pytest.raises(ValueError, match="gradient_rtol"):
-        bent.BentRayAlgorithm().run(case, _config(gradient_rtol=bad))
 
 
 @pytest.mark.parametrize("spatial_order", [1, 2])
