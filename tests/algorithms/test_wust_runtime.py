@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from usctbench.algorithms.fwi.parameters import WUSTParameters
+from usctbench.core.execution import Deployment
 from usctbench.algorithms.fwi.runtime import (
     Deadline,
     RuntimeFailure,
@@ -26,9 +26,7 @@ def capabilities():
 @pytest.fixture
 def client(tmp_path):
     (tmp_path / "Runtime/python").mkdir(parents=True)
-    return WUSTClient(
-        WUSTParameters(runtime_root=str(tmp_path)), Deadline(10), tmp_path
-    )
+    return WUSTClient(Deployment(runtime_root=str(tmp_path)), Deadline(10), tmp_path)
 
 
 @pytest.mark.parametrize(

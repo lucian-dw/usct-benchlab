@@ -39,24 +39,24 @@ def small_case(physics):
 
 @pytest.mark.parametrize("mode", ["fixed_background", "nonlinear"])
 def test_born_zero_cache_preserves_reconstruction(mode):
-    from usctbench.algorithms.configuration import validate_algorithm_config
+    from usctbench.core.config import prepare_config
 
     case = small_case("born")
     parameters = {
-        "mode": mode,
-        "green_backend": "volume_integral",
+        "variant": (
+            "full_green_fixed" if mode == "fixed_background" else "full_green_nonlinear"
+        ),
         "green_solver_rtol": 1e-7,
-        "iterations": 2,
     }
-    if mode == "fixed_background":
-        parameters.pop("iterations")
-        parameters.update(inner_iterations=2, stopping={"max_iterations": 2})
-    config = AlgorithmConfig(parameters=parameters)
+    config = AlgorithmConfig(parameters=parameters, run_controls={"max_iterations": 2})
     cached = RWaveAdapter().run(case, config)
-    uncached_config = AlgorithmConfig(parameters={**parameters, "max_cache_bytes": 0})
+    uncached_config = AlgorithmConfig(
+        parameters={**parameters, "max_cache_bytes": 0},
+        run_controls={"max_iterations": 2},
+    )
     uncached = RWaveAdapter().run(case, uncached_config)
     repeated = RWaveAdapter().run(
-        case, validate_algorithm_config("rwave_adapter", uncached_config)
+        case, prepare_config("rwave_adapter", uncached_config)
     )
     assert cached.status == uncached.status == repeated.status == "success"
     np.testing.assert_allclose(
@@ -74,21 +74,20 @@ def test_native_inversions_reduce_residual_and_need_no_truth(physics, algorithm)
     config = AlgorithmConfig(
         parameters={
             **(
-                {"mode": "fixed_background"}
+                {"variant": "wkb_fixed"}
                 if physics == "born"
                 else {"inner_iterations": 5}
             ),
-            "iterations": 5,
-            "regularization_lambda": 3e-5,
-            "evaluation": {"receiver_indices": [1]},
-            "stopping": {"update_rtol": None, "objective_rtol": None},
-        }
+            "regularization_lambda": 3e-05,
+        },
+        run_controls={"max_iterations": 5, "update_rtol": None, "objective_rtol": None},
+        evaluation={"receiver_indices": [1]},
     )
     result = algorithm().run(case, config)
     assert result.status == "success", result.failure_reason
     assert result.metrics["data_residual_reduction"] > 0.5
     assert result.metrics["evaluation"]["receiver"]["num_samples"] > 0
-    assert result.metrics["stopping"]["ground_truth_used_for_stopping"] is False
+    assert "target_rmse_mps" not in result.metrics["stopping"]["resolved_policy"]
     assert "rmse" not in result.metrics
     assert result.metrics["stopping"]["work"]["adjoint_calls"] > 0
     stop = result.metrics["stopping"]
@@ -115,18 +114,18 @@ def test_heldout_values_do_not_change_training_trajectory(physics, algorithm):
     config = AlgorithmConfig(
         parameters={
             **(
-                {"mode": "fixed_background"}
+                {"variant": "wkb_fixed"}
                 if physics == "born"
                 else {"inner_iterations": 3}
-            ),
-            "iterations": 2,
-            "evaluation": {"receiver_indices": [1]},
-            "stopping": {
-                "restore_best_validation": False,
-                "update_rtol": None,
-                "objective_rtol": None,
-            },
-        }
+            )
+        },
+        run_controls={
+            "max_iterations": 2,
+            "restore_best_validation": False,
+            "update_rtol": None,
+            "objective_rtol": None,
+        },
+        evaluation={"receiver_indices": [1]},
     )
     a, b = algorithm().run(case, config), algorithm().run(altered, config)
     assert a.status == b.status == "success"
@@ -141,7 +140,7 @@ def test_heldout_values_do_not_change_training_trajectory(physics, algorithm):
 def test_zero_budget_returns_initial_checkpoint_with_reason(physics, algorithm):
     case = small_case(physics)
     result = algorithm().run(
-        case, AlgorithmConfig(parameters={"stopping": {"max_forward_calls": 0}})
+        case, AlgorithmConfig(parameters={}, run_controls={"max_forward_calls": 0})
     )
     assert result.status == "success", result.failure_reason
     assert result.metrics["stop_reason"] == "forward_calls_budget"
@@ -154,12 +153,9 @@ def test_frequency_holdout_does_not_train_or_leak_reciprocal_receiver():
     result = RWaveAdapter().run(
         case,
         AlgorithmConfig(
-            parameters={
-                # Match the fixed-background Born generator in this split test.
-                "mode": "fixed_background",
-                "iterations": 4,
-                "evaluation": {"frequency_indices": [2], "receiver_indices": [1]},
-            }
+            parameters={"variant": "wkb_fixed"},
+            run_controls={"max_iterations": 4},
+            evaluation={"frequency_indices": [2], "receiver_indices": [1]},
         ),
     )
     assert result.status == "success", result.failure_reason
@@ -172,12 +168,9 @@ def test_approximate_wkb_failure_is_not_a_successful_inverse_solve():
     result = RWaveAdapter().run(
         small_case("born"),
         AlgorithmConfig(
-            parameters={
-                "mode": "nonlinear",
-                "green_backend": "eikonal_wkb",
-                "iterations": 4,
-                "evaluation": {"frequency_indices": [2], "receiver_indices": [1]},
-            }
+            parameters={"variant": "wkb_nonlinear"},
+            run_controls={"max_iterations": 4},
+            evaluation={"frequency_indices": [2], "receiver_indices": [1]},
         ),
     )
     assert (
@@ -198,16 +191,16 @@ def test_bent_cgls_initialization_does_not_use_heldout_data():
         parameters={
             "initialization": "cgls",
             "initialization_iterations": 10,
-            "iterations": 2,
             "inner_iterations": 4,
             "smooth_sigma": 0.4,
-            "evaluation": {"receiver_indices": [1]},
-            "stopping": {
-                "restore_best_validation": False,
-                "objective_rtol": None,
-                "update_rtol": None,
-            },
-        }
+        },
+        run_controls={
+            "max_iterations": 2,
+            "restore_best_validation": False,
+            "objective_rtol": None,
+            "update_rtol": None,
+        },
+        evaluation={"receiver_indices": [1]},
     )
     a, b = [BentRayGNAdapter().run(c, config) for c in (case, altered)]
     assert a.status == b.status == "success", a.failure_reason

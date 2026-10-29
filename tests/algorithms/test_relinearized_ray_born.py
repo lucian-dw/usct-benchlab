@@ -32,21 +32,16 @@ def nonlinear_case():
     return case, forward, linearization
 
 
-def config(**extra):
+def config(*, max_iterations=3, run_controls=None, evaluation=None, **parameters):
     return AlgorithmConfig(
         parameters={
-            "mode": "nonlinear",
-            "outer_iterations": 3,
+            "variant": "wkb_nonlinear",
             "inner_iterations": 4,
             "smooth_sigma": 0.6,
-            "evaluation": {"receiver_indices": [1]},
-            "stopping": {
-                "restore_best_validation": False,
-                "update_rtol": None,
-                "objective_rtol": None,
-            },
-            **extra,
-        }
+            **parameters,
+        },
+        run_controls={"max_iterations": max_iterations, **(run_controls or {})},
+        evaluation={"receiver_indices": [1]} if evaluation is None else evaluation,
     )
 
 
@@ -69,8 +64,8 @@ def test_nonlinear_holdout_is_not_used_for_updates_or_line_search():
     case, _, _ = nonlinear_case()
     changed = case.model_copy(deep=True)
     changed.measurement.freq_data[..., 1] *= 15j
-    original = RWaveAdapter().run(case, config(outer_iterations=1))
-    altered = RWaveAdapter().run(changed, config(outer_iterations=1))
+    original = RWaveAdapter().run(case, config(max_iterations=1))
+    altered = RWaveAdapter().run(changed, config(max_iterations=1))
     assert original.status == altered.status == "success"
     np.testing.assert_array_equal(original.sound_speed_mps, altered.sound_speed_mps)
     assert (
@@ -116,10 +111,9 @@ def test_source_is_required_and_complex_source_roundtrips(tmp_path):
 )
 def test_source_broadcast_matches_explicit_frequency_tx_calibration(source):
     case, _, _ = nonlinear_case()
-    expected = RWaveAdapter().run(case, config(outer_iterations=1))
-    result = RWaveAdapter().run(
-        case, config(outer_iterations=1, source_spectrum=source)
-    )
+    expected = RWaveAdapter().run(case, config(max_iterations=1))
+    case.measurement.source_spectrum = np.asarray(source)
+    result = RWaveAdapter().run(case, config(max_iterations=1))
     assert result.status == expected.status == "success"
     np.testing.assert_array_equal(result.sound_speed_mps, expected.sound_speed_mps)
 
@@ -130,7 +124,7 @@ def test_relative_regularization_is_invariant_to_pressure_units():
     other.measurement.freq_data *= 1e-6
     other.measurement.source_spectrum *= 1e-6
     cfg = config(
-        outer_iterations=1,
+        max_iterations=1,
         regularization_scaling="relative_jacobian_diagonal",
         regularization_lambda=0.2,
         regularization="laplacian",
@@ -190,13 +184,13 @@ def test_phase_seed_and_pressure_updates_exclude_heldout_frequency():
     changed = case.model_copy(deep=True)
     changed.measurement.freq_data[-1] *= 30j
     cfg = config(
-        outer_iterations=1,
+        max_iterations=1,
         initialization="phase_cgls",
         initialization_iterations=8,
         initialization_smooth_mm=0.3,
-        green_backend="volume_integral",
+        variant="full_green_nonlinear",
         evaluation={"frequency_indices": [3], "receiver_indices": [1]},
-        stopping={
+        run_controls={
             "restore_best_validation": False,
             "update_rtol": None,
             "objective_rtol": None,
@@ -211,7 +205,9 @@ def test_phase_seed_and_pressure_updates_exclude_heldout_frequency():
 @pytest.mark.parametrize("budget", [0, 1, 2])
 def test_nonlinear_budget_returns_a_complete_checkpoint(budget):
     case, _, _ = nonlinear_case()
-    result = RWaveAdapter().run(case, config(stopping={"max_forward_calls": budget}))
+    result = RWaveAdapter().run(
+        case, config(run_controls={"max_forward_calls": budget})
+    )
     assert result.status == "success", result.failure_reason
     assert result.metrics["stop_reason"] == "forward_calls_budget"
     assert result.metrics["stopping"]["work"]["forward_calls"] == budget
@@ -226,16 +222,15 @@ def test_nonlinear_budget_returns_a_complete_checkpoint(budget):
         {"initialization_iterations": True},
         {"initialization_lambda": float("nan")},
         {"initialization_smooth_mm": -1},
-        {"mode": "fixed_background", "initialization": "phase_cgls"},
+        {"variant": "wkb_fixed", "initialization": "phase_cgls"},
     ],
 )
 def test_invalid_initialization_settings_fail_explicitly(settings):
     case, _, _ = nonlinear_case()
     candidate = config(**settings)
-    if settings.get("mode") == "fixed_background":
+    if settings.get("variant") == "wkb_fixed":
         # Keep this an initialization rejection test, not an unrelated budget
         # rejection now that variant-specific unused fields fail closed.
         candidate = AlgorithmConfig(parameters=settings)
-    result = RWaveAdapter().run(case, candidate)
-    assert result.status == "failed"
-    assert "initialization" in result.failure_reason
+    with pytest.raises(ValueError, match="initialization"):
+        RWaveAdapter().run(case, candidate)

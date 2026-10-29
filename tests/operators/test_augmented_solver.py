@@ -5,7 +5,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from usctbench.core.stopping import BudgetExhausted, StopPolicy, WorkLedger
+from usctbench.core.stopping import BudgetExhausted, WorkLedger
+from usctbench.core.run_controls import RunControls
 from usctbench.solvers.least_squares import normal_step
 
 
@@ -47,7 +48,7 @@ def method(request):
 
 
 def controls(precision, *, policy=None, clock=None):
-    work = WorkLedger(policy or StopPolicy(), **({"clock": clock} if clock else {}))
+    work = WorkLedger(policy or RunControls(), **({"clock": clock} if clock else {}))
     return SimpleNamespace(
         observed=np.zeros(np.shape(precision)),
         precision=np.asarray(precision),
@@ -649,7 +650,7 @@ def test_operator_budgets_include_preconditioner_setup(
 ):
     rng = np.random.default_rng(8101)
     jacobian = DenseJacobian(rng.normal(size=(30, 16)), (4, 4))
-    control = controls(np.ones(30), policy=StopPolicy(**{f"max_{counter}": limit}))
+    control = controls(np.ones(30), policy=RunControls(**{f"max_{counter}": limit}))
     current = rng.normal(size=(4, 4))
     original = current.copy()
     with pytest.raises(BudgetExhausted, match=f"{counter}_budget"):
@@ -681,7 +682,7 @@ def test_operator_budgets_include_preconditioner_setup(
 )
 def test_elapsed_budget_is_checked_before_operator_work(method, preconditioner):
     control = controls(
-        np.ones(4), policy=StopPolicy(max_elapsed_s=1), clock=lambda: 0.0
+        np.ones(4), policy=RunControls(max_elapsed_s=1), clock=lambda: 0.0
     )
     control.work.clock = lambda: 1.0
     jacobian = DenseJacobian(np.eye(4), (2, 2))

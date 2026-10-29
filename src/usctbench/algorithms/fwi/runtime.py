@@ -32,13 +32,15 @@ class Deadline:
 
 
 class WUSTClient:
-    def __init__(self, parameters, deadline, folder):
-        self.parameters = parameters
+    def __init__(self, deployment, deadline, folder):
+        self.deployment = deployment
         self.deadline = deadline
         self.folder = Path(folder)
-        root = parameters.runtime_root or os.environ.get("USCT_WUST_ROOT")
+        root = deployment.runtime_root
         if not root:
-            raise RuntimeFailure("incompatible_runtime", "Set USCT_WUST_ROOT")
+            raise RuntimeFailure(
+                "incompatible_runtime", "Provide deployment.runtime_root"
+            )
         self.root = Path(root).resolve(strict=True)
         self.launcher = self.root / "Runtime/python/wust_runtime.py"
         self.counter = 0
@@ -47,8 +49,8 @@ class WUSTClient:
         self.counter += 1
         log = self.folder / f"runtime-{self.counter}.stderr.log"
         env = os.environ.copy()
-        if self.parameters.cuda_visible_devices is not None:
-            env["CUDA_VISIBLE_DEVICES"] = self.parameters.cuda_visible_devices
+        if self.deployment.cuda_visible_devices is not None:
+            env["CUDA_VISIBLE_DEVICES"] = self.deployment.cuda_visible_devices
         cmd = [sys.executable, str(self.launcher), *arguments]
         remaining = self.deadline.remaining()
         handlers = {}
@@ -126,7 +128,7 @@ class WUSTClient:
             or "reconstruct" not in info.get("operations", [])
             or "wust.frequency_input"
             not in info.get("input_schemas", {}).get("reconstruct", [])
-            or self.parameters.backend not in info.get("profiles", {})
+            or self.deployment.backend not in info.get("profiles", {})
         ):
             raise RuntimeFailure(
                 "incompatible_runtime", "WUST v2 reconstruction capability required"
@@ -141,7 +143,7 @@ class WUSTClient:
                 "run",
                 str(path),
                 "--matlab",
-                self.parameters.matlab_executable,
+                self.deployment.matlab_executable,
                 "--timeout-s",
                 str(self.deadline.remaining()),
             ]

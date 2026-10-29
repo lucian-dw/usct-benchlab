@@ -7,38 +7,18 @@ Static schemas contain no case data or deployment-specific paths.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
+from functools import cached_property
 import json
-import re
 
-from pydantic import ConfigDict, create_model
 
-from usctbench.algorithms.configuration import (
+from usctbench.core.config import (
     default_iterations,
     parameter_model,
-    validate_algorithm_config,
+    prepare_config,
 )
-from usctbench.core.run_controls import BudgetCaps, RunControls
+from usctbench.core.run_controls import BUDGET_FIELDS, RunControls
 from usctbench.core.schema import AlgorithmConfig
-from usctbench.core.stopping import StopPolicy
-
-BUDGET_FIELDS = (
-    "max_iterations",
-    "max_elapsed_s",
-    "max_forward_calls",
-    "max_adjoint_calls",
-)
-AgentRunControls = create_model(
-    "AgentRunControls",
-    __config__=ConfigDict(extra="forbid", allow_inf_nan=False),
-    **{
-        name: (
-            RunControls.model_fields[name].annotation,
-            RunControls.model_fields[name],
-        )
-        for name in BUDGET_FIELDS
-    },
-)
 
 
 @dataclass(frozen=True)
@@ -76,7 +56,13 @@ class AlgorithmSpecification:
         raise ValueError(f"unknown variant {variant_id!r} for {self.algorithm_id}")
 
     def describe(self, variant_id=None):
-        v = self.variant(variant_id)
+        return deepcopy(self.descriptions[self.variant(variant_id).id])
+
+    @cached_property
+    def descriptions(self):
+        return {v.id: self._describe(v) for v in self.variants}
+
+    def _describe(self, v):
         model = parameter_model(self.algorithm_id, v.selectors)
         schema, defaults = agent_schema(model, v.selectors, enabled=v.agent_parameters)
         description = {
@@ -106,11 +92,9 @@ class AlgorithmSpecification:
                 ),
                 "online_controls_supported": v.online_controls,
                 "run_controls_schema": (
-                    AgentRunControls.model_json_schema() if v.online_controls else None
+                    budget_schema(v) if v.online_controls else None
                 ),
-                "budget_caps_schema": (
-                    BudgetCaps.model_json_schema() if v.online_controls else None
-                ),
+                "host_limits_schema": (budget_schema(v) if v.online_controls else None),
                 "deadline_semantics": (
                     "cooperative; launching process must enforce a hard deadline"
                     if v.online_controls
@@ -128,7 +112,7 @@ class AlgorithmSpecification:
             "deterministic_status": v.deterministic,
         }
         if self.algorithm_id == "fwi_wust":
-            for key in ("run_controls_schema", "budget_caps_schema"):
+            for key in ("run_controls_schema", "host_limits_schema"):
                 properties = description["compute_budget"][key]["properties"]
                 for unsupported in ("max_forward_calls", "max_adjoint_calls"):
                     properties.pop(unsupported, None)
@@ -207,7 +191,7 @@ def _born_variant(identifier, mode, backend):
             if backend == "volume_integral"
             else "eikonal_wkb_ray_born"
         ),
-        selectors={"mode": mode, "green_backend": backend},
+        selectors={"variant": identifier},
         observation_domains=("frequency",),
         required_observations=("freq_data", "frequencies_hz"),
         observation_alternatives=(("source_spectrum",), ("water_reference",)),
@@ -340,68 +324,53 @@ SPECS = {
 }
 
 
+def budget_schema(variant):
+    schema = RunControls.model_json_schema()
+    allowed = (
+        BUDGET_FIELDS if variant.id != "wust" else ("max_iterations", "max_elapsed_s")
+    )
+    schema["properties"] = {
+        k: v for k, v in schema["properties"].items() if k in allowed
+    }
+    return schema
+
+
 def make_agent_config(
     algorithm_id,
     parameters=None,
     *,
     variant=None,
     run_controls=None,
-    budget_caps=None,
+    host_limits=None,
     trusted_parameters=None,
+    deployment=None,
+    case=None,
 ):
-    """Backend-enforced Agent boundary; trusted_parameters are deployment-owned.
-
-    Never fill trusted_parameters from Agent output. They supply approved runtime
-    artifacts/executables separately from autonomous numerical choices.
-    """
-    spec = SPECS[algorithm_id]
-    selected = spec.variant(variant)
-    description = spec.describe(selected.id)
+    """Only declared Agent knobs plus independent host-supplied context."""
+    selected = SPECS[algorithm_id].variant(variant)
+    description = SPECS[algorithm_id].describe(selected.id)
     supplied = dict(parameters or {})
-    if algorithm_id == "fwi_wust" and supplied.get("initialization") == "map":
-        raise ValueError(
-            "Map initialization is expert-only; no Agent artifact resolver exists yet"
-        )
     forbidden = supplied.keys() - set(description["allowed_parameters"])
     if forbidden:
         raise ValueError(f"parameters not exposed to Agent: {sorted(forbidden)}")
-    model = parameter_model(algorithm_id, selected.selectors)
-    agent_model = create_model(
-        f"{model.__name__}AgentInput",
-        __config__=ConfigDict(extra="forbid", allow_inf_nan=False),
-        **{
-            key: (model.model_fields[key].annotation, model.model_fields[key])
-            for key in description["allowed_parameters"]
-        },
-    )
-    # Validate JSON types/enums without expert-only alias normalization. Cross-field
-    # physical checks still run in the full model at the common boundary below.
-    supplied = agent_model.model_validate_json(
-        json.dumps(supplied, allow_nan=False), strict=True
-    ).model_dump(exclude_unset=True)
+    if algorithm_id == "fwi_wust" and supplied.get("initialization") == "map":
+        raise ValueError("Map initialization is expert-only")
     values = {**(trusted_parameters or {}), **supplied}
     for key, value in selected.selectors.items():
         if key in values and values[key] != value:
             raise ValueError(f"parameter {key} conflicts with selected variant")
         values[key] = value
-    if not selected.online_controls and (
-        run_controls is not None or budget_caps is not None
-    ):
-        raise ValueError("selected variant does not enforce online run controls")
-    return validate_algorithm_config(
+    controls = dict(run_controls or {})
+    if controls.keys() - budget_schema(selected)["properties"].keys():
+        raise ValueError("unsupported Agent run control")
+    model = parameter_model(algorithm_id, values)
+    typed = model.model_validate_json(json.dumps(values, allow_nan=False), strict=True)
+    return prepare_config(
         algorithm_id,
-        AlgorithmConfig(
-            name=algorithm_id,
-            parameters=values,
-            run_controls=(
-                RunControls.model_validate(
-                    AgentRunControls.model_validate(run_controls or {}).model_dump()
-                )
-                if selected.online_controls
-                else None
-            ),
-            budget_caps=budget_caps,
-        ),
+        AlgorithmConfig(name=algorithm_id, parameters=typed, run_controls=controls),
+        case=case,
+        host_limits=host_limits,
+        deployment=deployment,
     )
 
 
@@ -412,52 +381,19 @@ def case_capabilities(
     variant=None,
     config=None,
     runtime_available=None,
-    initialization_artifact_ids=(),
 ):
-    """Case facts, not a clinical/physical validity certificate or static schema."""
-    spec = SPECS[algorithm_id]
-    selected = spec.variant(variant)
-    resolved = validate_algorithm_config(
+    """Case facts are separate from static specifications and clinical validity."""
+    selected = SPECS[algorithm_id].variant(variant)
+    resolved = prepare_config(
         algorithm_id,
         config or AlgorithmConfig(name=algorithm_id, parameters=selected.selectors),
+        case=case,
     )
     for key, value in selected.selectors.items():
-        if resolved.parameters.get(key) != value:
+        if getattr(resolved.parameters, key) != value:
             raise ValueError("case-bound config does not match requested variant")
-    ids = list(initialization_artifact_ids)
-    if any(not re.fullmatch(r"[A-Za-z0-9_.-]+", value) for value in ids):
-        raise ValueError(
-            "initialization artifacts must be approved opaque ids, not paths"
-        )
-    measurement = case.measurement
-    frequencies = measurement.frequencies_hz
-    controls = None
-    policy = None
-    if algorithm_id == "fwi_wust":
-        schedule = resolved.parameters.get("frequency_schedule_hz")
-        count = len(
-            ([] if frequencies is None else frequencies)
-            if schedule is None
-            else schedule
-        )
-        policy = (
-            (resolved.run_controls or RunControls())
-            .capped(resolved.budget_caps, default_iterations=count)
-            .model_dump()
-        )
-        policy["max_iterations"] = min(count, policy["max_iterations"])
-        controls = {key: policy[key] for key in BUDGET_FIELDS}
-    elif selected.online_controls:
-        policy = (
-            (resolved.run_controls or RunControls()).to_stop_policy(
-                default_iterations=resolved.parameters["iterations"],
-                budget=resolved.budget_caps,
-            )
-            if resolved.run_controls is not None or resolved.budget_caps is not None
-            else StopPolicy.from_parameters(resolved.parameters)
-        )
-        policy = asdict(policy)
-        controls = {key: policy[key] for key in BUDGET_FIELDS}
+    frequencies = case.measurement.frequencies_hz
+    policy = resolved.run_controls.model_dump()
     return {
         "schema_version": "usct.case_capabilities.v1",
         "algorithm_id": algorithm_id,
@@ -465,22 +401,15 @@ def case_capabilities(
         "case_id": case.case_id,
         "available_frequencies_hz": [] if frequencies is None else frequencies.tolist(),
         "calibration_availability": {
-            "source_spectrum_present": measurement.source_spectrum is not None,
-            "water_reference_present": measurement.water_reference is not None,
-            "discrete_source_spectrum_present": "discrete_source_spectrum"
-            in resolved.parameters,
-            "meaning": "presence only; operator-specific units/convention checks still required",
+            "source_spectrum_present": case.measurement.source_spectrum is not None,
+            "water_reference_present": case.measurement.water_reference is not None,
+            "meaning": "presence only; operator-specific units/conventions still apply",
         },
         "runtime_available": runtime_available,
-        "production_runtime_available": (
-            None if algorithm_id == "fwi_wust" else runtime_available
-        ),
         "runtime_availability_source": (
             "not_checked" if runtime_available is None else "deployment_reported"
         ),
-        "compatible_initialization_artifact_ids": ids,
-        "initialization_compatibility_source": "deployment_verified_allowlist",
-        "resolved_budgets": controls,
+        "resolved_budgets": {key: policy[key] for key in BUDGET_FIELDS},
         "resolved_run_policy": policy,
         "validation_is_independent_test": False,
     }

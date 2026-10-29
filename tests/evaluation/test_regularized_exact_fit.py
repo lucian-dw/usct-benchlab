@@ -22,6 +22,8 @@ class Identity:
 
 
 def test_exact_data_fit_does_not_bypass_regularizer():
+    from usctbench.algorithms.parameters import CGLSParameters
+
     # min 1/2 ||x-1||^2 + 1/2 ||x||^2 has x*=1/2, not x=1.
     case = USCTCase(
         case_id="regularized_exact_fit",
@@ -32,14 +34,13 @@ def test_exact_data_fit_does_not_bypass_regularizer():
     control = InversionControl(
         case,
         AlgorithmConfig(
-            parameters={
-                "stopping": {
-                    "max_iterations": 4,
-                    "objective_rtol": None,
-                    "update_rtol": None,
-                    "restore_best_validation": False,
-                }
-            }
+            parameters=CGLSParameters(),
+            run_controls={
+                "max_iterations": 4,
+                "objective_rtol": None,
+                "update_rtol": None,
+                "restore_best_validation": False,
+            },
         ),
         np.ones((2, 2)),
         default_iterations=4,

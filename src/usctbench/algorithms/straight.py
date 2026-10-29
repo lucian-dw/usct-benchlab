@@ -5,11 +5,10 @@ from __future__ import annotations
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from usctbench.algorithms._control import InversionControl, add_image_metrics
+from usctbench.algorithms._control import InversionControl
 from usctbench.algorithms.ray import (
     configured_ray_weights,
     coverage_preconditioner,
-    image_diagnostic_metrics,
     ray_weight_metrics,
     reference_sound_speed,
     speed_bounds,
@@ -29,7 +28,7 @@ from usctbench.solvers.row_action import row_action
 
 def reconstruct(case, config, algorithm):
     projector = StraightRayProjector.from_case(
-        case, backend=config.parameters.get("projector_backend", "csr")
+        case, backend=config.parameters.projector_backend
     )
     target, mask = target_delta_tof(case, projector)
     weights = configured_ray_weights(case, projector, mask, config)
@@ -45,7 +44,7 @@ def reconstruct(case, config, algorithm):
     if not low <= c0 <= high:
         raise ValueError("reference sound speed must lie within sound_speed_bounds_mps")
     is_cg = algorithm == "straight_cgls"
-    lambda_value = float(p.get("lambda", p.get("regularization_lambda", 0)))
+    lambda_value = p.regularization_lambda if is_cg else 0.0
     control = InversionControl(
         case,
         config,
@@ -57,20 +56,18 @@ def reconstruct(case, config, algorithm):
         valid_mask=mask.reshape(projector.ray_shape),
         iteration_unit="cgls_step" if is_cg else "full_sweep",
     )
-    roi_only = coerce_bool(p.get("roi_update_only", False))
-    roi_laplacian = coerce_bool(
-        p.get("roi_laplacian", p.get("roi_aware_laplacian", False))
-    )
+    roi_only = coerce_bool(p.roi_update_only)
+    roi_laplacian = p.roi_laplacian if is_cg else False
     roi = case.grid.roi_mask if roi_only else None
     basis = None
     solver_operator = projector
-    kind = str(p.get("regularization", "identity"))
+    kind = p.regularization if is_cg else "identity"
     solver_kind = kind
     model_shape = case.grid.shape
-    if p.get("model_grid_shape") is not None:
+    if p.model_grid_shape is not None:
         if roi is not None or (roi_laplacian and case.grid.roi_mask is not None):
             raise ValueError("reduced model currently requires no inversion ROI")
-        basis = BilinearBasis(case.grid, p["model_grid_shape"])
+        basis = BilinearBasis(case.grid, p.model_grid_shape)
         model_shape = basis.shape
         solver_operator = ReducedLinearOperator(projector, basis)
         solver_kind = FineGridRegularizer(basis, kind)
@@ -91,7 +88,7 @@ def reconstruct(case, config, algorithm):
         fine = x if basis is None else basis.forward(x)
         return 1.0 / (1.0 / c0 + fine)
 
-    use_preconditioning = coerce_bool(p.get("coverage_preconditioning", False))
+    use_preconditioning = p.coverage_preconditioning if is_cg else False
     preconditioner, coverage = None, None
     # Coverage construction is a real adjoint application and is budgeted.
     # It cannot consume held-out receiver values or exceed the adjoint budget.
@@ -108,13 +105,13 @@ def reconstruct(case, config, algorithm):
                 control.split.train.ravel(),
                 control.split.weights.ravel(),
                 roi_mask=roi,
-                eps=float(p.get("coverage_preconditioner_eps", 1e-12)),
-                max_scale=float(p.get("coverage_preconditioner_max_scale", 10)),
-                normalize=coerce_bool(p.get("coverage_preconditioner_normalize", True)),
+                eps=float(p.coverage_preconditioner_eps),
+                max_scale=float(p.coverage_preconditioner_max_scale),
+                normalize=coerce_bool(p.coverage_preconditioner_normalize),
             )
         except BudgetExhausted as exc:
             control.monitor.finish(exc.reason)
-    robust_loss = str(p.get("robust_loss", "none")).lower()
+    robust_loss = p.robust_loss if is_cg else "none"
     if robust_loss not in {"none", "huber", "irls", "huber_irls"}:
         raise ValueError("robust_loss must be none or huber/irls/huber_irls")
     if not is_cg and robust_loss != "none":
@@ -129,20 +126,18 @@ def reconstruct(case, config, algorithm):
             reference=s0,
             project=project,
             to_image=to_speed,
-            damping=float(p.get("damping", lambda_value**2)),
+            damping=lambda_value**2,
             regularization=solver_kind,
             roi=roi,
             regularization_roi=case.grid.roi_mask if roi_laplacian else None,
             preconditioner=preconditioner,
-            huber_delta=(
-                float(p.get("huber_delta_s", 5e-7)) if robust_loss != "none" else None
-            ),
-            irls_stages=p.get("irls_iterations", 3) if robust_loss != "none" else 1,
-            optimality_rtol=float(p.get("gradient_rtol", 1e-10)),
+            huber_delta=(float(p.huber_delta_s) if robust_loss != "none" else None),
+            irls_stages=p.irls_iterations if robust_loss != "none" else 1,
+            optimality_rtol=float(p.gradient_rtol),
         )
     else:
-        sigma = float(p.get("smooth_sigma", 0))
-        every = int(p.get("smooth_every", 0))
+        sigma = float(p.smooth_sigma)
+        every = int(p.smooth_every)
         if not np.isfinite(sigma) or sigma < 0 or every < 0:
             raise ValueError("smoothing parameters must be nonnegative and finite")
 
@@ -166,10 +161,8 @@ def reconstruct(case, config, algorithm):
             reference=s0,
             project=project,
             to_image=to_speed,
-            relaxation=float(
-                p.get("relaxation", 0.2 if algorithm == "straight_sart" else 0.3)
-            ),
-            subsets=p.get("subsets", 8) if algorithm == "straight_sart" else 1,
+            relaxation=float(p.relaxation),
+            subsets=p.subsets if algorithm == "straight_sart" else 1,
             postprocess=smooth,
         )
     sound_speed = to_speed(state)
@@ -202,41 +195,21 @@ def reconstruct(case, config, algorithm):
     if is_cg:
         metrics.update(
             {
-                "regularization": str(p.get("regularization", "identity")),
-                "regularization_lambda": float(
-                    p.get("lambda", p.get("regularization_lambda", 0))
-                ),
-                "regularization_lambda_squared": float(
-                    p.get("damping", lambda_value**2)
-                ),
+                "regularization": str(p.regularization),
+                "regularization_lambda": p.regularization_lambda,
+                "regularization_lambda_squared": lambda_value**2,
             }
         )
     else:
         metrics.update(
             {
-                "relaxation": float(
-                    p.get("relaxation", 0.2 if algorithm == "straight_sart" else 0.3)
-                ),
-                "subsets": p.get("subsets", 8) if algorithm == "straight_sart" else 1,
-                "smooth_sigma": float(p.get("smooth_sigma", 0)),
-                "smooth_every": int(p.get("smooth_every", 0)),
+                "relaxation": float(p.relaxation),
+                "subsets": p.subsets if algorithm == "straight_sart" else 1,
+                "smooth_sigma": float(p.smooth_sigma),
+                "smooth_every": int(p.smooth_every),
             }
         )
-    add_image_metrics(metrics, sound_speed, case, c0)
-    if case.ground_truth.sound_speed_mps is not None:
-        metrics.update(
-            image_diagnostic_metrics(
-                sound_speed,
-                case.ground_truth.sound_speed_mps,
-                roi_mask=case.grid.roi_mask,
-                coverage=(
-                    basis.forward(coverage)
-                    if basis is not None and coverage is not None
-                    else coverage
-                ),
-                boundary_band_pixels=int(p.get("boundary_band_pixels", 4)),
-            )
-        )
+
     return ReconstructionResult(
         algorithm=algorithm,
         case_id=case.case_id,

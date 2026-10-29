@@ -18,7 +18,7 @@ def test_postprocessing_failure_keeps_completed_numerical_result(
 
     case_path = write_case_hdf5(synthetic_case, tmp_path / "case.h5")
     cfg = tmp_path / "config.yaml"
-    cfg.write_text("name: straight_cgls\nparameters:\n  iterations: 2\n")
+    cfg.write_text("name: straight_cgls\nrun_controls:\n  max_iterations: 2\n")
     out = tmp_path / "run" / synthetic_case.case_id
     numerical_bytes = []
 
@@ -86,10 +86,8 @@ def test_no_ground_truth_keeps_holdout_scores_without_image_scores(
         yaml.safe_dump(
             {
                 "name": "straight_cgls",
-                "parameters": {
-                    "stopping": {"max_iterations": 3},
-                    "evaluation": {"receiver_fraction": 0.125, "seed": 42},
-                },
+                "run_controls": {"max_iterations": 3},
+                "evaluation": {"receiver_fraction": 0.125, "seed": 42},
             }
         )
     )
@@ -113,10 +111,8 @@ def test_image_region_changes_only_reporting_not_reconstruction(
             yaml.safe_dump(
                 {
                     "name": "straight_cgls",
-                    "parameters": {
-                        "stopping": {"max_iterations": 3},
-                        "image_evaluation": {"primary_region": region},
-                    },
+                    "run_controls": {"max_iterations": 3},
+                    "image_evaluation": {"primary_region": region},
                 }
             )
         )
@@ -162,7 +158,7 @@ def test_run_algorithm_case_writes_standard_artifacts(synthetic_case, tmp_path):
     config_path = tmp_path / "cgls.yaml"
     write_case_hdf5(synthetic_case, case_path)
     config_path.write_text(
-        "name: straight_cgls\nparameters:\n  iterations: 2\n", encoding="utf-8"
+        "name: straight_cgls\nrun_controls:\n  max_iterations: 2\n", encoding="utf-8"
     )
 
     out_dir = run_algorithm_case(
@@ -180,7 +176,7 @@ def test_run_algorithm_case_rejects_config_algorithm_mismatch(synthetic_case, tm
     config_path = tmp_path / "sirt.yaml"
     write_case_hdf5(synthetic_case, case_path)
     config_path.write_text(
-        "name: straight_sirt\nparameters:\n  iterations: 2\n", encoding="utf-8"
+        "name: straight_sirt\nrun_controls:\n  max_iterations: 2\n", encoding="utf-8"
     )
 
     out_dir = run_algorithm_case(
@@ -198,7 +194,7 @@ def test_benchmark_suite_runs_synthetic_case(synthetic_case, tmp_path):
     write_case_hdf5(synthetic_case, case_dir / "case.h5")
     config_path = tmp_path / "sirt.yaml"
     config_path.write_text(
-        "name: straight_sirt\nparameters:\n  iterations: 2\n", encoding="utf-8"
+        "name: straight_sirt\nrun_controls:\n  max_iterations: 2\n", encoding="utf-8"
     )
     suite_path = tmp_path / "suite.yaml"
     suite_path.write_text(
@@ -231,7 +227,7 @@ def test_benchmark_suite_resolves_config_relative_to_suite_file(
     config_dir.mkdir()
     write_case_hdf5(synthetic_case, case_dir / "case.h5")
     (config_dir / "sirt.yaml").write_text(
-        "name: straight_sirt\nparameters:\n  iterations: 1\n", encoding="utf-8"
+        "name: straight_sirt\nrun_controls:\n  max_iterations: 1\n", encoding="utf-8"
     )
     suite_path = tmp_path / "suite.yaml"
     suite_path.write_text(

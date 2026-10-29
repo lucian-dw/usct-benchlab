@@ -55,7 +55,8 @@ def test_nonfinite_prediction_fails_even_with_finite_recovery_checkpoint(
     result = algorithm().run(
         case,
         AlgorithmConfig(
-            parameters={"iterations": 3, **({"inner_iterations": 2} if is_bent else {})}
+            parameters={**({"inner_iterations": 2} if is_bent else {})},
+            run_controls={"max_iterations": 3},
         ),
     )
     assert result.status == "failed", result.metrics.get("stop_reason")

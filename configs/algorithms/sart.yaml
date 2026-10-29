@@ -1,6 +1,7 @@
 name: straight_sart
+run_controls:
+  max_iterations: 20
 parameters:
-  iterations: 20
   relaxation: 0.1
   subsets: 8
   smooth_sigma: 0.75

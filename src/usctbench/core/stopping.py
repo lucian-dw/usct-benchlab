@@ -3,108 +3,10 @@
 from __future__ import annotations
 
 import time
-from dataclasses import asdict, dataclass, fields
-from numbers import Real
 
 import numpy as np
 
-from usctbench.core.config import coerce_bool
-
-
-@dataclass(frozen=True)
-class StopPolicy:
-    max_iterations: int = 50
-    min_iterations: int = 1
-    max_elapsed_s: float | None = None
-    max_forward_calls: int | None = None
-    max_adjoint_calls: int | None = None
-    target_relative_residual: float | None = None
-    noise_norm: float | None = None
-    discrepancy_factor: float = 1.05
-    update_rtol: float | None = 1e-6
-    update_patience: int = 1  # Legacy behavior; RunControls defaults to two.
-    objective_rtol: float | None = 1e-6
-    objective_patience: int = 5
-    validation_patience: int | None = None
-    validation_rtol: float = 1e-4
-    restore_best_validation: bool = True
-    target_rmse_mps: float | None = None
-    allow_ground_truth_stopping: bool = False
-
-    @classmethod
-    def from_parameters(cls, parameters, *, default_iterations=50):
-        supplied = dict(parameters.get("stopping", {}))
-        unknown = supplied.keys() - {item.name for item in fields(cls)}
-        if unknown:
-            raise ValueError(f"unknown stopping settings: {sorted(unknown)}")
-        supplied.setdefault(
-            "max_iterations", parameters.get("iterations", default_iterations)
-        )
-        for name in ("restore_best_validation", "allow_ground_truth_stopping"):
-            if name in supplied:
-                supplied[name] = coerce_bool(supplied[name])
-        return cls(**supplied)
-
-    def __post_init__(self):
-        for name in ("restore_best_validation", "allow_ground_truth_stopping"):
-            if not isinstance(getattr(self, name), (bool, np.bool_)):
-                raise ValueError(f"{name} must be a boolean")
-            object.__setattr__(self, name, bool(getattr(self, name)))
-        for name in (
-            "max_iterations",
-            "min_iterations",
-            "objective_patience",
-            "update_patience",
-        ):
-            if getattr(self, name) is None:
-                raise ValueError(f"{name} cannot be null")
-        integer_fields = (
-            "max_iterations",
-            "min_iterations",
-            "max_forward_calls",
-            "max_adjoint_calls",
-            "objective_patience",
-            "update_patience",
-            "validation_patience",
-        )
-        for name in integer_fields:
-            value = getattr(self, name)
-            if value is not None and (
-                isinstance(value, bool)
-                or not isinstance(value, (int, np.integer))
-                or value < 0
-            ):
-                raise ValueError(f"{name} must be a nonnegative integer")
-            if value is not None:
-                object.__setattr__(self, name, int(value))
-        for name in ("objective_patience", "validation_patience", "update_patience"):
-            if getattr(self, name) == 0:
-                raise ValueError(f"{name} must be positive")
-        for name in (
-            "max_elapsed_s",
-            "target_relative_residual",
-            "noise_norm",
-            "update_rtol",
-            "objective_rtol",
-            "validation_rtol",
-            "target_rmse_mps",
-        ):
-            value = getattr(self, name)
-            if value is not None:
-                if (
-                    isinstance(value, bool)
-                    or not isinstance(value, Real)
-                    or not np.isfinite(value)
-                    or value < 0
-                ):
-                    raise ValueError(f"{name} must be finite and nonnegative")
-                object.__setattr__(self, name, float(value))
-        if not np.isfinite(self.discrepancy_factor) or self.discrepancy_factor < 1:
-            raise ValueError("discrepancy_factor must be finite and >= 1")
-        if self.target_rmse_mps is not None and not self.allow_ground_truth_stopping:
-            raise ValueError(
-                "target_rmse_mps requires explicit allow_ground_truth_stopping=True"
-            )
+from usctbench.core.run_controls import RunControls
 
 
 class BudgetExhausted(RuntimeError):
@@ -121,7 +23,7 @@ class WorkLedger:
     Extra source-solve/subset counters are descriptive, not equivalent FLOPs.
     """
 
-    def __init__(self, policy: StopPolicy, *, clock=time.perf_counter):
+    def __init__(self, policy: RunControls, *, clock=time.perf_counter):
         self.policy, self.clock = policy, clock
         self.started = clock()
         self.counts = {"forward_calls": 0, "adjoint_calls": 0}
@@ -153,7 +55,7 @@ class StopMonitor:
     """Record complete iterates and the first OR trigger in deterministic order."""
 
     def __init__(
-        self, policy: StopPolicy, work: WorkLedger, *, iteration_unit="iteration"
+        self, policy: RunControls, work: WorkLedger, *, iteration_unit="iteration"
     ):
         self.policy, self.work = policy, work
         self.iteration_unit = iteration_unit
@@ -186,7 +88,6 @@ class StopMonitor:
         objective,
         update_relative=None,
         validation_relative=None,
-        quality_rmse_mps=None,
     ):
         if self.reason is not None:
             return self.reason
@@ -199,17 +100,9 @@ class StopMonitor:
         if self.history and iteration <= self.history[-1]["iteration"]:
             raise ValueError("complete iteration indices must be strictly increasing")
         values = [residual_norm, observed_norm, objective]
-        values += [
-            v
-            for v in (update_relative, validation_relative, quality_rmse_mps)
-            if v is not None
-        ]
+        values += [v for v in (update_relative, validation_relative) if v is not None]
         if not np.all(np.isfinite(values)) or not np.all(np.isfinite(state)):
             return self.finish("numerical_failure")
-        if self.policy.target_rmse_mps is not None and quality_rmse_mps is None:
-            raise ValueError(
-                "ground-truth quality stopping requested but no quality metric was supplied"
-            )
         relative = residual_norm / observed_norm if observed_norm > 0 else None
         if self.history and self.policy.objective_rtol is not None:
             previous = self.history[-1]["objective"]
@@ -285,8 +178,6 @@ class StopMonitor:
                 and residual_norm <= p.discrepancy_factor * p.noise_norm
             ):
                 triggers.append("noise_discrepancy")
-            if p.target_rmse_mps is not None and quality_rmse_mps <= p.target_rmse_mps:
-                triggers.append("oracle_quality_target")
             if (
                 p.update_rtol is not None
                 and update_relative is not None
@@ -314,7 +205,6 @@ class StopMonitor:
                 "exact_data_fit",
                 "target_residual",
                 "noise_discrepancy",
-                "oracle_quality_target",
             )
         ]
         if triggers:
@@ -359,10 +249,9 @@ class StopMonitor:
             ),
             "elapsed_s": self.work.elapsed_s,
             "work": dict(self.work.counts),
-            "policy": asdict(self.policy),
-            "resolved_policy": asdict(self.policy),
+            "policy": self.policy.model_dump(),
+            "resolved_policy": self.policy.model_dump(),
             "budget_scope": "operator_calls; time_checked_between_calls",
-            "ground_truth_used_for_stopping": self.policy.target_rmse_mps is not None,
             "has_complete_checkpoint": self.last_state is not None,
             "terminated_iterate_quality_target_met": bool(
                 self.history and self.history[-1]["quality_triggered_rules"]
@@ -390,7 +279,6 @@ class StopMonitor:
                                 "exact_data_fit",
                                 "target_residual",
                                 "noise_discrepancy",
-                                "oracle_quality_target",
                             }
                             else (
                                 "stationarity"

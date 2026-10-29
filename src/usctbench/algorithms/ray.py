@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from usctbench.algorithms.configuration import validated_run
+from usctbench.core.config import prepared_run
 
 import time
 from typing import Any
@@ -19,16 +19,10 @@ from usctbench.core.schema import (
 from usctbench.operators.straight_ray import StraightRayProjector
 
 
-def parameter(config: AlgorithmConfig, key: str, default: Any) -> Any:
-    return config.parameters.get(key, default)
-
-
 def reference_sound_speed(case: USCTCase, config: AlgorithmConfig) -> float:
-    value = parameter(
-        config,
-        "reference_sound_speed_mps",
-        case.metadata.get("reference_sound_speed_mps", 1500.0),
-    )
+    value = config.parameters.reference_sound_speed_mps
+    if value is None:
+        value = case.metadata.get("reference_sound_speed_mps", 1500.0)
     value = float(value)
     if not np.isfinite(value) or value <= 0:
         raise ValueError("reference_sound_speed_mps must be positive")
@@ -36,7 +30,7 @@ def reference_sound_speed(case: USCTCase, config: AlgorithmConfig) -> float:
 
 
 def speed_bounds(config: AlgorithmConfig) -> tuple[float, float]:
-    bounds = parameter(config, "sound_speed_bounds_mps", (1300.0, 1700.0))
+    bounds = config.parameters.sound_speed_bounds_mps
     low, high = float(bounds[0]), float(bounds[1])
     if not np.isfinite(low) or not np.isfinite(high) or low <= 0 or high <= low:
         raise ValueError("sound_speed_bounds_mps must be [positive_low, higher_high]")
@@ -62,15 +56,8 @@ def configured_ray_weights(
 ) -> np.ndarray:
     """Return per-ray confidence weights after optional config shaping."""
 
-    threshold = float(
-        config.parameters.get(
-            "min_ray_weight",
-            config.parameters.get(
-                "ray_weight_min", config.parameters.get("ray_weight_threshold", 0.0)
-            ),
-        )
-    )
-    power = float(config.parameters.get("ray_weight_power", 1.0))
+    threshold = float(config.parameters.min_ray_weight)
+    power = float(config.parameters.ray_weight_power)
     return ray_weights(case, projector, mask, min_weight=threshold, weight_power=power)
 
 
@@ -130,16 +117,8 @@ def ray_weight_metrics(
             "ray_weight_p10": 0.0,
             "ray_weight_p50": 0.0,
             "ray_weight_p90": 0.0,
-            "min_ray_weight": float(
-                config.parameters.get(
-                    "min_ray_weight",
-                    config.parameters.get(
-                        "ray_weight_min",
-                        config.parameters.get("ray_weight_threshold", 0.0),
-                    ),
-                )
-            ),
-            "ray_weight_power": float(config.parameters.get("ray_weight_power", 1.0)),
+            "min_ray_weight": float(config.parameters.min_ray_weight),
+            "ray_weight_power": float(config.parameters.ray_weight_power),
         }
     used = values[valid]
     return {
@@ -148,15 +127,8 @@ def ray_weight_metrics(
         "ray_weight_p10": float(np.percentile(used, 10.0)),
         "ray_weight_p50": float(np.percentile(used, 50.0)),
         "ray_weight_p90": float(np.percentile(used, 90.0)),
-        "min_ray_weight": float(
-            config.parameters.get(
-                "min_ray_weight",
-                config.parameters.get(
-                    "ray_weight_min", config.parameters.get("ray_weight_threshold", 0.0)
-                ),
-            )
-        ),
-        "ray_weight_power": float(config.parameters.get("ray_weight_power", 1.0)),
+        "min_ray_weight": float(config.parameters.min_ray_weight),
+        "ray_weight_power": float(config.parameters.ray_weight_power),
     }
 
 
@@ -371,7 +343,7 @@ def run_with_failure_capture(
 class StraightRayCGLSAlgorithm:
     name = "straight_cgls"
 
-    @validated_run
+    @prepared_run
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
         from usctbench.algorithms.straight import reconstruct
 
@@ -383,7 +355,7 @@ class StraightRayCGLSAlgorithm:
 class StraightRaySIRTAlgorithm:
     name = "straight_sirt"
 
-    @validated_run
+    @prepared_run
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
         from usctbench.algorithms.straight import reconstruct
 
@@ -395,7 +367,7 @@ class StraightRaySIRTAlgorithm:
 class StraightRaySARTAlgorithm:
     name = "straight_sart"
 
-    @validated_run
+    @prepared_run
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
         from usctbench.algorithms.straight import reconstruct
 

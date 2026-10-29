@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 from scipy.ndimage import gaussian_filter
 
-from usctbench.core.stopping import StopPolicy, WorkLedger
+from usctbench.core.stopping import WorkLedger
+from usctbench.core.run_controls import RunControls
 from usctbench.solvers.least_squares import normal_step, regularizer
 
 
@@ -22,7 +23,7 @@ class DenseJacobian:
 
 
 def controls(precision):
-    work = WorkLedger(StopPolicy())
+    work = WorkLedger(RunControls())
     return SimpleNamespace(
         observed=np.zeros(len(precision)),
         precision=precision,
@@ -204,15 +205,18 @@ def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution(
         measurement=MeasurementSpec(domain="features", delta_tof_s=observed),
     )
     config = AlgorithmConfig(
-        parameters={
-            "stopping": {
-                "max_iterations": 3,
-                "target_relative_residual": 1e-8,
-                "restore_best_validation": False,
-            }
-        }
+        parameters={},
+        run_controls={
+            "max_iterations": 3,
+            "target_relative_residual": 1e-08,
+            "restore_best_validation": False,
+        },
     )
-    control = InversionControl(case, config, observed, default_iterations=3)
+    from usctbench.core.config import prepare_config
+
+    control = InversionControl(
+        case, prepare_config("straight_cgls", config), observed, default_iterations=3
+    )
     result, metrics = nonlinear_least_squares(
         Forward(),
         control,

@@ -17,22 +17,17 @@ from usctbench.operators.model_space import BilinearBasis
 from usctbench.solvers.least_squares import regularizer
 
 
-def _config(**parameters):
-    settings = {
-        "iterations": 4,
-        "inner_iterations": 80,
-        "damping": 0.0,
-        "regularization": "identity",
-        "stopping": {
-            "objective_rtol": None,
-            "update_rtol": None,
-            "restore_best_validation": False,
+def _config(*, max_iterations=4, run_controls=None, evaluation=None, **parameters):
+    return AlgorithmConfig(
+        parameters={
+            "inner_iterations": 80,
+            "regularization_lambda": 0.0,
+            "regularization": "identity",
+            **parameters,
         },
-    }
-    stopping = parameters.pop("stopping", {})
-    settings["stopping"].update(stopping)
-    settings.update(parameters)
-    return AlgorithmConfig(parameters=settings)
+        run_controls={"max_iterations": max_iterations, **(run_controls or {})},
+        evaluation=evaluation or {},
+    )
 
 
 def _case(shape, data):
@@ -124,7 +119,7 @@ def test_uphill_gaussian_smoothing_recovers_regularized_dense_solution(
     result = bent.BentRayGNAdapter().run(
         case,
         _config(
-            damping=0.2,
+            regularization_lambda=np.sqrt(0.2),
             smooth_sigma=1,
             **({"model_grid_shape": [2, 2]} if reduced else {}),
         ),
@@ -159,7 +154,7 @@ def test_weighted_regularized_solution_matches_fine_grid_dense_reference(
     weights = rng.uniform(0.2, 0.9, (2, 12))
     case.measurement.ray_weights = weights
     config = _config(
-        damping=0.3,
+        regularization_lambda=np.sqrt(0.3),
         regularization=kind,
         gradient_rtol=1e-6,
         evaluation={"receiver_indices": [1]},
@@ -196,7 +191,9 @@ def test_descent_smoothing_that_fails_armijo_retries_raw_newton(monkeypatch):
     monkeypatch.setattr(
         bent, "gaussian_filter", lambda update, sigma, mode: update * 1e6
     )
-    result = bent.BentRayGNAdapter().run(case, _config(iterations=1, smooth_sigma=1))
+    result = bent.BentRayGNAdapter().run(
+        case, _config(max_iterations=1, smooth_sigma=1)
+    )
     assert result.status == "success", result.failure_reason
     assert not result.metrics["direction_checks"][0]["smoothing_rejected"]
     attempts = result.metrics["line_search_history"]
@@ -216,7 +213,7 @@ def test_clipping_rejects_uphill_newton_and_uses_projected_gradient(monkeypatch)
     data = matrix @ (initial - 1 / 1500).ravel() - np.linalg.solve(matrix.T, gradient)
     case, forward = _dense(monkeypatch, matrix, data)
     result = bent.BentRayGNAdapter().run(
-        case, _config(iterations=1, initial_sound_speed_mps=1 / initial)
+        case, _config(max_iterations=1, initial_sound_speed_mps=1 / initial)
     )
     assert result.status == "success", result.failure_reason
     attempts = result.metrics["line_search_history"]
@@ -238,7 +235,7 @@ def test_zero_inner_update_does_not_claim_stationarity(monkeypatch):
         "normal_step",
         lambda jac, residual, current, *a, **kw: np.zeros_like(current),
     )
-    result = bent.BentRayGNAdapter().run(case, _config(iterations=1))
+    result = bent.BentRayGNAdapter().run(case, _config(max_iterations=1))
     assert result.status == "success", result.failure_reason
     assert result.metrics["stop_reason"] == "max_iterations"
     assert result.metrics["line_search_history"][-1]["proposal"] == "projected_gradient"
@@ -264,7 +261,9 @@ def test_nonfinite_trials_are_rejected_without_changing_checkpoint(
     forward.trial_failure = lambda value: (
         value if recover and len(forward.states) > 2 else np.full_like(value, np.nan)
     )
-    result = bent.BentRayGNAdapter().run(case, _config(iterations=1, smooth_sigma=0.5))
+    result = bent.BentRayGNAdapter().run(
+        case, _config(max_iterations=1, smooth_sigma=0.5)
+    )
     assert (
         result.metrics["line_search_history"][0]["rejection"]
         == "nonfinite_trial_prediction_or_objective"
@@ -319,12 +318,12 @@ def test_budget_after_rejected_trial_preserves_image_and_prediction(
     result = bent.BentRayGNAdapter().run(
         case,
         _config(
-            damping=0.2,
+            regularization_lambda=np.sqrt(0.2),
             step_length=10,
             inner_solver=inner_solver,
             # Augmented solvers additionally measure an operator scale; count
             # that call while still exhausting the budget AFTER a rejected trial.
-            stopping={"max_forward_calls": 4 if inner_solver == "normal_cg" else 5},
+            run_controls={"max_forward_calls": 4 if inner_solver == "normal_cg" else 5},
             **({"model_grid_shape": [2, 2]} if reduced else {}),
         ),
     )
@@ -358,7 +357,9 @@ def test_relative_gradient_stopping_is_invariant_to_objective_scale(monkeypatch,
     matrix = np.diag(np.sqrt([1000.0, 1, 1, 1]))
     data = -1e-5 * np.array([-3.0, 0.6, 0.6, -0.5]) / np.diag(matrix)
     case, _ = _dense(monkeypatch, matrix * scale, data * scale)
-    result = bent.BentRayGNAdapter().run(case, _config(damping=0.2 * scale**2))
+    result = bent.BentRayGNAdapter().run(
+        case, _config(regularization_lambda=np.sqrt(0.2 * scale**2))
+    )
     assert result.status == "success", result.failure_reason
     assert result.metrics["stop_reason"] == "stationary_gradient"
     assert result.metrics["iterations"] == 1
@@ -376,7 +377,10 @@ def test_gradient_and_trials_obey_budgets_and_return_complete_iterates(
 ):
     case, forward = _dense(monkeypatch, np.eye(4), np.full(4, 1e-6))
     result = bent.BentRayGNAdapter().run(
-        case, _config(damping=0.2, stopping={f"max_{counter}": limit})
+        case,
+        _config(
+            regularization_lambda=np.sqrt(0.2), run_controls={f"max_{counter}": limit}
+        ),
     )
     assert result.status == "success", result.failure_reason
     assert result.metrics["stop_reason"] == f"{counter}_budget"
@@ -412,7 +416,9 @@ def test_differential_reference_override_must_match_metadata(reference):
     matching = 1500 if reference is None else reference
     result = bent.BentRayGNAdapter().run(
         case,
-        _config(reference_sound_speed_mps=matching, stopping={"max_forward_calls": 0}),
+        _config(
+            reference_sound_speed_mps=matching, run_controls={"max_forward_calls": 0}
+        ),
     )
     assert result.status == "success", result.failure_reason
     assert result.metrics["measurement_reference_sound_speed_mps"] == matching
@@ -423,7 +429,8 @@ def test_absolute_tof_allows_model_reference_override():
     case.measurement.tof_s = _offset(case)
     case.measurement.delta_tof_s = None
     result = bent.BentRayGNAdapter().run(
-        case, _config(reference_sound_speed_mps=1600, stopping={"max_forward_calls": 0})
+        case,
+        _config(reference_sound_speed_mps=1600, run_controls={"max_forward_calls": 0}),
     )
     assert result.status == "success", result.failure_reason
     assert result.metrics["measurement_reference_sound_speed_mps"] is None
@@ -433,9 +440,8 @@ def test_absolute_tof_allows_model_reference_override():
 @pytest.mark.parametrize("bad", [-1, np.nan, np.inf])
 def test_gradient_tolerance_must_be_finite_nonnegative(bad):
     case = _case((3, 3), np.ones((2, 2)) * 1e-8)
-    result = bent.BentRayGNAdapter().run(case, _config(gradient_rtol=bad))
-    assert result.status == "failed"
-    assert "gradient_rtol" in result.failure_reason
+    with pytest.raises(ValueError, match="gradient_rtol"):
+        bent.BentRayGNAdapter().run(case, _config(gradient_rtol=bad))
 
 
 @pytest.mark.parametrize("spatial_order", [1, 2])
@@ -472,9 +478,9 @@ def test_native_regularized_objective_directional_derivative_and_roi(
 
     monkeypatch.setattr(bent, "normal_step", record_step)
     config = _config(
-        iterations=2,
+        max_iterations=2,
         inner_iterations=12,
-        damping=1e-5,
+        regularization_lambda=np.sqrt(1e-05),
         regularization=kind,
         step_length=0.3,
         smooth_sigma=0.5,

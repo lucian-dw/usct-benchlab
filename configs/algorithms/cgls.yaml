@@ -1,6 +1,7 @@
 name: straight_cgls
+run_controls:
+  max_iterations: 30
 parameters:
-  iterations: 30
   regularization: laplacian
   regularization_lambda: 0.02
   reference_sound_speed_mps: 1500.0

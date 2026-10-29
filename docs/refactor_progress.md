@@ -129,3 +129,21 @@ No numerical implementation or defaults changed in this unit.
 
 Next: make the configuration payload stay typed through execution and unify
 request budgets with independent host limits.
+
+## P4: typed execution configuration
+
+Completed: `prepare_config` now supplies concrete parameter objects to every
+algorithm. Request budgets and production stopping use one `RunControls`;
+independent host limits intersect the resolved request, including zero budgets.
+Deployment paths/backend and evaluation policies have separate typed fields.
+Born variants use one selector. Removed aliases, `BudgetCaps`, `StopPolicy` and
+the dict roundtrip implementation. YAML, API, schemas and tests were migrated.
+
+Validation: local full CPU suite 564 passed (21.39 s); A100 564 passed (9.34 s).
+Black, Ruff and `git diff --check` passed. Independent optimization references,
+hold-out isolation, adjoints and native reconstruction assertions remain.
+Historical alias acceptance tests were replaced by canonical admission tests.
+Migration instructions are in `docs/parameter_contract.md`.
+
+Next: shorten result publication/reporting and unify CLI/public execution. Then
+P5 consolidates the mathematical kernels without changing their update order.

@@ -15,6 +15,7 @@ from usctbench.core.schema import (
     MeasurementSpec,
     USCTCase,
 )
+from usctbench.core.config import prepare_config
 from usctbench.operators.straight_ray import StraightRayProjector
 from usctbench.solvers.projected_cg import projected_cg
 
@@ -60,19 +61,24 @@ def bounded_case():
 def parameters(robust):
     if robust:
         return {
-            "iterations": 30,
             "robust_loss": "huber",
             "huber_delta_s": 1e-8,
             "irls_iterations": 3,
         }
     return {
-        "iterations": 30,
         "sound_speed_bounds_mps": [1 / (1 / 1500 + 1e-5), 1 / (1 / 1500 - 1e-5)],
     }
 
 
-def run(case, params):
-    result = StraightRayCGLSAlgorithm().run(case, AlgorithmConfig(parameters=params))
+def run(case, params, *, run_controls=None, evaluation=None):
+    result = StraightRayCGLSAlgorithm().run(
+        case,
+        AlgorithmConfig(
+            parameters=params,
+            run_controls={"max_iterations": 30, **(run_controls or {})},
+            evaluation=evaluation or {},
+        ),
+    )
     assert result.status == "success", result.failure_reason
     assert case.ground_truth.sound_speed_mps is None
     return result
@@ -198,13 +204,11 @@ def test_coupled_weighted_bounded_penalty_matches_independent_lbfgsb(robust):
     assert expected.success
     params = {
         **parameters(False),
-        "iterations": 100,
-        "damping": 0.2e-6,
-        "stopping": {"update_rtol": None, "objective_rtol": None},
+        "regularization_lambda": np.sqrt(0.2e-6),
     }
     if robust:
         params.update(robust_loss="huber", huber_delta_s=1e-8, irls_iterations=3)
-    result = run(case, params)
+    result = run(case, params, run_controls={"max_iterations": 100})
     x = perturbation(result).ravel() / 1e-5
     np.testing.assert_allclose(x, expected.x, rtol=1e-8, atol=1e-9)
     np.testing.assert_allclose(x, [0.125 if robust else 0.34375, 1.0], rtol=1e-8)
@@ -220,7 +224,7 @@ def test_coupled_weighted_bounded_penalty_matches_independent_lbfgsb(robust):
 @pytest.mark.parametrize("limit", [0, 1, 2])
 def test_retry_work_obeys_global_budgets_and_atomic_checkpoints(robust, budget, limit):
     case = huber_case() if robust else bounded_case()
-    result = run(case, {**parameters(robust), "stopping": {budget: limit}})
+    result = run(case, parameters(robust), run_controls={budget: limit})
     stop = result.metrics["stopping"]
     assert stop["work"][budget.removeprefix("max_")] <= limit
     assert not result.metrics["solver_optimality"]["converged"]
@@ -237,7 +241,9 @@ def test_retry_work_obeys_global_budgets_and_atomic_checkpoints(robust, budget, 
 
 @pytest.mark.parametrize("iterations", [0, 1, 2])
 def test_irls_restarts_do_not_extend_iteration_budget(iterations):
-    result = run(huber_case(), {**parameters(True), "iterations": iterations})
+    result = run(
+        huber_case(), parameters(True), run_controls={"max_iterations": iterations}
+    )
     assert result.metrics["iterations"] <= iterations
     assert result.metrics["stop_reason"] == "max_iterations"
     assert not result.metrics["solver_optimality"]["converged"]
@@ -259,14 +265,12 @@ def test_huber_reweighting_and_optimality_exclude_heldout_values_and_weights():
     params = {
         **parameters(True),
         "coverage_preconditioning": True,
-        "evaluation": {"receiver_indices": [2]},
-        "stopping": {"restore_best_validation": False},
     }
-    first = run(case, params)
+    first = run(case, params, evaluation={"receiver_indices": [2]})
     changed = case.model_copy(deep=True)
     changed.measurement.delta_tof_s[:, 2] += 1e-4
     changed.measurement.ray_weights[:, 2] = 0.125
-    second = run(changed, params)
+    second = run(changed, params, evaluation={"receiver_indices": [2]})
     np.testing.assert_array_equal(first.sound_speed_mps, second.sound_speed_mps)
     np.testing.assert_array_equal(
         first.metrics["residual_curve"], second.metrics["residual_curve"]
@@ -278,7 +282,9 @@ def test_huber_reweighting_and_optimality_exclude_heldout_values_and_weights():
 def test_optimality_certificate_belongs_to_selected_validation_checkpoint():
     result = run(
         heldout_case(),
-        {**parameters(True), "evaluation": {"receiver_indices": [2]}},
+        parameters(True),
+        evaluation={"receiver_indices": [2]},
+        run_controls={"restore_best_validation": True},
     )
     np.testing.assert_allclose(perturbation(result), [[1.5e-5]], rtol=1e-10)
     assert result.metrics["stop_reason"] == "stationary_gradient"
@@ -333,13 +339,19 @@ def test_quadratic_weights_roi_and_penalty_match_dense_augmented_reference(
         ground_truth=SimpleNamespace(sound_speed_mps=None),
     )
     config = AlgorithmConfig(
-        parameters={
-            "iterations": 30,
-            "stopping": {"update_rtol": None, "objective_rtol": None},
-        }
+        parameters={},
+        run_controls={
+            "max_iterations": 30,
+            "update_rtol": None,
+            "objective_rtol": None,
+        },
     )
     control = InversionControl(
-        case, config, observed, weights=weights, default_iterations=30
+        case,
+        prepare_config("straight_cgls", config),
+        observed,
+        weights=weights,
+        default_iterations=30,
     )
     actual, metrics = projected_cg(
         DenseOperator(),

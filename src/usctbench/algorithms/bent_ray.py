@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from usctbench.algorithms.configuration import validated_run
+from usctbench.core.config import prepared_run
 
 import numpy as np
 from scipy.linalg import norm
 from scipy.ndimage import gaussian_filter
 
-from usctbench.algorithms._control import InversionControl, add_image_metrics
+from usctbench.algorithms._control import InversionControl
 from usctbench.algorithms.ray import (
     configured_ray_weights,
     reference_sound_speed,
@@ -36,7 +36,7 @@ class BentRayGNAdapter:
 
     name = "bent_ray_gn"
 
-    @validated_run
+    @prepared_run
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
         return run_with_failure_capture(
             self.name, case, lambda: self._run(case, config)
@@ -57,7 +57,7 @@ class BentRayGNAdapter:
             case.grid,
             case.geometry,
             background_speed_mps=c0,
-            spatial_order=p.get("eikonal_order", 1),
+            spatial_order=p.eikonal_order,
         )
         distance = np.linalg.norm(
             case.geometry.tx_pos_m[:, None] - case.geometry.rx_pos_m[None, :], axis=-1
@@ -78,7 +78,7 @@ class BentRayGNAdapter:
             case,
             config,
             observed,
-            default_iterations=int(p.get("outer_iterations", 4)),
+            default_iterations=4,
             weights=weights,
             valid_mask=valid,
             iteration_unit="Gauss-Newton outer step",
@@ -86,18 +86,18 @@ class BentRayGNAdapter:
         control.declare_update(
             (
                 "slowness"
-                if p.get("model_grid_shape") is None
+                if p.model_grid_shape is None
                 else "delta_slowness_coefficients"
             ),
             "full_slowness",
             "s/m",
             normalization="norm(q_new-q_old)/norm(q_old); positive bounded slowness",
         )
-        inner = int(p.get("inner_iterations", 16))
+        inner = int(p.inner_iterations)
         if inner < 1:
             raise ValueError("inner_iterations must be positive")
-        inner_solver = str(p.get("inner_solver", "lsmr"))
-        inner_options = dict(p.get("inner_options", {}))
+        inner_solver = str(p.inner_solver)
+        inner_options = p.inner_options.model_dump()
         allowed = {
             "rtol",
             "atol",
@@ -112,13 +112,11 @@ class BentRayGNAdapter:
             or inner_options.keys() - allowed
         ):
             raise ValueError("invalid inner_solver or inner_options")
-        kind = str(p.get("regularization", "laplacian"))
-        damping = float(
-            p.get("damping", float(p.get("regularization_lambda", 2e-2)) ** 2)
-        )
-        step = float(p.get("step_length", 1.0))
-        sigma = float(p.get("smooth_sigma", 0.0))
-        gradient_rtol = float(p.get("gradient_rtol", 1e-8))
+        kind = str(p.regularization)
+        damping = p.regularization_lambda**2
+        step = float(p.step_length)
+        sigma = float(p.smooth_sigma)
+        gradient_rtol = float(p.gradient_rtol)
         if not np.isfinite(gradient_rtol) or gradient_rtol < 0:
             raise ValueError("gradient_rtol must be finite and nonnegative")
         if (
@@ -130,16 +128,15 @@ class BentRayGNAdapter:
             raise ValueError(
                 "damping/smoothing must be nonnegative; step_length positive"
             )
-        if str(p.get("robust_loss", "none")).lower() != "none":
-            raise ValueError(
-                "native Eikonal GN currently supports robust_loss=none; no surrogate fallback"
-            )
-        line_search = coerce_bool(p.get("line_search", True))
-        roi_only = coerce_bool(p.get("roi_update_only", False))
+        line_search = coerce_bool(p.line_search)
+        roi_only = coerce_bool(p.roi_update_only)
         roi = case.grid.roi_mask if roi_only else None
         s0 = np.full(case.grid.shape, 1 / c0)
         initial_speed = np.broadcast_to(
-            np.asarray(p.get("initial_sound_speed_mps", c0), dtype=float),
+            np.asarray(
+                c0 if p.initial_sound_speed_mps is None else p.initial_sound_speed_mps,
+                dtype=float,
+            ),
             case.grid.shape,
         )
         if not np.isfinite(initial_speed).all() or np.any(initial_speed <= 0):
@@ -149,10 +146,10 @@ class BentRayGNAdapter:
             s = np.where(roi, s, s0)
         initial = s.copy()
         offset = distance / c0 if differential else np.zeros_like(distance)
-        initialization = str(p.get("initialization", "configured"))
+        initialization = str(p.initialization)
         if initialization not in {"configured", "cgls"}:
             raise ValueError("initialization must be configured or cgls")
-        initialization_iterations = p.get("initialization_iterations", 80)
+        initialization_iterations = p.initialization_iterations
         if (
             isinstance(initialization_iterations, bool)
             or not isinstance(initialization_iterations, (int, np.integer))
@@ -163,7 +160,7 @@ class BentRayGNAdapter:
         basis = None
         coefficients = None
         solver_kind = kind
-        if p.get("model_grid_shape") is not None:
+        if p.model_grid_shape is not None:
             if roi is not None:
                 raise ValueError("reduced model currently requires no inversion ROI")
             if initialization != "configured" or not np.all(initial_speed == c0):
@@ -172,7 +169,7 @@ class BentRayGNAdapter:
                 )
             if not bounds[0] <= c0 <= bounds[1]:
                 raise ValueError("reference speed must lie within sound-speed bounds")
-            basis = BilinearBasis(case.grid, p["model_grid_shape"])
+            basis = BilinearBasis(case.grid, p.model_grid_shape)
             coefficients = np.zeros(basis.shape)
             solver_kind = FineGridRegularizer(basis, kind)
 
@@ -462,11 +459,11 @@ class BentRayGNAdapter:
                     measurement_c0 if differential else None
                 ),
                 "roi_update_only": roi_only,
-                "roi_laplacian": coerce_bool(p.get("roi_laplacian", False)),
+                "roi_laplacian": False,
                 "ground_truth_used_for_initialization": False,
             }
         )
-        add_image_metrics(metrics, sound_speed, case, c0)
+
         return ReconstructionResult(
             algorithm=self.name,
             case_id=case.case_id,

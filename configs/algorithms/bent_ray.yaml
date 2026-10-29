@@ -1,6 +1,7 @@
 name: bent_ray_gn
+run_controls:
+  max_iterations: 4
 parameters:
-  outer_iterations: 4
   inner_iterations: 24
   step_length: 1.0
   line_search: true

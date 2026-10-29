@@ -28,18 +28,21 @@ def small_case():
     return make_sound_speed_case(shape=(8, 8), n_transducers=8, inclusion_mps=1470)
 
 
-def config(algorithm=None, **parameters):
+def config(
+    algorithm=None,
+    *,
+    max_iterations=4,
+    run_controls=None,
+    evaluation=None,
+    **parameters,
+):
     return AlgorithmConfig(
         parameters={
-            "iterations": 4,
             **({"subsets": 3} if algorithm is StraightRaySARTAlgorithm else {}),
-            "stopping": {
-                "update_rtol": None,
-                "objective_rtol": None,
-                "restore_best_validation": False,
-            },
             **parameters,
-        }
+        },
+        run_controls={"max_iterations": max_iterations, **(run_controls or {})},
+        evaluation=evaluation or {},
     )
 
 
@@ -106,7 +109,8 @@ def test_training_holdout_isolation_without_truth(algorithm):
 def test_budgets_return_consistent_complete_checkpoints(algorithm, budget, limit):
     case = small_case()
     cfg = config(
-        algorithm, stopping={budget: limit, "update_rtol": None, "objective_rtol": None}
+        algorithm,
+        run_controls={budget: limit, "update_rtol": None, "objective_rtol": None},
     )
     result = algorithm().run(case, cfg)
     assert result.failure_reason is None, result.failure_reason

@@ -3,7 +3,8 @@ import json
 import numpy as np
 import pytest
 
-from usctbench.core.stopping import BudgetExhausted, StopMonitor, StopPolicy, WorkLedger
+from usctbench.core.stopping import BudgetExhausted, StopMonitor, WorkLedger
+from usctbench.core.run_controls import RunControls
 from usctbench.evaluation import make_data_split, residual_statistics
 
 
@@ -94,7 +95,15 @@ def test_weighted_residual_and_missing_data():
 
 
 def monitor(**kwargs):
-    policy = StopPolicy(**kwargs)
+    policy = RunControls(
+        **{
+            "max_iterations": 50,
+            "min_iterations": 1,
+            "update_patience": 1,
+            "restore_best_validation": True,
+            **kwargs,
+        }
+    )
     return StopMonitor(policy, WorkLedger(policy, clock=lambda: 0.0))
 
 
@@ -129,7 +138,7 @@ def test_or_rules_record_all_triggers_with_priority():
     [
         ({"max_iterations": 0}, {}, "max_iterations"),
         ({"update_rtol": 0.01}, {"update_relative": 0.001}, "small_model_update"),
-        ({"objective_patience": 1}, {}, "objective_plateau"),
+        ({"objective_patience": 1, "objective_rtol": 1e-6}, {}, "objective_plateau"),
         ({"max_iterations": 5}, {"residual_norm": 0, "objective": 0}, "exact_data_fit"),
     ],
 )
@@ -166,14 +175,12 @@ def test_quality_target_tracks_selected_checkpoint_not_termination(
 ):
     m = monitor(
         max_iterations=1,
-        target_rmse_mps=1,
-        allow_ground_truth_stopping=True,
+        target_relative_residual=0.3,
         restore_best_validation=restore_best_validation,
     )
-    assert observe(m, 0, validation_relative=0.1, quality_rmse_mps=2) is None
+    assert observe(m, 0, validation_relative=0.1, residual_norm=1) is None
     assert (
-        observe(m, 1, validation_relative=0.2, quality_rmse_mps=0.5)
-        == "oracle_quality_target"
+        observe(m, 1, validation_relative=0.2, residual_norm=0.5) == "target_residual"
     )
     state, index = m.selected_state()
     assert index == (0 if restore_best_validation else 1)
@@ -185,10 +192,10 @@ def test_quality_target_tracks_selected_checkpoint_not_termination(
     )
     assert record["terminated_iterate_quality_target_met"] is True
     assert record["selected_iteration"] == index
-    assert record["reason"] == "oracle_quality_target"
-    assert record["triggered_rules"] == ["oracle_quality_target", "max_iterations"]
+    assert record["reason"] == "target_residual"
+    assert record["triggered_rules"] == ["target_residual", "max_iterations"]
     assert m.history[0]["quality_triggered_rules"] == []
-    assert m.history[1]["quality_triggered_rules"] == ["oracle_quality_target"]
+    assert m.history[1]["quality_triggered_rules"] == ["target_residual"]
     json.dumps({"record": record, "history": m.history}, allow_nan=False)
 
 
@@ -208,14 +215,14 @@ def test_quality_target_requires_a_complete_checkpoint():
 
 
 def test_budgets_checked_before_operator_call():
-    policy = StopPolicy(max_forward_calls=1)
+    policy = RunControls(max_forward_calls=1)
     ledger = WorkLedger(policy)
     assert ledger.call("linear_forward", lambda: 7) == 7
     with pytest.raises(BudgetExhausted, match="forward_calls_budget"):
         ledger.call("linear_forward", lambda: pytest.fail("budget overrun"))
     assert ledger.counts["forward_calls"] == 1
     with pytest.raises(BudgetExhausted, match="time_budget"):
-        WorkLedger(StopPolicy(max_elapsed_s=0)).call("adjoint", lambda: 0)
+        WorkLedger(RunControls(max_elapsed_s=0)).call("adjoint", lambda: 0)
 
 
 def test_numerical_failure_preserves_last_complete_state():
@@ -227,14 +234,10 @@ def test_numerical_failure_preserves_last_complete_state():
     assert state[0] == 1
 
 
-def test_oracle_stopping_is_explicit_and_missing_truth_is_not_ignored():
-    with pytest.raises(ValueError, match="explicit"):
-        StopPolicy(target_rmse_mps=1)
-    m = monitor(target_rmse_mps=1, allow_ground_truth_stopping=True)
-    with pytest.raises(ValueError, match="no quality metric"):
-        observe(m, 0)
-    observe(m, 0, quality_rmse_mps=2)
-    assert observe(m, 1, quality_rmse_mps=0.5) == "oracle_quality_target"
+def test_ground_truth_stopping_is_not_supported():
+    for settings in ({"target_rmse_mps": 1}, {"allow_ground_truth_stopping": True}):
+        with pytest.raises(ValueError):
+            RunControls(**settings)
 
 
 def test_policy_rejects_typos_nan_and_fractional_counts():
@@ -244,12 +247,9 @@ def test_policy_rejects_typos_nan_and_fractional_counts():
         {"update_rtol": np.nan},
     ):
         with pytest.raises(ValueError):
-            StopPolicy(**kwargs)
-    with pytest.raises(ValueError, match="unknown"):
-        StopPolicy.from_parameters({"stopping": {"max_iteration": 4}})
-    assert not StopPolicy.from_parameters(
-        {"stopping": {"restore_best_validation": "false"}}
-    ).restore_best_validation
+            RunControls(**kwargs)
+    with pytest.raises(ValueError):
+        RunControls(max_iteration=4)
 
 
 def test_termination_is_sticky_and_cannot_replace_checkpoint():
@@ -271,7 +271,12 @@ def test_control_rejected_objective_cannot_mismatch_image_and_prediction():
 
     case = make_sound_speed_case(shape=(4, 4), n_transducers=4)
     obs = np.ones((4, 4))
-    control = InversionControl(case, AlgorithmConfig(), obs, default_iterations=4)
+    from usctbench.core.config import prepare_config
+
+    cfg = prepare_config(
+        "straight_cgls", AlgorithmConfig(run_controls={"max_iterations": 4})
+    )
+    control = InversionControl(case, cfg, obs, default_iterations=4)
     initial = np.zeros((4, 4))
     control.observe(0, initial, initial, objective=1)
     control.observe(1, np.ones((4, 4)), obs, objective=np.nan)

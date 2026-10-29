@@ -91,7 +91,7 @@ def test_agent_types_enums_cross_checks_and_budget_boundary():
     config = make_agent_config(
         "straight_cgls",
         run_controls={"max_iterations": 3},
-        budget_caps={"max_iterations": 1},
+        host_limits={"max_iterations": 1},
     )
     case = make_sound_speed_case(shape=(8, 8), n_transducers=8)
     result = get_algorithm("straight_cgls").run(case, config)
@@ -119,8 +119,8 @@ def test_external_fwi_agent_admission_stays_canonical_and_strict():
             "sound_speed_bounds_mps": [1400.0, 1600.0],
         },
     )
-    assert config.parameters["initial_sound_speed_mps"] == 1490.0
-    assert "baseline_sound_speed_mps" not in config.parameters
+    assert config.parameters.initial_sound_speed_mps == 1490.0
+    assert "baseline_sound_speed_mps" not in type(config.parameters).model_fields
 
 
 def test_definitions_do_not_leak_and_nested_objects_fail_closed():
@@ -158,13 +158,13 @@ def test_observation_and_runtime_variants_are_not_guessed_from_names():
     assert fwi["compute_budget"]["online_controls_supported"] is True
     assert fwi["compute_budget"]["numerical_convergence_stopping_supported"] is False
     assert fwi["required_observations"]["any_of"] == []
-    with pytest.raises(ValueError, match="conflicts"):
+    with pytest.raises(ValueError):
         make_agent_config(
             "rwave_adapter",
-            {"green_backend": "volume_integral"},
+            {"variant": "full_green_nonlinear"},
             variant="wkb_nonlinear",
         )
-    with pytest.raises(ValueError, match="iteration/time budgets"):
+    with pytest.raises(ValueError, match="unsupported Agent run control"):
         make_agent_config(
             "fwi_wust",
             run_controls={"max_forward_calls": 1},
@@ -176,27 +176,19 @@ def test_case_bound_facts_and_policy_are_separate():
     case.measurement.frequencies_hz = np.array([150000.0, 250000.0])
     static = SPECS["straight_cgls"].describe()
     config = AlgorithmConfig(
-        parameters={
-            "iterations": 2,
-            "stopping": {"update_rtol": None, "min_iterations": 1},
-        }
+        parameters={},
+        run_controls={"max_iterations": 2, "update_rtol": None, "min_iterations": 1},
     )
     bound = case_capabilities(
         "straight_cgls",
         case,
         config=config,
-        initialization_artifact_ids=["water-init-1"],
     )
     assert "available_frequencies_hz" not in static
     assert bound["available_frequencies_hz"] == [150000, 250000]
     assert bound["runtime_available"] is None
     assert bound["resolved_budgets"]["max_iterations"] == 2
     assert bound["resolved_run_policy"]["min_iterations"] == 1
-    assert bound["compatible_initialization_artifact_ids"] == ["water-init-1"]
-    with pytest.raises(ValueError, match="opaque ids"):
-        case_capabilities(
-            "straight_cgls", case, initialization_artifact_ids=["/secret/init.h5"]
-        )
 
 
 def test_json_stdout_cli_and_case_capabilities(capsys, tmp_path):

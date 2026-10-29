@@ -37,21 +37,21 @@ def test_model_prior_uses_no_gt_or_validation_for_updates_and_obeys_budget(name)
     config = AlgorithmConfig(
         parameters={
             "model_grid_shape": [4, 4],
-            "iterations": 2,
             **({"inner_iterations": 4} if name == "bent_ray_gn" else {}),
             **(
                 {"regularization": "laplacian", "regularization_lambda": 0.0001}
                 if name in {"straight_cgls", "bent_ray_gn"}
                 else {}
             ),
-            "evaluation": {"receiver_indices": [1]},
-            "stopping": {
-                "restore_best_validation": False,
-                "validation_patience": None,
-                "objective_rtol": None,
-                "update_rtol": None,
-            },
-        }
+        },
+        run_controls={
+            "max_iterations": 2,
+            "restore_best_validation": False,
+            "validation_patience": None,
+            "objective_rtol": None,
+            "update_rtol": None,
+        },
+        evaluation={"receiver_indices": [1]},
     )
     algo = {
         "straight_cgls": StraightRayCGLSAlgorithm,
@@ -66,7 +66,7 @@ def test_model_prior_uses_no_gt_or_validation_for_updates_and_obeys_budget(name)
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
     assert a.metrics["model_parameterization"]["propagation_shape"] == [8, 8]
     assert a.metrics["data_residual_reduction"] > 0
-    config.parameters["stopping"]["max_forward_calls"] = 1
+    config.run_controls.max_forward_calls = 1
     result = algo.run(case, config)
     assert result.status == "success", result.failure_reason
     assert result.metrics["stopping"]["work"]["forward_calls"] <= 1

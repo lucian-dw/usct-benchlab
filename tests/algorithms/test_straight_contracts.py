@@ -78,16 +78,19 @@ def test_inconsistent_row_action_matches_its_documented_model(subsets, expected)
         measurement=MeasurementSpec(domain="features", delta_tof_s=observed),
     )
     config = AlgorithmConfig(
-        parameters={
-            "stopping": {
-                "max_iterations": 40,
-                "update_rtol": None,
-                "objective_rtol": None,
-                "restore_best_validation": False,
-            }
-        }
+        parameters={},
+        run_controls={
+            "max_iterations": 40,
+            "update_rtol": None,
+            "objective_rtol": None,
+            "restore_best_validation": False,
+        },
     )
-    control = InversionControl(case, config, observed, default_iterations=40)
+    from usctbench.core.config import prepare_config
+
+    control = InversionControl(
+        case, prepare_config("straight_cgls", config), observed, default_iterations=40
+    )
     state, metrics = row_action(
         Operator(),
         control,

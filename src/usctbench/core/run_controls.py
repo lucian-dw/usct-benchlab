@@ -1,114 +1,93 @@
-"""Minimal production stopping and budget admission, separate from hyperparameters.
-
-The agent owns the outer process deadline; array/PDE calls are cooperatively
-interruptible only. A smaller library budget can never enlarge an agent cap.
-"""
+"""One stopping policy and compute budget, independent of model parameters."""
 
 from __future__ import annotations
 
 from typing import Annotated
-
 from pydantic import BaseModel, ConfigDict, Field
-
-from usctbench.core.stopping import StopPolicy
 
 NonnegativeInt = Annotated[int, Field(strict=True, ge=0)]
 NonnegativeFloat = Annotated[float, Field(strict=True, ge=0)]
+PositiveInt = Annotated[int, Field(strict=True, gt=0)]
+
+BUDGET_FIELDS = (
+    "max_iterations",
+    "max_elapsed_s",
+    "max_forward_calls",
+    "max_adjoint_calls",
+)
 
 
 class RunControls(BaseModel):
-    """Complete iterations, optional time/call caps, and small-update patience.
+    """Budgets are checked between charged work units; the host owns hard deadlines.
 
-    A CGLS step, a complete SART sweep and a GN outer step are different units.
-    Call caps use the existing WorkLedger charged-operation convention, which
-    includes setup/calibration and Jacobian calls; they are not PDE-solve FLOPs.
+    Relative update tolerances are opt-in and interpreted in the algorithm's
+    declared variable, units, norm scope and normalization. GT is never a stop rule.
     """
 
     model_config = ConfigDict(
         extra="forbid", allow_inf_nan=False, validate_default=True
     )
-
     max_iterations: NonnegativeInt | None = Field(
-        default=None,
-        description="Null inherits the method iteration default; zero permits no updates.",
+        None,
+        description="Complete updates; null inherits the algorithm default, zero performs no updates.",
     )
     max_elapsed_s: NonnegativeFloat | None = Field(
-        default=None,
-        description="Cooperative elapsed-time cap in seconds; an outer process must enforce a hard timeout.",
-    )
-    min_iterations: NonnegativeInt = Field(
-        default=3,
-        description="Minimum complete iterations before update-based stopping; budgets take priority.",
-    )
-    update_rtol: NonnegativeFloat | None = Field(
-        default=None,
-        description="Opt-in relative change; stopping metadata declares optimization/update variables, units, norm scope and normalization. No universal tolerance is assumed.",
-    )
-    update_patience: Annotated[int, Field(strict=True, ge=1)] = Field(
-        default=2,
-        description="Consecutive eligible small updates, not objective/residual plateau.",
+        None,
+        description="Cooperative seconds; WUST also has a supervised hard deadline.",
     )
     max_forward_calls: NonnegativeInt | None = Field(
-        default=None,
-        description="Optional cap on WorkLedger forward-charged operations, including setup and Jv.",
+        None, description="Charged forward, setup and Jacobian operations."
     )
     max_adjoint_calls: NonnegativeInt | None = Field(
-        default=None,
-        description="Optional cap on WorkLedger adjoint-charged operations, including normalization.",
+        None, description="Charged adjoint operations, including normalization."
     )
-
-    def to_stop_policy(
-        self,
-        *,
-        default_iterations: int | None = None,
-        budget: BudgetCaps | dict | None = None,
-    ) -> StopPolicy:
-        # Legacy YAML policies remain available explicitly. New production calls
-        # do not silently enable objectives, oracle targets or validation selection.
-        return StopPolicy(
-            **self.capped(budget, default_iterations=default_iterations).model_dump(),
-            objective_rtol=None,
-            validation_patience=None,
-            restore_best_validation=False,
-        )
+    min_iterations: NonnegativeInt = 3
+    update_rtol: NonnegativeFloat | None = None
+    update_patience: PositiveInt = 2
+    target_relative_residual: NonnegativeFloat | None = None
+    noise_norm: NonnegativeFloat | None = None
+    discrepancy_factor: Annotated[float, Field(strict=True, ge=1)] = 1.05
+    objective_rtol: NonnegativeFloat | None = None
+    objective_patience: PositiveInt = 5
+    validation_patience: PositiveInt | None = None
+    validation_rtol: NonnegativeFloat = 1e-4
+    restore_best_validation: bool = False
 
     def capped(
-        self, budget: BudgetCaps | dict | None, *, default_iterations: int | None = None
+        self,
+        host_limits: RunControls | dict | None = None,
+        *,
+        default_iterations: int | None = None,
     ) -> RunControls:
-        """Intersect requested controls with agent admission caps (including zero)."""
-        caps = BudgetCaps.model_validate(budget or {})
+        """Resolve the method default before intersecting independent host caps."""
+        limits = RunControls.model_validate(host_limits or {})
         values = self.model_dump()
-        if self.max_iterations is None:
+        if values["max_iterations"] is None:
             if default_iterations is None:
                 raise ValueError(
-                    "default_iterations is required to resolve an inherited budget"
+                    "default_iterations is required for an inherited budget"
                 )
-            # Resolve the method default BEFORE intersection: a cap is never a request.
-            values["max_iterations"] = RunControls(
-                max_iterations=default_iterations
-            ).max_iterations
-        for target, value in {
-            "max_iterations": caps.max_iterations,
-            "max_elapsed_s": caps.timeout_s,
-            "max_forward_calls": caps.max_forward_calls,
-            "max_adjoint_calls": caps.max_adjoint_calls,
-        }.items():
-            if value is not None:
-                values[target] = (
-                    value if values[target] is None else min(value, values[target])
-                )
+            values["max_iterations"] = default_iterations
+        for key in BUDGET_FIELDS:
+            cap = getattr(limits, key)
+            if cap is not None:
+                values[key] = cap if values[key] is None else min(values[key], cap)
         return RunControls.model_validate(values)
 
-
-class BudgetCaps(BaseModel):
-    """Numerical subset of inverse_agent.ComputeBudget.
-
-    Device, memory isolation and thread limits belong to the launching process.
-    Unknown keys are rejected rather than silently pretending to enforce them.
-    """
-
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    max_iterations: NonnegativeInt | None = None
-    timeout_s: NonnegativeFloat | None = None
-    max_forward_calls: NonnegativeInt | None = None
-    max_adjoint_calls: NonnegativeInt | None = None
+    def validate_for_wust(self):
+        unsupported = (
+            "max_forward_calls",
+            "max_adjoint_calls",
+            "update_rtol",
+            "target_relative_residual",
+            "noise_norm",
+            "objective_rtol",
+            "validation_patience",
+        )
+        if (
+            any(getattr(self, key) is not None for key in unsupported)
+            or self.restore_best_validation
+        ):
+            raise ValueError(
+                "WUST supports iteration/time budgets only; no online convergence or call caps"
+            )

@@ -21,7 +21,12 @@ from typing import Any
 import yaml
 
 from usctbench.benchmark.report import write_failure_report
-from usctbench.core.config import coerce_bool
+from usctbench.core.config import (
+    coerce_bool,
+    load_yaml,
+    expand_config_value,
+    prepare_config,
+)
 from usctbench.core.io import read_case_hdf5, write_result_hdf5
 from usctbench.core.provenance import case_measurement_metadata
 from usctbench.core.registry import get_algorithm
@@ -39,44 +44,10 @@ _ENV_DEFAULT_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}")
 
 
 def load_algorithm_config(path: str | Path) -> AlgorithmConfig:
-    with Path(path).open("r", encoding="utf-8") as handle:
-        payload = yaml.safe_load(handle) or {}
-    if not isinstance(payload, dict):
-        raise ValueError("algorithm config must be a YAML mapping")
-    parameters = payload.get("parameters", {})
-    metadata = payload.get("metadata", {})
-    if not isinstance(parameters, dict):
-        raise ValueError("config parameters must be a mapping")
-    if not isinstance(metadata, dict):
-        raise ValueError("config metadata must be a mapping")
-    from usctbench.algorithms.configuration import validate_algorithm_config
-
-    unknown = payload.keys() - {
-        "name",
-        "algorithm",
-        "parameters",
-        "metadata",
-        "run_controls",
-        "budget_caps",
-    }
-    if unknown:
-        raise ValueError(f"unknown algorithm config fields: {sorted(unknown)}")
-    if (
-        payload.get("name")
-        and payload.get("algorithm")
-        and payload["name"] != payload["algorithm"]
-    ):
-        raise ValueError("conflicting name/algorithm aliases")
-    config = AlgorithmConfig(
-        name=payload.get("name") or payload.get("algorithm"),
-        parameters=_expand_config_value(parameters),
-        metadata=_expand_config_value(metadata),
-        run_controls=payload.get("run_controls"),
-        budget_caps=payload.get("budget_caps"),
-    )
-    if config.name:
-        return validate_algorithm_config(config.name, config)
-    return config
+    config = AlgorithmConfig.model_validate(expand_config_value(load_yaml(path)))
+    if not config.name:
+        raise ValueError("Algorithm YAML requires name")
+    return prepare_config(config.name, config)
 
 
 def run_algorithm_case(
@@ -107,7 +78,9 @@ def run_algorithm_case(
                 "algorithm/config mismatch: "
                 f"requested {algorithm_name!r}, config declares {config.name!r}"
             )
-        config.parameters.setdefault("_run_output_dir", str(out_root / case_id))
+        if config.deployment.scratch_root is None:
+            config.deployment.scratch_root = str(out_root / case_id)
+        config = prepare_config(algorithm_name, config, case=case)
         algorithm = get_algorithm(algorithm_name)
         stages[stage] = {"status": "completed"}
         stage = "solve"
@@ -152,14 +125,7 @@ def run_algorithm_case(
     )
     if result.status == ResultStatus.SUCCESS and result.sound_speed_mps is not None:
         try:
-            image_policy = dict(config.parameters.get("image_evaluation", {}))
-            image_policy.setdefault(
-                "water_speed_mps",
-                config.parameters.get(
-                    "reference_sound_speed_mps",
-                    case.metadata.get("reference_sound_speed_mps", 1500.0),
-                ),
-            )
+            image_policy = config.image_evaluation.model_dump(exclude_none=True)
             result.metrics.update(
                 compute_regional_image_metrics(
                     result.sound_speed_mps,

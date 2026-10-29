@@ -1,4 +1,4 @@
-"""Small WUST parameter contract; deployment is hidden from autonomous Agents."""
+"""Scientific WUST parameters; deployment is supplied separately by the host."""
 
 from typing import ClassVar, Literal
 from pydantic import model_validator
@@ -68,21 +68,6 @@ class WUSTParameters(Parameters):
     source_batch_size: PositiveInt = parameter(1, "Number of source RHS per batch.")
     update_mask: list[list[bool]] | None = parameter(
         None, "Expert mask, never inferred from GT; WUST validates PML clearance."
-    )
-    runtime_root: str | None = parameter(
-        None, "WUST protocol-2 checkout; null uses USCT_WUST_ROOT.", exposure="internal"
-    )
-    matlab_executable: str = parameter(
-        "matlab", "Deployment-owned MATLAB executable.", exposure="internal"
-    )
-    cuda_visible_devices: str | None = parameter(
-        None, "Deployment GPU selection; no CPU fallback.", exposure="internal"
-    )
-    backend: Literal["gpu", "cpu"] = parameter(
-        "gpu", "GPU production; CPU reference/debug only.", exposure="internal"
-    )
-    scratch_root: str | None = parameter(
-        None, "Deployment-owned artifact directory.", exposure="internal"
     )
 
     @model_validator(mode="after")

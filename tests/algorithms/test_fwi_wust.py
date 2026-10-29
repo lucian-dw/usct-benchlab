@@ -15,6 +15,7 @@ from usctbench.algorithms.fwi.io import (
 )
 from usctbench.algorithms.fwi.parameters import WUSTParameters
 from usctbench.core.algorithm_specs import make_agent_config, SPECS
+from usctbench.core.config import prepare_config
 from usctbench.core.schema import (
     AlgorithmConfig,
     GeometrySpec,
@@ -66,14 +67,14 @@ def wave_case():
 def config(tmp_path):
     return AlgorithmConfig(
         name="fwi_wust",
+        run_controls={"max_elapsed_s": 60.0},
         parameters={
             "sound_speed_bounds_mps": [1400.0, 1700.0],
             "pml_m": 0.003,
             "source_batch_size": 3,
             "frequency_schedule_hz": [100000.0, 100000.0, 120000.0],
-            "scratch_root": str(tmp_path),
         },
-        run_controls={"max_elapsed_s": 60.0},
+        deployment={"scratch_root": str(tmp_path)},
     )
 
 
@@ -137,7 +138,9 @@ def stub(monkeypatch):
 )
 def test_schedule_and_budget_mapping(wave_case, config, count, cap, expected, reason):
     config.run_controls.max_iterations = count
-    config.budget_caps = {"max_iterations": cap}
+    config = prepare_config(
+        "fwi_wust", config, case=wave_case, host_limits={"max_iterations": cap}
+    )
     result = module.WUSTFWIAlgorithm().run(wave_case, config)
     assert result.status == "success", result.failure_reason
     assert result.metrics["completed_iterations"] == expected
@@ -190,8 +193,8 @@ def test_input_geometry_sign_axes_masks_and_no_gt_leak(wave_case, config, tmp_pa
 )
 def test_unsupported_controls_fail(wave_case, config, key, value):
     setattr(config.run_controls, key, value)
-    result = module.WUSTFWIAlgorithm().run(wave_case, config)
-    assert result.status == "failed"
+    with pytest.raises(ValueError, match="iteration/time budgets"):
+        module.WUSTFWIAlgorithm().run(wave_case, config)
     assert not FakeClient.requests
 
 
@@ -241,7 +244,7 @@ def test_agent_and_runtime_admission_contract():
     assert (
         make_agent_config(
             "fwi_wust", {"initialization": "scalar", "initial_sound_speed_mps": 1490.0}
-        ).parameters["initial_sound_speed_mps"]
+        ).parameters.initial_sound_speed_mps
         == 1490.0
     )
 

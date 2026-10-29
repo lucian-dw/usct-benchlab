@@ -38,21 +38,19 @@ def test_water_scales_jacobian_not_just_background_and_needs_no_truth():
     )
     case.ground_truth = GroundTruthSpec()
     cfg = AlgorithmConfig(
-        parameters={
-            "mode": "fixed_background",
-            "iterations": 4,
-            "evaluation": {"receiver_indices": [1], "frequency_indices": [2]},
-            "stopping": {
-                "restore_best_validation": False,
-                "objective_rtol": None,
-                "update_rtol": None,
-            },
-        }
+        parameters={"variant": "wkb_fixed"},
+        run_controls={
+            "max_iterations": 4,
+            "restore_best_validation": False,
+            "objective_rtol": None,
+            "update_rtol": None,
+        },
+        evaluation={"receiver_indices": [1], "frequency_indices": [2]},
     )
     fitted = RWaveAdapter().run(case, cfg)
-    configured = RWaveAdapter().run(
-        case, AlgorithmConfig(parameters={**cfg.parameters, "source_spectrum": source})
-    )
+    configured_case = case.model_copy(deep=True)
+    configured_case.measurement.source_spectrum = source
+    configured = RWaveAdapter().run(configured_case, cfg)
     assert fitted.failure_reason is None, fitted.failure_reason
     assert configured.failure_reason is None, configured.failure_reason
     np.testing.assert_allclose(

@@ -77,15 +77,17 @@ def main():
         name="fwi_wust",
         run_controls={"max_elapsed_s": args.timeout_s, "max_iterations": 2},
         parameters={
-            "runtime_root": str(args.runtime.resolve()),
-            "matlab_executable": args.matlab,
-            "backend": args.backend,
             "sound_speed_bounds_mps": [1300.0, 1800.0],
             "stencil_bounds_mps": [1400.0, 1700.0],
             "pml_m": 0.003,
-            "frequency_schedule_hz": [1e5, 1e5, 1.2e5],
+            "frequency_schedule_hz": [100000.0, 100000.0, 120000.0],
             "source_batch_size": 2,
             "update_mask": initial["update_mask"].tolist(),
+        },
+        deployment={
+            "runtime_root": str(args.runtime.resolve()),
+            "matlab_executable": args.matlab,
+            "backend": args.backend,
             "scratch_root": str(args.out),
         },
     )

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from usctbench.algorithms.configuration import validated_run
+from usctbench.core.config import prepared_run
 
 import numpy as np
 
-from usctbench.algorithms._control import InversionControl, add_image_metrics
+from usctbench.algorithms._control import InversionControl
 from usctbench.algorithms.ray import (
     reference_sound_speed,
     run_with_failure_capture,
@@ -31,7 +31,7 @@ class RWaveAdapter:
 
     name = "rwave_adapter"
 
-    @validated_run
+    @prepared_run
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
         return run_with_failure_capture(
             self.name, case, lambda: self._run(case, config)
@@ -40,36 +40,21 @@ class RWaveAdapter:
     def _run(self, case, config):
         p = config.parameters
         green_settings = {
-            "green_backend": str(p.get("green_backend", "eikonal_wkb")),
-            "green_solver_rtol": float(p.get("green_solver_rtol", 1e-7)),
-            "green_solver_maxiter": p.get("green_solver_maxiter", 20),
+            "green_backend": str(p.green_backend),
+            "green_solver_rtol": float(p.green_solver_rtol),
+            "green_solver_maxiter": p.green_solver_maxiter,
         }
-        mode = str(p.get("mode", "nonlinear"))
+        mode = str(p.mode)
         if mode not in {"nonlinear", "fixed_background"}:
             raise ValueError("rwave mode must be nonlinear or fixed_background")
-        initialization = str(p.get("initialization", "configured"))
+        initialization = p.initialization if mode == "nonlinear" else "configured"
         if initialization not in {"configured", "phase_cgls"}:
             raise ValueError("initialization must be configured or phase_cgls")
         if mode == "fixed_background" and initialization != "configured":
             raise ValueError("phase_cgls initialization requires nonlinear mode")
-        initialization_iterations = p.get("initialization_iterations", 80)
-        if (
-            isinstance(initialization_iterations, (bool, np.bool_))
-            or not isinstance(initialization_iterations, (int, np.integer))
-            or initialization_iterations <= 0
-        ):
-            raise ValueError("initialization_iterations must be a positive integer")
-        initialization_lambda = float(p.get("initialization_lambda", 0.02))
-        initialization_smooth_mm = float(p.get("initialization_smooth_mm", 3.0))
-        if (
-            not np.isfinite(initialization_lambda)
-            or initialization_lambda < 0
-            or not np.isfinite(initialization_smooth_mm)
-            or initialization_smooth_mm < 0
-        ):
-            raise ValueError(
-                "initialization lambda/smoothing must be finite and nonnegative"
-            )
+        initialization_iterations = (
+            p.initialization_iterations if mode == "nonlinear" else 0
+        )
         if (
             case.measurement.freq_data is None
             or case.measurement.frequencies_hz is None
@@ -79,22 +64,29 @@ class RWaveAdapter:
             )
         c0 = reference_sound_speed(case, config)
         background = np.broadcast_to(
-            np.asarray(p.get("background_sound_speed_mps", c0), dtype=float),
+            np.asarray(
+                (
+                    c0
+                    if p.background_sound_speed_mps is None
+                    else p.background_sound_speed_mps
+                ),
+                dtype=float,
+            ),
             case.grid.shape,
         )
         inverse_ppw = float(
             np.min(background)
             / (np.max(case.measurement.frequencies_hz) * max(case.grid.spacing_m))
         )
-        if inverse_ppw < 4 and not coerce_bool(p.get("allow_underresolved", False)):
+        if inverse_ppw < 4 and not coerce_bool(p.allow_underresolved):
             raise ValueError(
                 f"Ray-Born inverse grid underresolved ({inverse_ppw:.2f} pixels/wavelength < 4); refine the image grid, not just the k-Wave simulation grid"
             )
-        source = p.get("source_spectrum", case.measurement.source_spectrum)
+        source = case.measurement.source_spectrum
         if (
             source is None
             and case.measurement.water_reference is None
-            and not coerce_bool(p.get("assume_unit_source", False))
+            and not coerce_bool(p.assume_unit_source)
         ):
             raise ValueError(
                 "Ray-Born requires a calibrated source_spectrum or independent water_reference; assume_unit_source is for explicitly unit-source synthetic data only"
@@ -145,13 +137,14 @@ class RWaveAdapter:
         # frequency into pressure inversion. Pressure weights need a separate
         # acquisition-noise definition; the default is uniform precision.
         weights = None
-        if coerce_bool(p.get("use_feature_weights", False)):
+        if coerce_bool(p.use_feature_weights):
             weights = case.measurement.ray_weights
             if weights is None:
                 weights = case.measurement.feature_quality
-            if config.parameters.get("evaluation", {}).get(
-                "frequency_indices"
-            ) or config.parameters.get("evaluation", {}).get("frequency_fraction"):
+            if (
+                config.evaluation.frequency_indices
+                or config.evaluation.frequency_fraction
+            ):
                 raise ValueError(
                     "broadband ToF feature weights cannot be used with a pressure frequency holdout"
                 )
@@ -159,11 +152,7 @@ class RWaveAdapter:
             case,
             config,
             observed,
-            default_iterations=int(
-                p.get("outer_iterations", 4)
-                if mode == "nonlinear"
-                else p.get("inner_iterations", 30)
-            ),
+            default_iterations=4 if mode == "nonlinear" else 30,
             weights=weights,
             valid_mask=valid,
             iteration_unit=(
@@ -194,7 +183,7 @@ class RWaveAdapter:
             raise ValueError(
                 "background sound speed lies outside sound_speed_bounds_mps"
             )
-        roi_only = coerce_bool(p.get("roi_update_only", False))
+        roi_only = coerce_bool(p.roi_update_only)
         roi = case.grid.roi_mask if roi_only else None
 
         def exhausted_result(exc):
@@ -206,7 +195,7 @@ class RWaveAdapter:
                 calibration_completed=False,
                 surrogate_travel_time_backend=False,
             )
-            add_image_metrics(metrics, background, case, c0)
+
             return ReconstructionResult(
                 algorithm=self.name,
                 case_id=case.case_id,
@@ -224,7 +213,7 @@ class RWaveAdapter:
                 background_sound_speed_mps=background,
                 exterior_speed_mps=c0,
                 source_spectrum=source,
-                max_cache_bytes=int(p.get("max_cache_bytes", 128 * 1024**2)),
+                max_cache_bytes=int(p.max_cache_bytes),
                 **green_settings,
             )
         except BudgetExhausted as exc:
@@ -277,12 +266,10 @@ class RWaveAdapter:
             offset = control.call("background_prediction", operator.background_data)
         except BudgetExhausted as exc:
             return exhausted_result(exc)
-        damping = float(
-            p.get("damping", float(p.get("regularization_lambda", 0.0)) ** 2)
-        )
+        damping = p.regularization_lambda**2
         if not np.isfinite(damping) or damping < 0:
             raise ValueError("damping must be finite and nonnegative")
-        scaling = str(p.get("regularization_scaling", "absolute"))
+        scaling = str(p.regularization_scaling)
         penalty_scale = 1.0
         if scaling == "relative_jacobian_diagonal":
             try:
@@ -301,10 +288,8 @@ class RWaveAdapter:
             raise ValueError(
                 "regularization_scaling must be absolute or relative_jacobian_diagonal"
             )
-        regularization = str(
-            p.get("regularization", "laplacian" if mode == "nonlinear" else "identity")
-        )
-        length_wavelengths = float(p.get("regularization_length_wavelengths", 0.0))
+        regularization = str(p.regularization)
+        length_wavelengths = float(p.regularization_length_wavelengths)
         if not np.isfinite(length_wavelengths) or length_wavelengths < 0:
             raise ValueError(
                 "regularization_length_wavelengths must be finite and nonnegative"
@@ -363,10 +348,8 @@ class RWaveAdapter:
                     control.split.train,
                     c0=c0,
                     bounds=bounds,
-                    max_phase_rms=float(p.get("initialization_max_phase_rms", 0.2)),
-                    min_amplitude_ratio=float(
-                        p.get("initialization_min_amplitude_ratio", 0.05)
-                    ),
+                    max_phase_rms=float(p.initialization_max_phase_rms),
+                    min_amplitude_ratio=float(p.initialization_min_amplitude_ratio),
                 )
                 if not np.any(precision):
                     raise ValueError(
@@ -388,12 +371,14 @@ class RWaveAdapter:
                         np.zeros(case.grid.shape),
                         training,
                         iterations=initialization_iterations,
-                        damping=initialization_lambda**2,
+                        damping=p.initialization_lambda**2,
                         regularization="laplacian",
                         roi=roi,
                     )
                     sigma = (
-                        initialization_smooth_mm * 1e-3 / np.array(case.grid.spacing_m)
+                        p.initialization_smooth_mm
+                        * 1e-3
+                        / np.array(case.grid.spacing_m)
                     )
                     delta = gaussian_filter(delta, sigma, mode="nearest")
                     slowness = np.clip(1 / c0 + delta, 1 / bounds[1], 1 / bounds[0])
@@ -408,7 +393,7 @@ class RWaveAdapter:
                 case.measurement.frequencies_hz,
                 exterior_speed_mps=c0,
                 source_spectrum=operator.source_spectrum,
-                max_cache_bytes=int(p.get("max_cache_bytes", 128 * 1024**2)),
+                max_cache_bytes=int(p.max_cache_bytes),
                 **green_settings,
             )
             state, metrics = nonlinear_least_squares(
@@ -416,17 +401,17 @@ class RWaveAdapter:
                 control,
                 initial=initial_model,
                 bounds=bounds,
-                inner_iterations=p.get("inner_iterations", 12),
-                inner_solver=str(p.get("inner_solver", "lsmr")),
-                inner_options=p.get("inner_options", {}),
+                inner_iterations=p.inner_iterations,
+                inner_solver=str(p.inner_solver),
+                inner_options=p.inner_options.model_dump(),
                 damping=damping,
                 regularization=regularization,
                 roi=roi,
-                step_length=float(p.get("step_length", 1)),
-                smooth_sigma=float(p.get("smooth_sigma", 0)),
-                max_update_mps=float(p.get("max_update_mps", 12)),
-                max_backtracks=p.get("max_backtracks", 10),
-                gradient_rtol=float(p.get("gradient_rtol", 1e-8)),
+                step_length=float(p.step_length),
+                smooth_sigma=float(p.smooth_sigma),
+                max_update_mps=float(p.max_update_mps),
+                max_backtracks=p.max_backtracks,
+                gradient_rtol=float(p.gradient_rtol),
             )
             sound_speed = 1 / np.sqrt(state)
             metrics["initialization"] = initialization
@@ -490,7 +475,7 @@ class RWaveAdapter:
                 "ground_truth_used_for_initialization": False,
             }
         )
-        add_image_metrics(metrics, sound_speed, case, c0)
+
         return ReconstructionResult(
             algorithm=self.name,
             case_id=case.case_id,

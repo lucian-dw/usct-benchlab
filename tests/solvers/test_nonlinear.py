@@ -62,18 +62,18 @@ def run_outer(request, monkeypatch):
         options = {"rtol": 1e-9}
         config = AlgorithmConfig(
             parameters={
-                "iterations": 1,
                 "inner_solver": "lsqr",
                 "inner_options": options,
-                "damping": 0.0,
+                "regularization_lambda": 0.0,
                 "regularization": "identity",
                 "sound_speed_bounds_mps": [1400, 1500],
-                "stopping": {
-                    "objective_rtol": None,
-                    "update_rtol": None,
-                    "restore_best_validation": False,
-                },
-            }
+            },
+            run_controls={
+                "max_iterations": 1,
+                "objective_rtol": None,
+                "update_rtol": None,
+                "restore_best_validation": False,
+            },
         )
         calls = []
 
@@ -88,7 +88,14 @@ def run_outer(request, monkeypatch):
 
         if request.param == "nonlinear":
             monkeypatch.setattr(nonlinear, "normal_step", inner_step)
-            control = InversionControl(case, config, observed, default_iterations=1)
+            from usctbench.core.config import prepare_config
+
+            control = InversionControl(
+                case,
+                prepare_config("bent_ray_gn", config),
+                observed,
+                default_iterations=1,
+            )
             state, metrics = nonlinear.nonlinear_least_squares(
                 forward,
                 control,
@@ -194,16 +201,19 @@ def solve(monkeypatch):
             measurement=MeasurementSpec(domain="features", tof_s=observed),
         )
         config = AlgorithmConfig(
-            parameters={
-                "stopping": {
-                    "max_iterations": 1,
-                    "objective_rtol": None,
-                    "update_rtol": None,
-                    "restore_best_validation": False,
-                },
-            }
+            parameters={},
+            run_controls={
+                "max_iterations": 1,
+                "objective_rtol": None,
+                "update_rtol": None,
+                "restore_best_validation": False,
+            },
         )
-        control = InversionControl(case, config, observed, default_iterations=1)
+        from usctbench.core.config import prepare_config
+
+        control = InversionControl(
+            case, prepare_config("bent_ray_gn", config), observed, default_iterations=1
+        )
         forward = _DenseForward(matrix, initial)
         settings = dict(
             bounds=(1400, 1600),

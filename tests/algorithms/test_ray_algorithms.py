@@ -31,10 +31,10 @@ def test_ray_sound_speed_algorithms_run(synthetic_case):
     ):
         config = AlgorithmConfig(
             parameters={
-                "iterations": 1,
                 **({"subsets": 4} if algorithm.name == "straight_sart" else {}),
                 **({"inner_iterations": 4} if algorithm.name == "bent_ray_gn" else {}),
-            }
+            },
+            run_controls={"max_iterations": 1},
         )
         result = algorithm.run(synthetic_case, config)
         assert result.status == ResultStatus.SUCCESS
@@ -43,7 +43,9 @@ def test_ray_sound_speed_algorithms_run(synthetic_case):
 
 
 def test_native_bent_ray_and_rwave_feature_rejection(synthetic_case):
-    config = AlgorithmConfig(parameters={"outer_iterations": 1, "inner_iterations": 3})
+    config = AlgorithmConfig(
+        parameters={"inner_iterations": 3}, run_controls={"max_iterations": 1}
+    )
     bent = BentRayGNAdapter().run(synthetic_case, config)
     assert bent.status == ResultStatus.SUCCESS
     assert bent.metrics["backend"] == "native_eikonal_fast_marching"
@@ -56,7 +58,7 @@ def test_native_bent_ray_and_rwave_feature_rejection(synthetic_case):
 
 
 def test_string_false_bool_parameters_do_not_enable_ray_options(synthetic_case):
-    common = {"iterations": 2, "roi_update_only": "false"}
+    common = {"roi_update_only": "false"}
     cgls = StraightRayCGLSAlgorithm().run(
         synthetic_case,
         AlgorithmConfig(

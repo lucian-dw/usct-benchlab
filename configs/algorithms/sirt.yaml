@@ -1,6 +1,7 @@
 name: straight_sirt
+run_controls:
+  max_iterations: 50
 parameters:
-  iterations: 50
   relaxation: 0.25
   smooth_sigma: 0.5
   smooth_every: 1

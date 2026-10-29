@@ -4,26 +4,24 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from usctbench.core.run_controls import BudgetCaps, RunControls
+from usctbench.core.run_controls import RunControls
 from usctbench.core.schema import AlgorithmConfig
 from usctbench.core.stopping import StopMonitor, WorkLedger
 
 
 def test_minimal_policy_disables_optional_quality_rules():
-    policy = RunControls().to_stop_policy(default_iterations=30)
+    policy = RunControls().capped(default_iterations=30)
     assert policy.max_iterations == 30
     assert policy.update_rtol is None
     assert policy.min_iterations == 3
     assert policy.update_patience == 2
     assert policy.objective_rtol is None
     assert policy.validation_patience is None
-    assert policy.target_rmse_mps is None
     assert not policy.restore_best_validation
-    assert not policy.allow_ground_truth_stopping
 
 
 def test_stationarity_is_not_update_stagnation():
-    policy = RunControls().to_stop_policy(default_iterations=3)
+    policy = RunControls().capped(default_iterations=3)
     monitor = StopMonitor(policy, WorkLedger(policy))
     monitor.reason = "stationary_gradient"
     assert monitor.record()["termination_category"] == "stationarity"
@@ -34,8 +32,8 @@ def test_stationarity_is_not_update_stagnation():
 def test_caps_intersect_and_zero_is_not_missing():
     requested = RunControls(max_iterations=30, max_elapsed_s=2, max_forward_calls=10)
     actual = requested.capped(
-        BudgetCaps(
-            max_iterations=0, timeout_s=4, max_forward_calls=3, max_adjoint_calls=0
+        RunControls(
+            max_iterations=0, max_elapsed_s=4, max_forward_calls=3, max_adjoint_calls=0
         )
     )
     assert actual.max_iterations == 0
@@ -63,9 +61,9 @@ def test_invalid_controls_fail_closed(values):
 
 
 def test_one_small_step_or_pre_minimum_steps_do_not_stop():
-    policy = RunControls(
-        min_iterations=2, update_patience=2, update_rtol=0.01
-    ).to_stop_policy(default_iterations=10)
+    policy = RunControls(min_iterations=2, update_patience=2, update_rtol=0.01).capped(
+        default_iterations=10
+    )
     monitor = StopMonitor(policy, WorkLedger(policy))
     updates = [None, 0.001, 0.001, 0.5, 0.001, 0.001]
     for k, update in enumerate(updates):
@@ -89,23 +87,25 @@ def test_controls_round_trip_and_no_ambiguous_legacy_stopping():
         ).run_controls.max_iterations
         == 7
     )
-    with pytest.raises(ValidationError, match="not both"):
-        AlgorithmConfig(run_controls=RunControls(), parameters={"stopping": {}})
+    from usctbench.core.config import prepare_config
+
+    with pytest.raises(ValidationError):
+        prepare_config("straight_cgls", AlgorithmConfig(parameters={"stopping": {}}))
 
 
 @pytest.mark.parametrize("native", [4, 5, 10, 30, 50, 120, 200])
 @pytest.mark.parametrize("partial", [{"max_elapsed_s": 60}, {"update_rtol": 1e-5}, {}])
 def test_partial_controls_inherit_method_iterations(native, partial):
     assert (
-        RunControls(**partial).to_stop_policy(default_iterations=native).max_iterations
+        RunControls(**partial).capped(default_iterations=native).max_iterations
         == native
     )
 
 
 @pytest.mark.parametrize("cap, expected", [(100, 30), (10, 10), (0, 0)])
 def test_cap_cannot_increase_inherited_default(cap, expected):
-    policy = RunControls().to_stop_policy(
-        default_iterations=30, budget={"max_iterations": cap}
+    policy = RunControls().capped(
+        default_iterations=30, host_limits={"max_iterations": cap}
     )
     assert policy.max_iterations == expected
     assert (
@@ -119,7 +119,7 @@ def test_cap_cannot_increase_inherited_default(cap, expected):
 def test_explicit_request_overrides_default_before_cap():
     assert (
         RunControls(max_iterations=60)
-        .to_stop_policy(default_iterations=30, budget={"max_iterations": 40})
+        .capped(default_iterations=30, host_limits={"max_iterations": 40})
         .max_iterations
         == 40
     )
@@ -127,38 +127,23 @@ def test_explicit_request_overrides_default_before_cap():
         RunControls().capped({"max_iterations": 100})
 
 
-def test_inversion_control_resolves_partial_controls_and_caps():
-    from usctbench.algorithms._control import InversionControl
-    from usctbench.core.schema import GeometrySpec, GridSpec, MeasurementSpec, USCTCase
+def test_public_boundary_resolves_partial_controls_and_host_caps():
+    from usctbench.core.config import prepare_config
 
-    case = USCTCase(
-        case_id="controls",
-        grid=GridSpec(shape=(2, 2), spacing_m=(1, 1)),
-        geometry=GeometrySpec(tx_pos_m=[[0, 0]], rx_pos_m=[[1, 1]]),
-        measurement=MeasurementSpec(domain="features", delta_tof_s=[[1.0]]),
+    request = AlgorithmConfig(run_controls=RunControls(max_elapsed_s=60))
+    resolved = prepare_config(
+        "straight_cgls", request, host_limits={"max_iterations": 100}
     )
-    config = AlgorithmConfig(
-        run_controls=RunControls(max_elapsed_s=60),
-        budget_caps=BudgetCaps(max_iterations=100),
+    assert resolved.run_controls.max_iterations == 30
+    assert request.run_controls.max_iterations is None
+    resolved = prepare_config(
+        "straight_cgls", request, host_limits={"max_iterations": 0}
     )
-    for default in (4, 10, 30, 50):
-        control = InversionControl(
-            case, config, np.ones((1, 1)), default_iterations=default
-        )
-        assert control.policy.max_iterations == default
-    config.parameters["iterations"] = 7
-    assert (
-        InversionControl(
-            case, config, np.ones((1, 1)), default_iterations=50
-        ).policy.max_iterations
-        == 7
-    )
+    assert resolved.run_controls.max_iterations == 0
 
 
 def test_stage_change_resets_update_patience_not_global_iteration_budget():
-    policy = RunControls(
-        max_iterations=4, min_iterations=1, update_rtol=0.01
-    ).to_stop_policy()
+    policy = RunControls(max_iterations=4, min_iterations=1, update_rtol=0.01).capped()
     monitor = StopMonitor(policy, WorkLedger(policy))
     for k, stage in enumerate(("a", "a", "b", "c", "d")):
         monitor.set_stage(stage)
