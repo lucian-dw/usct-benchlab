@@ -1,30 +1,28 @@
-from __future__ import annotations
+"""Public execution, persistence ordering, evaluation isolation and suite paths."""
 
-import yaml
 import json
 import h5py
 import numpy as np
 import pytest
+import yaml
 
-from usctbench.benchmark.runner import run_algorithm_case, run_benchmark_suite
+from usctbench import run, suite, evaluate
 from usctbench.core.io import write_case_hdf5
+from usctbench.core.schema import ReconstructionResult
 
 
-@pytest.mark.parametrize("failed_stage", ["evaluation", "preview"])
-def test_postprocessing_failure_keeps_completed_numerical_result(
-    synthetic_case, tmp_path, monkeypatch, failed_stage
+@pytest.mark.parametrize("stage", ["evaluation", "preview"])
+def test_postprocessing_failure_keeps_numerical_result(
+    synthetic_case, tmp_path, monkeypatch, stage
 ):
     from usctbench.benchmark import runner
 
-    case_path = write_case_hdf5(synthetic_case, tmp_path / "case.h5")
-    cfg = tmp_path / "config.yaml"
-    cfg.write_text("name: straight_cgls\nrun_controls:\n  max_iterations: 2\n")
-    out = tmp_path / "run" / synthetic_case.case_id
-    numerical_bytes = []
+    saved = []
 
     def fail(*args, **kwargs):
-        numerical_bytes.append((out / "result.h5").read_bytes())
-        with h5py.File(out / "result.h5") as handle:
+        saved.append((tmp_path / "result.h5").read_bytes())
+        assert (tmp_path / "index.json").exists()
+        with h5py.File(tmp_path / "result.h5") as handle:
             assert np.isfinite(handle["sound_speed_mps"][()]).all()
         raise RuntimeError("postprocessing unavailable")
 
@@ -32,26 +30,28 @@ def test_postprocessing_failure_keeps_completed_numerical_result(
         runner,
         (
             "compute_regional_image_metrics"
-            if failed_stage == "evaluation"
+            if stage == "evaluation"
             else "write_preview_png"
         ),
         fail,
     )
-    runner.run_algorithm_case("straight_cgls", case_path, cfg, tmp_path / "run")
-    assert numerical_bytes and numerical_bytes[-1] == (out / "result.h5").read_bytes()
-    metadata = yaml.safe_load((out / "metadata.yaml").read_text())
-    assert metadata["status"] == "success"
-    assert metadata["runtime_s"] > 0
-    assert metadata["stages"]["save"]["status"] == "completed"
-    assert metadata["stages"][failed_stage]["status"] == "failed"
-    assert "postprocessing unavailable" in metadata["stages"][failed_stage]["message"]
+    result = run(
+        "straight_cgls",
+        synthetic_case,
+        {"run_controls": {"max_iterations": 2}},
+        tmp_path,
+    )
+    assert result.status == "budget_exhausted"
+    assert saved and saved[-1] == (tmp_path / "result.h5").read_bytes()
+    record = json.loads((tmp_path / "run.json").read_text())
+    assert record["runtime_s"] > 0
+    assert record["stages"]["save"]["status"] == "completed"
+    assert record["stages"][stage]["status"] == "failed"
+    assert "postprocessing unavailable" in record["stages"][stage]["message"]
 
 
 def test_runner_supplies_gt_free_shallow_case(synthetic_case, tmp_path, monkeypatch):
     from usctbench.benchmark import runner
-    from usctbench.core.schema import ReconstructionResult
-
-    monkeypatch.setattr(runner, "read_case_hdf5", lambda path: synthetic_case)
 
     class Algorithm:
         def run(self, case, config):
@@ -61,192 +61,144 @@ def test_runner_supplies_gt_free_shallow_case(synthetic_case, tmp_path, monkeypa
             return ReconstructionResult(
                 algorithm="straight_cgls",
                 case_id=case.case_id,
-                sound_speed_mps=np.full(case.grid.shape, 1500.0),
-                runtime_s=0,
+                sound_speed_mps=np.full(case.grid.shape, 1500),
             )
 
     monkeypatch.setattr(runner, "get_algorithm", lambda name: Algorithm())
-    cfg = tmp_path / "config.yaml"
-    cfg.write_text("name: straight_cgls\nparameters: {}\n")
-    out = runner.run_algorithm_case("straight_cgls", "ignored.h5", cfg, tmp_path)
+    result = run("straight_cgls", synthetic_case, {}, tmp_path)
     assert synthetic_case.ground_truth.sound_speed_mps is not None
-    metadata = yaml.safe_load((out / "metadata.yaml").read_text())
-    assert metadata["status"] == "success"
-    assert metadata["stages"]["evaluation"]["status"] == "completed"
+    assert result.status == "completed"
+    assert result.metrics["stages"]["evaluation"]["status"] == "completed"
 
 
-def test_no_ground_truth_keeps_holdout_scores_without_image_scores(
-    synthetic_case, tmp_path
-):
+def test_no_ground_truth_keeps_holdout_without_image_scores(synthetic_case, tmp_path):
     case = synthetic_case.model_copy(deep=True)
     case.ground_truth.sound_speed_mps = None
-    case_path = write_case_hdf5(case, tmp_path / "no_gt.h5")
-    cfg = tmp_path / "config.yaml"
-    cfg.write_text(
-        yaml.safe_dump(
-            {
-                "name": "straight_cgls",
-                "run_controls": {"max_iterations": 3},
-                "evaluation": {"receiver_fraction": 0.125, "seed": 42},
-            }
-        )
+    result = run(
+        "straight_cgls",
+        case,
+        {
+            "run_controls": {"max_iterations": 3},
+            "evaluation": {"receiver_fraction": 0.125, "seed": 42},
+        },
+        tmp_path,
     )
-    out = run_algorithm_case("straight_cgls", case_path, cfg, tmp_path / "run")
-    metrics = json.loads((out / "metrics.json").read_text())
+    metrics = result.metrics
     assert metrics["rmse"] is metrics["psnr"] is metrics["ssim"] is None
     assert metrics["image_evaluation"]["status"] == "ground_truth_unavailable"
     assert metrics["evaluation"]["receiver"]["weighted_relative_residual"] >= 0
-    metadata = yaml.safe_load((out / "metadata.yaml").read_text())
-    assert metadata["image_evaluation"] == metrics["image_evaluation"]
+    assert (
+        json.loads((tmp_path / "metrics.json").read_text())["image_evaluation"]
+        == metrics["image_evaluation"]
+    )
 
 
-def test_image_region_changes_only_reporting_not_reconstruction(
-    synthetic_case, tmp_path
-):
-    case_path = write_case_hdf5(synthetic_case, tmp_path / "case.h5")
-    outputs = []
-    for region in ("tissue", "full_image"):
-        cfg = tmp_path / f"{region}.yaml"
-        cfg.write_text(
-            yaml.safe_dump(
-                {
-                    "name": "straight_cgls",
-                    "run_controls": {"max_iterations": 3},
-                    "image_evaluation": {"primary_region": region},
-                }
-            )
+def test_image_region_changes_only_reporting(synthetic_case, tmp_path):
+    results = [
+        run(
+            "straight_cgls",
+            synthetic_case,
+            {
+                "run_controls": {"max_iterations": 3},
+                "image_evaluation": {"primary_region": region},
+            },
+            tmp_path / region,
         )
-        outputs.append(
-            run_algorithm_case("straight_cgls", case_path, cfg, tmp_path / region)
-        )
-    with (
-        h5py.File(outputs[0] / "result.h5") as a,
-        h5py.File(outputs[1] / "result.h5") as b,
-    ):
-        np.testing.assert_array_equal(
-            a["sound_speed_mps"][()], b["sound_speed_mps"][()]
-        )
-    a, b = [json.loads((p / "metrics.json").read_text()) for p in outputs]
+        for region in ("tissue", "full_image")
+    ]
+    np.testing.assert_array_equal(
+        results[0].sound_speed_mps, results[1].sound_speed_mps
+    )
+    a, b = [result.metrics for result in results]
     assert a["rmse"] == a["tissue_rmse"]
     assert b["rmse"] == b["full_image_rmse"]
-    # Timing is naturally different; compare the numerical history only.
     for row_a, row_b in zip(a["iteration_history"], b["iteration_history"]):
         for key in ("iteration", "residual_norm", "objective"):
             assert row_a[key] == row_b[key]
     assert a["stop_reason"] == b["stop_reason"]
 
 
-def test_line_search_failure_is_not_a_passing_benchmark():
-    from usctbench.benchmark.runner import _assess_record
-
-    passed, _, failures = _assess_record(
-        {
-            "status": "success",
-            "algorithm": "rwave_adapter",
-            "stop_reason": "line_search_failed",
-            "stopping": {"termination_category": "failure"},
-        },
-        {},
-        [],
-    )
-    assert not passed
-    assert any("unsuccessfully" in reason for reason in failures)
-
-
-def test_run_algorithm_case_writes_standard_artifacts(synthetic_case, tmp_path):
-    case_path = tmp_path / "case.h5"
-    config_path = tmp_path / "cgls.yaml"
-    write_case_hdf5(synthetic_case, case_path)
-    config_path.write_text(
-        "name: straight_cgls\nrun_controls:\n  max_iterations: 2\n", encoding="utf-8"
-    )
-
-    out_dir = run_algorithm_case(
-        "straight_cgls", case_path, config_path, tmp_path / "runs"
-    )
-
-    assert (out_dir / "result.h5").exists()
-    assert (out_dir / "metrics.json").exists()
-    assert (out_dir / "metadata.yaml").exists()
-    assert (out_dir / "preview.png").exists()
-
-
-def test_run_algorithm_case_rejects_config_algorithm_mismatch(synthetic_case, tmp_path):
-    case_path = tmp_path / "case.h5"
-    config_path = tmp_path / "sirt.yaml"
-    write_case_hdf5(synthetic_case, case_path)
-    config_path.write_text(
-        "name: straight_sirt\nrun_controls:\n  max_iterations: 2\n", encoding="utf-8"
-    )
-
-    out_dir = run_algorithm_case(
-        "straight_cgls", case_path, config_path, tmp_path / "runs"
-    )
-    metadata = yaml.safe_load((out_dir / "metadata.yaml").read_text())
-
-    assert metadata["status"] == "failed"
-    assert "algorithm/config mismatch" in metadata["failure_reason"]
-
-
-def test_benchmark_suite_runs_synthetic_case(synthetic_case, tmp_path):
-    case_dir = tmp_path / "cases"
-    case_dir.mkdir()
-    write_case_hdf5(synthetic_case, case_dir / "case.h5")
-    config_path = tmp_path / "sirt.yaml"
-    config_path.write_text(
-        "name: straight_sirt\nrun_controls:\n  max_iterations: 2\n", encoding="utf-8"
-    )
-    suite_path = tmp_path / "suite.yaml"
-    suite_path.write_text(
-        yaml.safe_dump(
-            {
-                "name": "test_suite",
-                "case_glob": str(case_dir / "*.h5"),
-                "outputs": {"root": str(tmp_path / "runs")},
-                "algorithms": [{"name": "straight_sirt", "config": str(config_path)}],
-                "min_cases": 1,
-                "min_records": 1,
-                "expected_statuses": ["success"],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    result = run_benchmark_suite(suite_path)
-
-    assert result["run_checks"]["passed"] is True
-    assert result["records"]
-
-
-def test_benchmark_suite_resolves_config_relative_to_suite_file(
-    synthetic_case, tmp_path
+@pytest.mark.parametrize("checkpoint", [False, True])
+def test_failures_and_partial_checkpoint_are_not_published_as_success(
+    synthetic_case, tmp_path, monkeypatch, checkpoint
 ):
-    case_dir = tmp_path / "cases"
-    config_dir = tmp_path / "configs"
-    case_dir.mkdir()
-    config_dir.mkdir()
-    write_case_hdf5(synthetic_case, case_dir / "case.h5")
-    (config_dir / "sirt.yaml").write_text(
-        "name: straight_sirt\nrun_controls:\n  max_iterations: 1\n", encoding="utf-8"
+    from usctbench.benchmark import runner
+
+    class Algorithm:
+        def run(self, case, config):
+            if not checkpoint:
+                raise FloatingPointError("invalid PDE solution")
+            return ReconstructionResult(
+                algorithm="straight_cgls",
+                case_id=case.case_id,
+                sound_speed_mps=np.full(case.grid.shape, 1500),
+                metrics={"stop_reason": "line_search_failed"},
+            )
+
+    monkeypatch.setattr(runner, "get_algorithm", lambda name: Algorithm())
+    result = run("straight_cgls", synthetic_case, {}, tmp_path)
+    assert result.status == "failed"
+    assert (result.sound_speed_mps is not None) == checkpoint
+    assert not (tmp_path / "index.json").exists()
+    report = evaluate(tmp_path)
+    assert not report["passed"]
+    assert report["records"][0]["failure_stage"] == "solve"
+    assert report["records"][0]["message"]
+
+
+def test_run_writes_artifacts_and_rejects_config_mismatch(synthetic_case, tmp_path):
+    config = tmp_path / "algorithm.yaml"
+    config.write_text("name: straight_cgls\nrun_controls:\n  max_iterations: 2\n")
+    result = run("straight_cgls", synthetic_case, config, tmp_path / "output")
+    assert result.status == "budget_exhausted"
+    for name in ("result.h5", "run.json", "index.json", "metrics.json", "preview.png"):
+        assert (tmp_path / "output" / name).exists()
+    assert evaluate(tmp_path / "output")["passed"]
+    result = run("straight_sirt", synthetic_case, config, tmp_path / "output")
+    assert result.status == "failed"
+    assert "algorithm/config mismatch" in result.failure_reason
+    assert not (tmp_path / "output" / "index.json").exists()
+    assert not (tmp_path / "output" / "preview.png").exists()
+    assert "rmse" not in json.loads((tmp_path / "output" / "metrics.json").read_text())
+
+
+def test_partial_deployment_override_keeps_explicit_backend():
+    from usctbench import prepare_config
+
+    config = prepare_config(
+        "fwi_wust",
+        {"deployment": {"backend": "cpu", "matlab_executable": "/opt/matlab"}},
+        deployment={"runtime_root": "/opt/wust"},
     )
-    suite_path = tmp_path / "suite.yaml"
-    suite_path.write_text(
+    assert config.deployment.backend == "cpu"
+    assert config.deployment.matlab_executable == "/opt/matlab"
+    assert config.deployment.runtime_root == "/opt/wust"
+
+
+def test_suite_resolves_all_paths_relative_to_yaml(
+    synthetic_case, tmp_path, monkeypatch
+):
+    write_case_hdf5(synthetic_case, tmp_path / "cases" / "case.h5")
+    (tmp_path / "algorithm.yaml").write_text(
+        "name: straight_sirt\nrun_controls:\n  max_iterations: 2\n"
+    )
+    path = tmp_path / "suite.yaml"
+    path.write_text(
         yaml.safe_dump(
             {
-                "name": "relative_suite",
-                "case_glob": str(case_dir / "*.h5"),
-                "outputs": {"root": str(tmp_path / "runs")},
-                "algorithms": [
-                    {"name": "straight_sirt", "config": "configs/sirt.yaml"}
-                ],
-                "min_cases": 1,
-                "min_records": 1,
-                "expected_statuses": ["success"],
+                "case_glob": "cases/*.h5",
+                "outputs": {"root": "runs"},
+                "algorithms": [{"name": "straight_sirt", "config": "algorithm.yaml"}],
             }
-        ),
-        encoding="utf-8",
+        )
     )
-
-    result = run_benchmark_suite(suite_path)
-
-    assert result["run_checks"]["passed"] is True
+    monkeypatch.chdir(tmp_path.parent)
+    result = suite(path)
+    assert result["passed"]
+    assert len(result["records"]) == 1
+    assert result["num_cases"] == 1
+    assert result["run_root"].startswith(str(tmp_path / "runs"))
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("case_glob: missing/*.h5\n")
+    with pytest.raises(ValueError, match="matched no cases"):
+        suite(empty)

@@ -125,7 +125,7 @@ def test_uphill_gaussian_smoothing_recovers_regularized_dense_solution(
         ),
     )
     expected = np.linalg.solve(matrix.T @ matrix + 0.2 * np.eye(4), matrix.T @ data)
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     np.testing.assert_allclose(
         (1 / result.sound_speed_mps - 1 / 1500).ravel(), expected, atol=2e-14
     )
@@ -173,7 +173,7 @@ def test_weighted_regularized_solution_matches_fine_grid_dense_reference(
         design.T @ (train_weights.ravel() * data),
     )
     result = bent.BentRayGNAdapter().run(case, config)
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     np.testing.assert_allclose(
         (1 / result.sound_speed_mps - 1 / 1500).ravel(), basis @ expected, atol=2e-11
     )
@@ -194,7 +194,7 @@ def test_descent_smoothing_that_fails_armijo_retries_raw_newton(monkeypatch):
     result = bent.BentRayGNAdapter().run(
         case, _config(max_iterations=1, smooth_sigma=1)
     )
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert not result.metrics["direction_checks"][0]["smoothing_rejected"]
     attempts = result.metrics["line_search_history"]
     assert len(attempts) == 11
@@ -215,7 +215,7 @@ def test_clipping_rejects_uphill_newton_and_uses_projected_gradient(monkeypatch)
     result = bent.BentRayGNAdapter().run(
         case, _config(max_iterations=1, initial_sound_speed_mps=1 / initial)
     )
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     attempts = result.metrics["line_search_history"]
     assert result.metrics["direction_checks"][0]["raw_directional_derivative"] < 0
     assert attempts[0]["projected_directional_derivative"] > 0
@@ -236,7 +236,7 @@ def test_zero_inner_update_does_not_claim_stationarity(monkeypatch):
         lambda jac, residual, current, *a, **kw: np.zeros_like(current),
     )
     result = bent.BentRayGNAdapter().run(case, _config(max_iterations=1))
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["stop_reason"] == "max_iterations"
     assert result.metrics["line_search_history"][-1]["proposal"] == "projected_gradient"
     assert result.metrics["data_residual_reduction"] > 0
@@ -246,7 +246,7 @@ def test_bound_kkt_stationarity_requires_no_newton_or_trial(monkeypatch):
     initial = np.full((2, 2), 1 / 1700)
     case, forward = _dense(monkeypatch, np.eye(4), (initial - 1 / 1500 - 1e-6).ravel())
     result = bent.BentRayGNAdapter().run(case, _config(initial_sound_speed_mps=1700))
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["stop_reason"] == "stationary_projected_gradient"
     assert len(forward.states) == 1
     assert forward.adjoint_calls == 1
@@ -269,7 +269,7 @@ def test_nonfinite_trials_are_rejected_without_changing_checkpoint(
         == "nonfinite_trial_prediction_or_objective"
     )
     if recover:
-        assert result.status == "success", result.failure_reason
+        assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
         assert result.metrics["data_residual_reduction"] > 0
         _assert_armijo(result)
     else:
@@ -327,7 +327,7 @@ def test_budget_after_rejected_trial_preserves_image_and_prediction(
             **({"model_grid_shape": [2, 2]} if reduced else {}),
         ),
     )
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["stop_reason"] == "forward_calls_budget"
     assert len(forward.states) == 2
     assert len(result.metrics["iteration_history"]) == 1
@@ -360,7 +360,7 @@ def test_relative_gradient_stopping_is_invariant_to_objective_scale(monkeypatch,
     result = bent.BentRayGNAdapter().run(
         case, _config(regularization_lambda=np.sqrt(0.2 * scale**2))
     )
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["stop_reason"] == "stationary_gradient"
     assert result.metrics["iterations"] == 1
     assert result.metrics["gradient_checks"][0]["relative_to_initial"] == 1
@@ -382,7 +382,7 @@ def test_gradient_and_trials_obey_budgets_and_return_complete_iterates(
             regularization_lambda=np.sqrt(0.2), run_controls={f"max_{counter}": limit}
         ),
     )
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["stop_reason"] == f"{counter}_budget"
     work = result.metrics["stopping"]["work"]
     assert work[counter] == limit
@@ -420,7 +420,7 @@ def test_differential_reference_override_must_match_metadata(reference):
             reference_sound_speed_mps=matching, run_controls={"max_forward_calls": 0}
         ),
     )
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["measurement_reference_sound_speed_mps"] == matching
 
 
@@ -432,7 +432,7 @@ def test_absolute_tof_allows_model_reference_override():
         case,
         _config(reference_sound_speed_mps=1600, run_controls={"max_forward_calls": 0}),
     )
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["measurement_reference_sound_speed_mps"] is None
     np.testing.assert_allclose(result.sound_speed_mps, 1600)
 
@@ -489,7 +489,7 @@ def test_native_regularized_objective_directional_derivative_and_roi(
         **parameters,
     )
     result = bent.BentRayGNAdapter().run(case, config)
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert len(records) == 2
     current, direction, control = records[-1]
     fine = current if basis is None else basis.forward(current)

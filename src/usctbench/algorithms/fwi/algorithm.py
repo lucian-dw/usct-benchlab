@@ -193,7 +193,11 @@ class WUSTFWIAlgorithm:
             return ReconstructionResult(
                 algorithm=self.name,
                 case_id=case.case_id,
-                status=ResultStatus.FAILED,
+                status=(
+                    ResultStatus.BUDGET_EXHAUSTED
+                    if reason == "time_budget"
+                    else ResultStatus.FAILED
+                ),
                 failure_reason=f"{reason}: {exc}",
                 runtime_s=time.monotonic() - started,
                 metrics={

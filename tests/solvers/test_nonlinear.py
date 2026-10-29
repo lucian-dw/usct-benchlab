@@ -110,7 +110,7 @@ def run_outer(request, monkeypatch):
             monkeypatch.setattr(bent, "normal_step", inner_step)
             monkeypatch.setattr(bent, "EikonalForward", lambda *a, **kw: forward)
             result = bent.BentRayGNAdapter().run(case, config)
-            expected_status = "failed" if direction == "tiny" else "success"
+            expected_status = "failed" if direction == "tiny" else "budget_exhausted"
             assert result.status == expected_status, result.failure_reason
             state, metrics = 1 / result.sound_speed_mps, result.metrics
         assert state.shape == initial.shape

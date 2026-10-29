@@ -43,9 +43,9 @@ class MeasurementDomain(StrEnum):
 class ResultStatus(StrEnum):
     """Outcome state for an algorithm run."""
 
-    SUCCESS = "success"
+    COMPLETED = "completed"
+    BUDGET_EXHAUSTED = "budget_exhausted"
     FAILED = "failed"
-    SKIPPED = "skipped"
 
 
 def _optional_array(value: Any) -> np.ndarray | None:
@@ -305,7 +305,7 @@ class ReconstructionResult(_ArrayModel):
     sound_speed_mps: np.ndarray | None = None
     metrics: dict[str, Any] = Field(default_factory=dict)
     runtime_s: float = 0.0
-    status: ResultStatus = ResultStatus.SUCCESS
+    status: ResultStatus = ResultStatus.COMPLETED
     failure_reason: str | None = None
     artifacts: dict[str, Any] = Field(default_factory=dict)
 
@@ -321,6 +321,22 @@ class ReconstructionResult(_ArrayModel):
     def _validate_result(self) -> "ReconstructionResult":
         if self.runtime_s < 0:
             raise ValueError("runtime_s must be non-negative")
-        if self.status != ResultStatus.SUCCESS and not self.failure_reason:
-            raise ValueError("failed or skipped results must include failure_reason")
+        reason = self.metrics.get("stop_reason")
+        if self.status == ResultStatus.COMPLETED:
+            if reason in {
+                "max_iterations",
+                "time_budget",
+                "forward_calls_budget",
+                "adjoint_calls_budget",
+            }:
+                self.status = ResultStatus.BUDGET_EXHAUSTED
+            elif reason in {
+                "numerical_failure",
+                "linear_solver_breakdown",
+                "line_search_failed",
+            }:
+                self.status = ResultStatus.FAILED
+                self.failure_reason = self.failure_reason or str(reason)
+        if self.status == ResultStatus.FAILED and not self.failure_reason:
+            raise ValueError("failed results must include failure_reason")
         return self

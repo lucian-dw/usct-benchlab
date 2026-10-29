@@ -78,6 +78,9 @@ def prepare_config(name, config, *, case=None, host_limits=None, deployment=None
         config = AlgorithmConfig.model_validate(expand_config_value(load_yaml(config)))
     elif not isinstance(config, AlgorithmConfig):
         config = AlgorithmConfig.model_validate(config)
+    name = name or config.name
+    if name is None:
+        raise ValueError("algorithm name is required")
     if config.name is not None and config.name != name:
         raise ValueError(f"algorithm/config mismatch: {name!r} != {config.name!r}")
     values = expand_config_value(config.parameters)
@@ -100,11 +103,10 @@ def prepare_config(name, config, *, case=None, host_limits=None, deployment=None
         raise ValueError("case required to resolve inherited WUST frequency budget")
     if name == "fwi_wust":
         controls.validate_for_wust()
-    context = (
-        config.deployment
-        if deployment is None
-        else Deployment.model_validate(deployment)
-    )
+    context = config.deployment
+    if deployment is not None:
+        overrides = Deployment.model_validate(deployment).model_dump(exclude_unset=True)
+        context = Deployment.model_validate({**context.model_dump(), **overrides})
     return config.model_copy(
         update={
             "name": name,
@@ -154,16 +156,12 @@ def coerce_bool(value: Any) -> bool:
 
     if isinstance(value, bool):
         return value
-    if value is None:
-        return False
-    if isinstance(value, (int, float)):
-        return bool(value)
     text = str(value).strip().lower()
     if text in {"1", "true", "yes", "on"}:
         return True
     if text in {"0", "false", "no", "off", ""}:
         return False
-    return bool(value)
+    raise ValueError(f"invalid boolean: {value!r}")
 
 
 def _expand_env(value: str) -> str:
@@ -171,4 +169,6 @@ def _expand_env(value: str) -> str:
         name, default = match.group(1), match.group(2)
         return os.environ.get(name, default)
 
-    return os.path.expandvars(_ENV_DEFAULT_RE.sub(replace_default, value))
+    return os.path.expanduser(
+        os.path.expandvars(_ENV_DEFAULT_RE.sub(replace_default, value))
+    )

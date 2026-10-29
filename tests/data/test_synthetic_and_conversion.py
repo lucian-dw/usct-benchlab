@@ -12,7 +12,7 @@ from usctbench.data.conversion import convert_nbp_slice2d_mat, convert_kwave_cha
 from usctbench.operators.straight_ray import StraightRayProjector
 from usctbench.data.nbpslice2d import (
     inspect_nbp_slice2d_zip,
-    make_nbp_slice2d_smoke_subset,
+    prepare_cases as prepare_nbp_cases,
 )
 from usctbench.data.synthetic import (
     make_sound_speed_case,
@@ -126,7 +126,7 @@ def test_openbreastus_conversion_preserves_unrelated_case_files(tmp_path, monkey
     monkeypatch.setattr(
         openbreastus, "inspect_openbreastus", lambda *args: {"cases": []}
     )
-    openbreastus.make_smoke_subset(root, out, symlink_sources=False)
+    openbreastus.prepare_cases(root, out, symlink_sources=False)
     assert saved.read_bytes() == b"existing user result"
 
 
@@ -200,7 +200,7 @@ def test_nbpslice2d_zip_inspection_and_smoke_conversion(tmp_path):
         archive.write(mat_path, "A/A_sample.mat")
 
     index = inspect_nbp_slice2d_zip(zip_path, tmp_path / "index.json")
-    manifest = make_nbp_slice2d_smoke_subset(
+    manifest = prepare_nbp_cases(
         zip_path, tmp_path / "nbp", converted_shape=(4, 4), n_transducers=8
     )
 

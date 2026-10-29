@@ -37,7 +37,7 @@ def test_ray_sound_speed_algorithms_run(synthetic_case):
             run_controls={"max_iterations": 1},
         )
         result = algorithm.run(synthetic_case, config)
-        assert result.status == ResultStatus.SUCCESS
+        assert result.status in {ResultStatus.COMPLETED, ResultStatus.BUDGET_EXHAUSTED}
         assert result.sound_speed_mps is not None
         assert "data_relative_residual" in result.metrics
 
@@ -47,7 +47,7 @@ def test_native_bent_ray_and_rwave_feature_rejection(synthetic_case):
         parameters={"inner_iterations": 3}, run_controls={"max_iterations": 1}
     )
     bent = BentRayGNAdapter().run(synthetic_case, config)
-    assert bent.status == ResultStatus.SUCCESS
+    assert bent.status in {ResultStatus.COMPLETED, ResultStatus.BUDGET_EXHAUSTED}
     assert bent.metrics["backend"] == "native_eikonal_fast_marching"
     assert bent.metrics["true_bent_ray"] is True
     assert bent.metrics["surrogate_travel_time_backend"] is False

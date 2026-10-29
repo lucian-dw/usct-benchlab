@@ -123,8 +123,6 @@ def test_or_rules_record_all_triggers_with_priority():
         "max_iterations",
     ]
     assert m.record()["quality_target_met"] is True
-    assert m.record()["selected_iterate_quality_target_met"] is True
-    assert m.record()["terminated_iterate_quality_target_met"] is True
     assert m.history[0]["quality_triggered_rules"] == []
     assert m.history[1]["quality_triggered_rules"] == [
         "target_residual",
@@ -151,10 +149,6 @@ def test_stop_reasons(kwargs, second, reason):
         assert observe(m, 1, **second) == reason
     record = m.record()
     assert record["quality_target_met"] is (reason == "exact_data_fit")
-    assert record["selected_iterate_quality_target_met"] is (reason == "exact_data_fit")
-    assert record["terminated_iterate_quality_target_met"] is (
-        reason == "exact_data_fit"
-    )
 
 
 def test_validation_restores_best_not_last_state():
@@ -187,10 +181,6 @@ def test_quality_target_tracks_selected_checkpoint_not_termination(
     np.testing.assert_array_equal(state, [index + 1.0])
     record = m.record()
     assert record["quality_target_met"] is (not restore_best_validation)
-    assert record["selected_iterate_quality_target_met"] is (
-        not restore_best_validation
-    )
-    assert record["terminated_iterate_quality_target_met"] is True
     assert record["selected_iteration"] == index
     assert record["reason"] == "target_residual"
     assert record["triggered_rules"] == ["target_residual", "max_iterations"]
@@ -206,8 +196,6 @@ def test_quality_target_requires_a_complete_checkpoint():
     assert m.selected_state() == (None, None)
     record = m.record()
     assert record["quality_target_met"] is False
-    assert record["selected_iterate_quality_target_met"] is False
-    assert record["terminated_iterate_quality_target_met"] is False
     assert record["has_complete_checkpoint"] is False
     assert record["selected_iteration"] is None
     assert record["reason"] == "target_residual"

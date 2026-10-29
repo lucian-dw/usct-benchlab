@@ -95,7 +95,7 @@ def main():
     result = WUSTFWIAlgorithm().run(case, config)
     write_result_hdf5(result, args.out / "result.h5")
     (args.out / "metrics.json").write_text(json.dumps(result.metrics, indent=2))
-    if result.status != "success":
+    if result.status not in {"completed", "budget_exhausted"}:
         raise RuntimeError(result.failure_reason)
     fixture.check_reconstruction(
         result.metrics["wust"], result.sound_speed_mps, backend=args.backend

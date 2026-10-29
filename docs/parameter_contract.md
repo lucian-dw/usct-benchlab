@@ -91,3 +91,30 @@ The refactor removes implicit aliases. Update existing configurations explicitly
 Historical configs remain in the sibling research archive. They are not accepted
 as current runtime APIs. No reconstruction operator or penalty formula changes
 as a consequence of these name migrations.
+
+## Public execution and saved output
+
+```python
+from usctbench import run, describe, evaluate
+
+specification = describe("straight_cgls")
+result = run("straight_cgls", "case.h5", "configs/algorithms/cgls.yaml", "runs/example")
+summary = evaluate("runs/example")
+```
+
+The output path is the exact case directory, not a parent to which a case ID is
+silently appended. The equivalent CLI is `usct run straight_cgls --case case.h5
+--config configs/algorithms/cgls.yaml --out runs/example`.
+
+Saved output is `result.h5`, `run.json`, `index.json`, `metrics.json` and optional
+`preview.png`. The index is published only after arrays and the run record exist;
+a failed run does not have a successful index. Evaluation/preview failures do not
+overwrite numerical arrays. `run.json` distinguishes `completed`,
+`budget_exhausted` and `failed`, with stage messages and actual wall time.
+Budget exhaustion is not convergence. A killed WUST run may have no usable model.
+
+`usct data prepare --dataset synthetic --shape 32 32 --n-transducers 32 --out
+data/synthetic_demo` prepares one matched-model example. The same command accepts
+`--dataset openbreastus` or `nbpslice2d` with explicit source data. Pressure imports
+use `usct data import-pressure`; `usct inspect`, `demo`, `evaluate` and `bench`
+have separate responsibilities. Suite paths are relative to their YAML file.

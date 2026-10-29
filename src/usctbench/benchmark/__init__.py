@@ -1,15 +1,9 @@
 """Benchmark runners and report helpers."""
 
-from .runner import (
-    evaluate_run,
-    load_algorithm_config,
-    run_algorithm_case,
-    run_benchmark_suite,
-)
+from .runner import run, suite, evaluate
 
 __all__ = [
-    "evaluate_run",
-    "load_algorithm_config",
-    "run_algorithm_case",
-    "run_benchmark_suite",
+    "run",
+    "suite",
+    "evaluate",
 ]

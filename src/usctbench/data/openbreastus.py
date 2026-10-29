@@ -446,7 +446,7 @@ def _slug(value: str) -> str:
     return slug or "case"
 
 
-def make_smoke_subset(
+def prepare_cases(
     root: str | Path,
     out: str | Path,
     *,
@@ -560,38 +560,6 @@ def make_smoke_subset(
     )
     write_schema_report(index, out_path / "schema_inspection_report.md")
     return manifest
-
-
-def make_quality_subset(
-    root: str | Path,
-    out: str | Path,
-    *,
-    cases_per_density: int = 1,
-    symlink_sources: bool = True,
-    convert_speed_mat: bool = True,
-    converted_shape: tuple[int, int] = (256, 256),
-    spacing_m: tuple[float, float] = (1.0e-3, 1.0e-3),
-    n_transducers: int = 128,
-    sample_axis: int = 2,
-    image_axes: str = "yx",
-    sound_speed_units: str = "m/s",
-) -> dict[str, Any]:
-    """Create OpenBreastUS map-surrogate cases for visual quality comparison."""
-
-    return make_smoke_subset(
-        root,
-        out,
-        cases_per_density=cases_per_density,
-        symlink_sources=symlink_sources,
-        convert_speed_mat=convert_speed_mat,
-        converted_shape=converted_shape,
-        spacing_m=spacing_m,
-        n_transducers=n_transducers,
-        sample_axis=sample_axis,
-        image_axes=image_axes,
-        sound_speed_units=sound_speed_units,
-        subset_role="quality_comparison",
-    )
 
 
 def _capability_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:

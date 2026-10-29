@@ -48,7 +48,7 @@ def config(*, max_iterations=3, run_controls=None, evaluation=None, **parameters
 def test_rebuilds_background_and_accepts_only_true_nonlinear_decrease():
     case, _, _ = nonlinear_case()
     result = RWaveAdapter().run(case, config())
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     metrics = result.metrics
     assert metrics["nonlinear_background_updates"] >= 1, metrics
     curve = [row["objective"] for row in metrics["iteration_history"]]
@@ -66,7 +66,7 @@ def test_nonlinear_holdout_is_not_used_for_updates_or_line_search():
     changed.measurement.freq_data[..., 1] *= 15j
     original = RWaveAdapter().run(case, config(max_iterations=1))
     altered = RWaveAdapter().run(changed, config(max_iterations=1))
-    assert original.status == altered.status == "success"
+    assert original.status == altered.status in {"completed", "budget_exhausted"}
     np.testing.assert_array_equal(original.sound_speed_mps, altered.sound_speed_mps)
     assert (
         original.metrics["line_search_history"]
@@ -114,7 +114,7 @@ def test_source_broadcast_matches_explicit_frequency_tx_calibration(source):
     expected = RWaveAdapter().run(case, config(max_iterations=1))
     case.measurement.source_spectrum = np.asarray(source)
     result = RWaveAdapter().run(case, config(max_iterations=1))
-    assert result.status == expected.status == "success"
+    assert result.status == expected.status in {"completed", "budget_exhausted"}
     np.testing.assert_array_equal(result.sound_speed_mps, expected.sound_speed_mps)
 
 
@@ -130,7 +130,7 @@ def test_relative_regularization_is_invariant_to_pressure_units():
         regularization="laplacian",
     )
     a, b = (RWaveAdapter().run(c, cfg) for c in (case, other))
-    assert a.status == b.status == "success"
+    assert a.status == b.status in {"completed", "budget_exhausted"}
     np.testing.assert_allclose(a.sound_speed_mps, b.sound_speed_mps, rtol=1e-10)
     np.testing.assert_allclose(
         b.metrics["effective_damping"],
@@ -197,7 +197,7 @@ def test_phase_seed_and_pressure_updates_exclude_heldout_frequency():
         },
     )
     a, b = [RWaveAdapter().run(c, cfg) for c in (case, changed)]
-    assert a.status == b.status == "success", a.failure_reason
+    assert a.status == b.status in {"completed", "budget_exhausted"}, a.failure_reason
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
     assert a.metrics["initialization_qc"]["frequencies_hz"] == [100e3, 150e3, 200e3]
 
@@ -208,7 +208,7 @@ def test_nonlinear_budget_returns_a_complete_checkpoint(budget):
     result = RWaveAdapter().run(
         case, config(run_controls={"max_forward_calls": budget})
     )
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["stop_reason"] == "forward_calls_budget"
     assert result.metrics["stopping"]["work"]["forward_calls"] == budget
     np.testing.assert_allclose(result.sound_speed_mps, 1500)

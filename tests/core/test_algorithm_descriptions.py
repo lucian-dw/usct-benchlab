@@ -95,9 +95,9 @@ def test_agent_types_enums_cross_checks_and_budget_boundary():
     )
     case = make_sound_speed_case(shape=(8, 8), n_transducers=8)
     result = get_algorithm("straight_cgls").run(case, config)
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["iterations"] <= 1
-    assert result.metrics["stopping"]["policy"]["update_rtol"] is None
+    assert result.metrics["stopping"]["resolved_policy"]["update_rtol"] is None
 
 
 def test_external_fwi_agent_admission_stays_canonical_and_strict():

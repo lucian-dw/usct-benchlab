@@ -196,7 +196,7 @@ class StopMonitor:
                 triggers.append("validation_plateau")
         if iteration >= p.max_iterations:
             triggers.append("max_iterations")
-        # Preserve checkpoint quality evidence, including oracle-only triggers.
+        # Targets belong to the selected checkpoint, not merely the final iterate.
         self.history[-1]["quality_triggered_rules"] = [
             rule
             for rule in triggers
@@ -249,14 +249,9 @@ class StopMonitor:
             ),
             "elapsed_s": self.work.elapsed_s,
             "work": dict(self.work.counts),
-            "policy": self.policy.model_dump(),
             "resolved_policy": self.policy.model_dump(),
             "budget_scope": "operator_calls; time_checked_between_calls",
             "has_complete_checkpoint": self.last_state is not None,
-            "terminated_iterate_quality_target_met": bool(
-                self.history and self.history[-1]["quality_triggered_rules"]
-            ),
-            "selected_iterate_quality_target_met": selected_quality_target_met,
             "quality_target_met": selected_quality_target_met,
             "termination_category": (
                 "not_terminated"

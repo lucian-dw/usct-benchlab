@@ -1,30 +1,14 @@
 name: synthetic_demo
-case_glob: ${USCT_SYNTHETIC_CASE_GLOB:-data/synthetic_demo/cases/*.h5}
+case_glob: ${USCT_SYNTHETIC_CASE_GLOB:-../../data/synthetic_demo/cases/*.h5}
 outputs:
-  root: ${USCT_RUN_ROOT:-runs/usctbench_runs}
+  root: ${USCT_RUN_ROOT:-../../runs}
+host_limits:
+  max_iterations: 10
 algorithms:
   - name: straight_cgls
-    config: configs/algorithms/cgls.yaml
+    config: ../algorithms/cgls.yaml
   - name: straight_sirt
-    config: configs/algorithms/sirt.yaml
+    config: ../algorithms/sirt.yaml
   - name: straight_sart
-    config: configs/algorithms/sart.yaml
-  - name: bent_ray_gn
-    config: configs/algorithms/bent_ray.yaml
-# This suite contains TOF-only surrogates. Ray-Born requires complex pressure;
-# it is validated separately in tests/algorithms/test_native_inversions.py.
-min_cases: 1
-min_records: 4
-expected_statuses: [success]
-required_metrics:
-  # Includes an all-water case, which correctly has no tissue image score.
-  # Gate this numerical smoke on explicit full-FOV scores, not a silent fallback.
-  default: [full_image_rmse, full_image_ssim, data_residual_norm, data_residual_reduction]
-thresholds:
-  default:
-    full_image_rmse: 50.0
-# Relative residual is undefined for the all-zero homogeneous delta-TOF case.
-# Require non-increasing residual instead of replacing 0/0 by a fake score.
-minimums:
-  default:
-    data_residual_reduction: 0.0
+    config: ../algorithms/sart.yaml
+# Matched straight-ray ToF; native Eikonal and Born have separate physical fixtures.

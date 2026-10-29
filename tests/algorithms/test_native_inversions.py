@@ -58,7 +58,12 @@ def test_born_zero_cache_preserves_reconstruction(mode):
     repeated = RWaveAdapter().run(
         case, prepare_config("rwave_adapter", uncached_config)
     )
-    assert cached.status == uncached.status == repeated.status == "success"
+    assert (
+        cached.status
+        == uncached.status
+        == repeated.status
+        in {"completed", "budget_exhausted"}
+    )
     np.testing.assert_allclose(
         uncached.sound_speed_mps, cached.sound_speed_mps, rtol=1e-12
     )
@@ -84,7 +89,7 @@ def test_native_inversions_reduce_residual_and_need_no_truth(physics, algorithm)
         evaluation={"receiver_indices": [1]},
     )
     result = algorithm().run(case, config)
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["data_residual_reduction"] > 0.5
     assert result.metrics["evaluation"]["receiver"]["num_samples"] > 0
     assert "target_rmse_mps" not in result.metrics["stopping"]["resolved_policy"]
@@ -128,7 +133,7 @@ def test_heldout_values_do_not_change_training_trajectory(physics, algorithm):
         evaluation={"receiver_indices": [1]},
     )
     a, b = algorithm().run(case, config), algorithm().run(altered, config)
-    assert a.status == b.status == "success"
+    assert a.status == b.status in {"completed", "budget_exhausted"}
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
     np.testing.assert_allclose(a.metrics["residual_curve"], b.metrics["residual_curve"])
     assert a.metrics["evaluation_split"] == b.metrics["evaluation_split"]
@@ -142,7 +147,7 @@ def test_zero_budget_returns_initial_checkpoint_with_reason(physics, algorithm):
     result = algorithm().run(
         case, AlgorithmConfig(parameters={}, run_controls={"max_forward_calls": 0})
     )
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["stop_reason"] == "forward_calls_budget"
     assert result.metrics["stopping"]["work"]["forward_calls"] == 0
     np.testing.assert_allclose(result.sound_speed_mps, 1500)
@@ -158,7 +163,7 @@ def test_frequency_holdout_does_not_train_or_leak_reciprocal_receiver():
             evaluation={"frequency_indices": [2], "receiver_indices": [1]},
         ),
     )
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["evaluation"]["frequency"]["num_samples"] > 0
     assert result.metrics["evaluation"]["joint"]["num_samples"] > 0
     assert result.metrics["evaluation_split"]["reciprocal_tx_excluded"] == [1]
@@ -203,7 +208,7 @@ def test_bent_cgls_initialization_does_not_use_heldout_data():
         evaluation={"receiver_indices": [1]},
     )
     a, b = [BentRayGNAdapter().run(c, config) for c in (case, altered)]
-    assert a.status == b.status == "success", a.failure_reason
+    assert a.status == b.status in {"completed", "budget_exhausted"}, a.failure_reason
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
     assert a.metrics["initialization_training_only"] is True
     assert "rmse" not in a.metrics

@@ -147,3 +147,21 @@ Migration instructions are in `docs/parameter_contract.md`.
 
 Next: shorten result publication/reporting and unify CLI/public execution. Then
 P5 consolidates the mathematical kernels without changing their update order.
+
+## P4: public execution and publication
+
+Completed: one `run/suite/evaluate` API and CLI handler dispatch. Output paths
+are explicit, suite paths are relative to the suite file, and GT is removed
+from the numerical view. Arrays and run records precede the success index;
+evaluation/preview failures keep saved arrays. Statuses are completed,
+budget_exhausted or failed. Partial deployment overrides preserve other explicit
+settings. Reusing an output directory invalidates only generated reporting files.
+
+Validation: local CPU suite 564 passed (20.91 s); A100 preceding execution unit
+563 passed (7.19 s), with the final deployment regression included in the next
+remote gate. Black, Ruff and whitespace checks passed. CLI synthetic quickstart
+and demo produced arrays, run records, metrics and previews. A100 real MATLAB
+CPU protocol gate passed on a 23x27 grid: one fixture invocation (10.89 s), one
+two-update reconstruction invocation (10.79 s), stop reason max_iterations.
+
+Next: P5 removes duplicate physical kernels and consolidates numerical solvers.

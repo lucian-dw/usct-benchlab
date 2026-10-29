@@ -60,7 +60,7 @@ def inspect_nbp_slice2d_zip(
     return index
 
 
-def make_nbp_slice2d_smoke_subset(
+def prepare_cases(
     zip_path: str | Path,
     out: str | Path,
     *,
@@ -107,25 +107,3 @@ def make_nbp_slice2d_smoke_subset(
         json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
     )
     return manifest
-
-
-def make_nbp_slice2d_quality_subset(
-    zip_path: str | Path,
-    out: str | Path,
-    *,
-    cases_per_type: int = 1,
-    converted_shape: tuple[int, int] = (256, 256),
-    n_transducers: int = 128,
-    reference_sound_speed_mps: float = 1500.0,
-) -> dict[str, Any]:
-    """Create 256x256 NBPslice2D cases for visual quality comparison."""
-
-    return make_nbp_slice2d_smoke_subset(
-        zip_path,
-        out,
-        cases_per_type=cases_per_type,
-        converted_shape=converted_shape,
-        n_transducers=n_transducers,
-        reference_sound_speed_mps=reference_sound_speed_mps,
-        subset_role="quality_comparison",
-    )

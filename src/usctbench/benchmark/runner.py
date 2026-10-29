@@ -1,1021 +1,231 @@
-"""Benchmark run and evaluation helpers."""
+"""Prepare, reconstruct, persist and optionally evaluate one explicit request."""
 
-from __future__ import annotations
-
-import csv
 import glob
 import json
-import math
-import numpy as np
-import os
-import platform
-import re
+from pathlib import Path
 import resource
-import subprocess
 import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
 
-import yaml
-
-from usctbench.benchmark.report import write_failure_report
-from usctbench.core.config import (
-    coerce_bool,
-    load_yaml,
-    expand_config_value,
-    prepare_config,
-)
-from usctbench.core.io import read_case_hdf5, write_result_hdf5
+from usctbench.benchmark.artifacts import publish, save_arrays, write_json
+from usctbench.benchmark.report import write_summary
+from usctbench.core.config import expand_config_value, load_yaml, prepare_config
+from usctbench.core.io import read_case_hdf5
 from usctbench.core.provenance import case_measurement_metadata
 from usctbench.core.registry import get_algorithm
 from usctbench.core.schema import (
-    AlgorithmConfig,
     GroundTruthSpec,
     ReconstructionResult,
     ResultStatus,
     USCTCase,
 )
-from usctbench.viz import write_preview_png
 from usctbench.metrics import compute_regional_image_metrics
-
-_ENV_DEFAULT_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}")
-
-
-def load_algorithm_config(path: str | Path) -> AlgorithmConfig:
-    config = AlgorithmConfig.model_validate(expand_config_value(load_yaml(path)))
-    if not config.name:
-        raise ValueError("Algorithm YAML requires name")
-    return prepare_config(config.name, config)
+from usctbench.viz import write_preview_png
 
 
-def run_algorithm_case(
-    algorithm_name: str,
-    case_path: str | Path,
-    config_path: str | Path,
-    out_root: str | Path,
-) -> Path:
-    """Run one algorithm on one case and write the standard artifact set."""
+def run(
+    algorithm,
+    case,
+    config,
+    out=None,
+    *,
+    host_limits=None,
+    deployment=None,
+    score=True,
+    preview=True,
+):
+    """Return the result; optional ``out`` is the exact case output directory.
 
-    out_root = Path(out_root)
-    case_id = Path(case_path).stem
-    algorithm_for_report = algorithm_name
-    config_for_report = str(config_path)
-    memory_before_mib = _process_peak_rss_mib()
-    resolved_config = None
-    case: USCTCase | None = None
+    This runner owns failure records and strips GT before numerical execution.
+    Postprocessing can fail without destroying an already saved numerical result.
+    """
     started = time.perf_counter()
+    case_id = case.case_id if isinstance(case, USCTCase) else Path(case).stem
+    prepared = None
     stages = {}
     stage = "prepare"
+    measurement = {}
+    directory = Path(out) if out is not None else None
     try:
-        case = read_case_hdf5(case_path)
+        case = case if isinstance(case, USCTCase) else read_case_hdf5(case)
         case_id = case.case_id
-        config = load_algorithm_config(config_path)
-        resolved_config = config.model_dump(mode="json")
-        if config.name is not None and config.name != algorithm_name:
-            raise ValueError(
-                "algorithm/config mismatch: "
-                f"requested {algorithm_name!r}, config declares {config.name!r}"
+        measurement = case_measurement_metadata(case.metadata)
+        prepared = prepare_config(
+            algorithm, config, case=case, host_limits=host_limits, deployment=deployment
+        )
+        if directory is not None and prepared.deployment.scratch_root is None:
+            prepared.deployment = prepared.deployment.model_copy(
+                update={"scratch_root": str(directory)}
             )
-        if config.deployment.scratch_root is None:
-            config.deployment.scratch_root = str(out_root / case_id)
-        config = prepare_config(algorithm_name, config, case=case)
-        algorithm = get_algorithm(algorithm_name)
         stages[stage] = {"status": "completed"}
         stage = "solve"
-        reconstruction_case = case.model_copy(
-            update={"ground_truth": GroundTruthSpec()}
+        result = get_algorithm(algorithm).run(
+            case.model_copy(update={"ground_truth": GroundTruthSpec()}), prepared
         )
-        result = algorithm.run(reconstruction_case, config)
         stages[stage] = {"status": str(result.status)}
+        if result.failure_reason:
+            stages[stage]["message"] = result.failure_reason
     except Exception as exc:
         stages[stage] = {"status": "failed", "message": f"{type(exc).__name__}: {exc}"}
         result = ReconstructionResult(
-            algorithm=algorithm_for_report,
+            algorithm=algorithm,
             case_id=case_id,
-            runtime_s=time.perf_counter() - started,
             status=ResultStatus.FAILED,
-            failure_reason=f"{type(exc).__name__}: {exc}",
+            failure_reason=stages[stage]["message"],
         )
     result.runtime_s = time.perf_counter() - started
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    peak_mib = float(peak) / (1024**2 if sys.platform == "darwin" else 1024)
     result.metrics["stages"] = stages
-    memory_after_mib = _process_peak_rss_mib()
-    result.metrics["resolved_config"] = resolved_config
-    if case is not None:
-        for key, value in _feature_qc_metrics(case).items():
-            result.metrics.setdefault(key, value)
-
-    out_dir = out_root / case_id
-    out_dir.mkdir(parents=True, exist_ok=True)
-    process_peak_rss_mib = max(memory_before_mib, memory_after_mib)
-    try:
-        write_result_hdf5(result, out_dir / "result.h5")
-        stages["save"] = {"status": "completed"}
-    except Exception as exc:
-        stages["save"] = {"status": "failed", "message": f"{type(exc).__name__}: {exc}"}
-        result.status = ResultStatus.FAILED
-        result.failure_reason = f"artifact write failed: {type(exc).__name__}: {exc}"
-    _write_result_records(
-        result,
-        out_dir,
-        config=config_for_report,
-        process_peak_rss_mib=process_peak_rss_mib,
-        case=case,
-    )
-    if result.status == ResultStatus.SUCCESS and result.sound_speed_mps is not None:
+    if directory is not None:
+        directory.mkdir(parents=True, exist_ok=True)
         try:
-            image_policy = config.image_evaluation.model_dump(exclude_none=True)
-            result.metrics.update(
-                compute_regional_image_metrics(
-                    result.sound_speed_mps,
-                    case.ground_truth.sound_speed_mps,
-                    **image_policy,
-                )
-            )
-            _write_straight_ray_diagnostics(result, case, out_dir)
-            stages["evaluation"] = {"status": "completed"}
+            save_arrays(result, directory)
+            stages["save"] = {"status": "completed"}
         except Exception as exc:
+            stages["save"] = {
+                "status": "failed",
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+            result.status = ResultStatus.FAILED
+            result.failure_reason = stages["save"]["message"]
+        publish(
+            result,
+            directory,
+            config=prepared,
+            stages=stages,
+            peak_rss_mib=peak_mib,
+            measurement=measurement,
+        )
+    if result.sound_speed_mps is not None and result.status != ResultStatus.FAILED:
+        if score:
+            try:
+                result.metrics.update(
+                    compute_regional_image_metrics(
+                        result.sound_speed_mps,
+                        case.ground_truth.sound_speed_mps,
+                        **prepared.image_evaluation.model_dump(exclude_none=True),
+                    )
+                )
+                stages["evaluation"] = {"status": "completed"}
+            except Exception as exc:
+                stages["evaluation"] = {
+                    "status": "failed",
+                    "message": f"{type(exc).__name__}: {exc}",
+                }
+        if preview and directory is not None:
+            try:
+                result.artifacts["preview"] = str(
+                    write_preview_png(result.sound_speed_mps, directory / "preview.png")
+                )
+                stages["preview"] = {"status": "completed"}
+            except Exception as exc:
+                stages["preview"] = {
+                    "status": "failed",
+                    "message": f"{type(exc).__name__}: {exc}",
+                }
+    if directory is not None:
+        try:
+            write_json(directory / "metrics.json", result.metrics)
+        except (ValueError, TypeError, OSError) as exc:
             stages["evaluation"] = {
                 "status": "failed",
-                "message": f"{type(exc).__name__}: {exc}",
+                "message": f"metrics serialization: {exc}",
             }
-        try:
-            preview = write_preview_png(result.sound_speed_mps, out_dir / "preview.png")
-            result.artifacts["preview"] = str(preview)
-            stages["preview"] = {"status": "completed"}
-        except Exception as exc:
-            stages["preview"] = {
-                "status": "failed",
-                "message": f"{type(exc).__name__}: {exc}",
-            }
-        _write_result_records(
+        publish(
             result,
-            out_dir,
-            config=config_for_report,
-            process_peak_rss_mib=process_peak_rss_mib,
-            case=case,
+            directory,
+            config=prepared,
+            stages=stages,
+            peak_rss_mib=peak_mib,
+            measurement=measurement,
         )
-    return out_dir
+    return result
 
 
-def evaluate_run(
-    run_dir: str | Path, protocol_path: str | Path | None = None
-) -> dict[str, Any]:
-    """Aggregate per-case metrics into CSV and markdown reports."""
-
-    run_path = Path(run_dir)
-    run_path.mkdir(parents=True, exist_ok=True)
-    protocol = _load_yaml(protocol_path) if protocol_path is not None else {}
+def evaluate(directory):
+    """Summarize saved outcomes without rerunning a model or inventing scores."""
+    directory = Path(directory)
     records = []
-    for metrics_path in sorted(run_path.rglob("metrics.json")):
-        case_dir = metrics_path.parent
-        metadata_path = case_dir / "metadata.yaml"
-        metadata = _load_yaml(metadata_path) if metadata_path.exists() else {}
-        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
-        record = {
-            "case_id": metadata.get("case_id", case_dir.name),
-            "case_type": metadata.get("case_type", ""),
-            "benchmark_type": metadata.get("benchmark_type", ""),
-            "algorithm": metadata.get("algorithm", case_dir.parent.name),
-            "status": metadata.get("status", "unknown"),
-            "runtime_s": metadata.get("runtime_s", ""),
-            "process_peak_rss_mib": metadata.get("process_peak_rss_mib", ""),
-            "failure_reason": metadata.get("failure_reason") or "",
-            "feature_qc_passed": metadata.get("feature_qc_passed", ""),
-            "feature_failed_qc": metadata.get("feature_failed_qc", ""),
-            "failure_report_present": (case_dir / "failure_report.md").exists(),
+    for path in sorted(directory.rglob("run.json")):
+        record = json.loads(path.read_text())
+        metrics_path = path.parent / "metrics.json"
+        metrics = json.loads(metrics_path.read_text()) if metrics_path.exists() else {}
+        failures = [
+            (key, value.get("message"))
+            for key, value in record["stages"].items()
+            if value["status"] == "failed"
+        ]
+        row = {
+            key: record.get(key)
+            for key in ("algorithm", "case_id", "status", "stop_reason", "runtime_s")
         }
-        record.update(metrics)
-        record["artifacts_complete"], artifact_reasons = _artifact_check(
-            case_dir, record
+        row.update(
+            numerical_result_available=record["numerical_result_available"],
+            measurement_provenance=record["measurement"].get(
+                "measurement_provenance", "unknown"
+            ),
+            forward_model=metrics.get("forward_model"),
+            primary_image_region=metrics.get("primary_image_region"),
+            failure_stage=failures[0][0] if failures else None,
+            message=failures[0][1] if failures else record.get("failure_reason"),
         )
-        record["pass"], pass_reasons, fail_reasons = _assess_record(
-            record, protocol, artifact_reasons
-        )
-        record["pass_reasons"] = "; ".join(pass_reasons)
-        record["fail_reasons"] = "; ".join(fail_reasons)
-        records.append(record)
-
-    run_pass_reasons, run_fail_reasons = _assess_run_records(records, protocol)
-    run_checks = {
-        "passed": not run_fail_reasons,
-        "pass_reasons": run_pass_reasons,
-        "fail_reasons": run_fail_reasons,
-    }
-    run_checks_json = run_path / "benchmark_run_checks.json"
-    run_checks_json.write_text(
-        json.dumps(run_checks, indent=2, sort_keys=True), encoding="utf-8"
-    )
-    summary_csv = run_path / "benchmark_summary.csv"
-    _write_summary_csv(records, summary_csv)
-    report_md = run_path / "benchmark_report.md"
-    provenance = (
-        _load_yaml(run_path / "run_metadata.yaml")
-        if (run_path / "run_metadata.yaml").exists()
-        else _collect_run_provenance(run_path)
-    )
-    _write_benchmark_report(
-        records,
-        report_md,
-        protocol=protocol,
-        run_checks=run_checks,
-        provenance=provenance,
-    )
+        for source, target in (
+            ("rmse", "rmse_mps"),
+            ("psnr", "psnr_db"),
+            ("ssim", "ssim"),
+            ("full_image_rmse", "full_image_rmse_mps"),
+            ("full_image_psnr", "full_image_psnr_db"),
+            ("full_image_ssim", "full_image_ssim"),
+            ("data_relative_residual", "data_relative_residual"),
+        ):
+            row[target] = metrics.get(source)
+        records.append(row)
+    directory.mkdir(parents=True, exist_ok=True)
     return {
         "records": records,
-        "run_checks": run_checks,
-        "summary_csv": str(summary_csv),
-        "report_md": str(report_md),
-        "run_checks_json": str(run_checks_json),
+        "passed": bool(records)
+        and all(
+            row["status"] != "failed"
+            and row["numerical_result_available"]
+            and not row["failure_stage"]
+            for row in records
+        ),
+        **write_summary(records, directory),
     }
 
 
-def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
-    """Run all algorithms listed in a benchmark suite YAML."""
+def suite(path):
+    """Resolve every relative path against the suite file, never the current cwd."""
+    path = Path(path).resolve()
+    definition = expand_config_value(load_yaml(path))
 
-    suite_file = Path(suite_path)
-    suite = _load_yaml(suite_file)
-    suite_name = suite.get("name", suite_file.stem)
-    case_glob = _expand(str(suite["case_glob"]))
-    suite_cases = sorted(Path(path) for path in glob.glob(case_glob, recursive=True))
-    if not suite_cases and not coerce_bool(suite.get("allow_empty", False)):
-        raise ValueError(f"benchmark suite matched no cases: {case_glob}")
-    output_root = Path(
-        _expand(str(suite.get("outputs", {}).get("root", "runs/usctbench_runs")))
-    )
-    run_id = (
-        suite.get("run_id")
-        or f"{suite_name}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
-    )
-    run_root = output_root / run_id
-    run_root.mkdir(parents=True, exist_ok=True)
-    _write_run_metadata(
-        run_root / "run_metadata.yaml", suite_file=suite_file, suite=suite
-    )
+    def relative(value):
+        candidate = Path(value).expanduser()
+        return candidate if candidate.is_absolute() else path.parent / candidate
 
-    algorithms = suite.get("algorithms", [])
+    cases = sorted(glob.glob(str(relative(definition["case_glob"])), recursive=True))
+    if not cases:
+        raise ValueError(f"benchmark suite matched no cases: {definition['case_glob']}")
+    algorithms = definition.get("algorithms")
     if not isinstance(algorithms, list) or not algorithms:
-        raise ValueError("benchmark suite must define a non-empty algorithms list")
-
-    for algorithm in algorithms:
-        algorithm_name = algorithm["name"]
-        config_path = _resolve_algorithm_config_path(algorithm["config"], suite_file)
-        algorithm_case_glob = algorithm.get("case_glob")
-        cases = suite_cases
-        if algorithm_case_glob:
-            expanded_glob = _expand(str(algorithm_case_glob))
-            cases = sorted(
-                Path(path) for path in glob.glob(expanded_glob, recursive=True)
-            )
-            if not cases and not coerce_bool(
-                algorithm.get("allow_empty", suite.get("allow_empty", False))
-            ):
-                raise ValueError(
-                    f"benchmark suite algorithm {algorithm_name} matched no cases: {expanded_glob}"
-                )
+        raise ValueError("benchmark suite requires a nonempty algorithms list")
+    run_id = (
+        definition.get("run_id")
+        or f"{definition.get('name', path.stem)}_{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
+    )
+    root = relative(definition.get("outputs", {}).get("root", "../../runs")) / run_id
+    for item in algorithms:
+        config = relative(item["config"])
         for case_path in cases:
-            run_algorithm_case(
-                algorithm_name, case_path, config_path, run_root / algorithm_name
+            case = read_case_hdf5(case_path)
+            run(
+                item["name"],
+                case,
+                config,
+                root / item["name"] / case.case_id,
+                host_limits=definition.get("host_limits"),
+                deployment=definition.get("deployment"),
             )
-
-    evaluation = evaluate_run(run_root, suite_file)
-    return {"run_root": str(run_root), "num_cases": len(suite_cases), **evaluation}
-
-
-def _write_result_records(
-    result: ReconstructionResult,
-    out_dir: Path,
-    *,
-    config: str,
-    process_peak_rss_mib: float,
-    case: USCTCase | None = None,
-) -> None:
-    result_path = out_dir / "result.h5"
-    (out_dir / "metrics.json").write_text(
-        json.dumps(result.metrics, indent=2, sort_keys=True), encoding="utf-8"
-    )
-    measurement_metadata = (
-        case_measurement_metadata(case.metadata) if case is not None else {}
-    )
-    (out_dir / "metadata.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "algorithm": result.algorithm,
-                "case_id": result.case_id,
-                "case_type": (
-                    case.metadata.get("case_type") if case is not None else None
-                ),
-                "benchmark_type": (
-                    case.metadata.get("benchmark_type") if case is not None else None
-                ),
-                "feature_qc_passed": (
-                    case.metadata.get("feature_qc_passed") if case is not None else None
-                ),
-                "feature_failed_qc": (
-                    case.metadata.get("feature_failed_qc") if case is not None else None
-                ),
-                **measurement_metadata,
-                "config": config,
-                "resolved_config": result.metrics.get("resolved_config"),
-                "implementation": result.metrics.get("implementation"),
-                "image_evaluation": result.metrics.get("image_evaluation"),
-                "error_type": _classify_failure(result.failure_reason),
-                "runtime_s": result.runtime_s,
-                "process_peak_rss_mib": process_peak_rss_mib,
-                "stages": result.metrics.get("stages"),
-                "status": str(result.status),
-                "failure_reason": result.failure_reason,
-                "result_h5": str(result_path),
-            },
-            sort_keys=True,
-        ),
-        encoding="utf-8",
-    )
-    if result.status != ResultStatus.SUCCESS:
-        write_failure_report(
-            out_dir / "failure_report.md",
-            algorithm=result.algorithm,
-            case_id=result.case_id,
-            config=config,
-            error_type=_classify_failure(result.failure_reason),
-            symptom=result.failure_reason or "algorithm did not report success",
-            likely_causes=[
-                "schema mismatch",
-                "data/geometry mismatch",
-                "numerical instability",
-            ],
-            actions=[
-                "inspect case metadata",
-                "inspect sinogram/features",
-                "lower relaxation or iterations",
-            ],
-        )
-    else:
-        stale_failure_report = out_dir / "failure_report.md"
-        if stale_failure_report.exists():
-            stale_failure_report.unlink()
-
-
-def _write_straight_ray_diagnostics(
-    result: ReconstructionResult, case: USCTCase | None, out_dir: Path
-) -> None:
-    if case is None or not str(result.algorithm).startswith("straight_"):
-        return
-    try:
-        from usctbench.algorithms.ray import (
-            ray_weights,
-            valid_ray_mask,
-        )
-        from usctbench.operators.straight_ray import StraightRayProjector
-    except Exception:
-        return
-
-    projector = StraightRayProjector.from_case(case)
-    mask = valid_ray_mask(case, projector)
-    weights = ray_weights(case, projector, mask)
-    coverage = projector.adjoint(mask.astype(float))
-    row_norm_l1 = projector.row_norms(power=1)
-    row_norm_l2 = projector.row_norms(power=2)
-    col_norm_l1 = projector.col_norms(power=1)
-
-    coverage_path = write_preview_png(coverage, out_dir / "coverage.png")
-    result.artifacts.setdefault("coverage", str(coverage_path))
-    stats = {
-        "valid_ray_count": int(np.sum(mask)),
-        "total_ray_count": int(mask.size),
-        "valid_ray_fraction": float(np.mean(mask)) if mask.size else 0.0,
-        "ray_weight_mean": float(np.mean(weights[mask])) if np.any(mask) else 0.0,
-        "ray_weight_nonzero_fraction": (
-            float(np.mean(weights[mask] > 0.0)) if np.any(mask) else 0.0
-        ),
-        "coverage": _array_stats(coverage),
-        "coverage_nonzero_fraction": float(np.mean(coverage > 0.0)),
-        "row_norm_l1": _array_stats(row_norm_l1[mask] if np.any(mask) else row_norm_l1),
-        "row_norm_l2": _array_stats(row_norm_l2[mask] if np.any(mask) else row_norm_l2),
-        "col_norm_l1": _array_stats(col_norm_l1),
-    }
-    if (
-        result.sound_speed_mps is not None
-        and case.ground_truth.sound_speed_mps is not None
-    ):
-        error = np.asarray(result.sound_speed_mps, dtype=float) - np.asarray(
-            case.ground_truth.sound_speed_mps, dtype=float
-        )
-        stats["abs_error_coverage_corr"] = _finite_corr(np.abs(error), coverage)
-        stats["ring_artifact_index"] = _radial_artifact_index(error, case.grid.roi_mask)
-        result.metrics["coverage_abs_error_corr"] = stats["abs_error_coverage_corr"]
-        result.metrics["ring_artifact_index"] = stats["ring_artifact_index"]
-    result.metrics["coverage_nonzero_fraction"] = stats["coverage_nonzero_fraction"]
-    result.metrics["valid_ray_fraction"] = stats["valid_ray_fraction"]
-    result.metrics.setdefault("ray_weight_mean", stats["ray_weight_mean"])
-    result.metrics.setdefault(
-        "ray_weight_nonzero_fraction", stats["ray_weight_nonzero_fraction"]
-    )
-    result.metrics["row_norm_l1_min"] = stats["row_norm_l1"]["min"]
-    result.metrics["row_norm_l1_max"] = stats["row_norm_l1"]["max"]
-    result.metrics["col_norm_l1_min"] = stats["col_norm_l1"]["min"]
-    result.metrics["col_norm_l1_max"] = stats["col_norm_l1"]["max"]
-
-    stats_path = out_dir / "coverage_stats.json"
-    stats_path.write_text(json.dumps(stats, indent=2, sort_keys=True), encoding="utf-8")
-    result.artifacts.setdefault("coverage_stats", str(stats_path))
-    if "residual_curve" in result.metrics:
-        curve_path = out_dir / "residual_curve.json"
-        curve_path.write_text(
-            json.dumps(result.metrics["residual_curve"], indent=2), encoding="utf-8"
-        )
-        result.artifacts.setdefault("residual_curve", str(curve_path))
-
-
-def _array_stats(values: np.ndarray) -> dict[str, float]:
-    array = np.asarray(values, dtype=float)
-    finite = array[np.isfinite(array)]
-    if finite.size == 0:
-        return {"min": math.nan, "max": math.nan, "mean": math.nan, "std": math.nan}
-    return {
-        "min": float(np.min(finite)),
-        "max": float(np.max(finite)),
-        "mean": float(np.mean(finite)),
-        "std": float(np.std(finite)),
-    }
-
-
-def _feature_qc_metrics(case: USCTCase) -> dict[str, Any]:
-    qc = case.metadata.get("feature_qc", {})
-    if not isinstance(qc, dict):
-        return {}
-    metrics: dict[str, Any] = {}
-    for key, value in qc.items():
-        if isinstance(value, (int, float, bool, str)) or value is None:
-            metrics[key] = value
-    return metrics
-
-
-def _finite_corr(a: np.ndarray, b: np.ndarray) -> float:
-    x = np.asarray(a, dtype=float).reshape(-1)
-    y = np.asarray(b, dtype=float).reshape(-1)
-    finite = np.isfinite(x) & np.isfinite(y)
-    if int(np.sum(finite)) < 3:
-        return math.nan
-    x = x[finite] - float(np.mean(x[finite]))
-    y = y[finite] - float(np.mean(y[finite]))
-    denom = float(np.linalg.norm(x) * np.linalg.norm(y))
-    if denom == 0.0:
-        return 0.0
-    return float(np.dot(x, y) / denom)
-
-
-def _radial_artifact_index(error: np.ndarray, roi_mask: np.ndarray | None) -> float:
-    image = np.asarray(error, dtype=float)
-    yy, xx = np.indices(image.shape, dtype=float)
-    center_y = 0.5 * (image.shape[0] - 1)
-    center_x = 0.5 * (image.shape[1] - 1)
-    radius = np.rint(np.hypot(yy - center_y, xx - center_x)).astype(int)
-    mask = np.isfinite(image)
-    if roi_mask is not None:
-        mask &= np.asarray(roi_mask, dtype=bool)
-    if not np.any(mask):
-        return math.nan
-    values = np.abs(image)
-    radial_means = []
-    for ridx in np.unique(radius[mask]):
-        shell = mask & (radius == ridx)
-        if int(np.sum(shell)) >= 4:
-            radial_means.append(float(np.mean(values[shell])))
-    if len(radial_means) < 3:
-        return 0.0
-    denom = float(np.std(values[mask]))
-    if denom == 0.0:
-        return 0.0
-    return float(np.std(np.asarray(radial_means, dtype=float)) / denom)
-
-
-def _load_yaml(path: str | Path | None) -> dict[str, Any]:
-    if path is None:
-        return {}
-    with Path(path).open("r", encoding="utf-8") as handle:
-        payload = yaml.safe_load(handle) or {}
-    if not isinstance(payload, dict):
-        raise ValueError(f"YAML file must contain a mapping: {path}")
-    return payload
-
-
-def _expand(value: str) -> str:
-    def _replace_default(match: re.Match[str]) -> str:
-        env_value = os.environ.get(match.group(1))
-        return env_value if env_value not in (None, "") else match.group(2)
-
-    value = _ENV_DEFAULT_RE.sub(_replace_default, value)
-    return os.path.expandvars(os.path.expanduser(value))
-
-
-def _resolve_algorithm_config_path(config: Any, suite_file: Path) -> Path:
-    config_path = Path(_expand(str(config)))
-    if config_path.is_absolute():
-        return config_path
-
-    suite_candidate = suite_file.parent / config_path
-    if suite_candidate.exists():
-        return suite_candidate
-
-    root_candidate = _repo_root() / config_path
-    if root_candidate.exists():
-        return root_candidate
-
-    cwd_candidate = Path.cwd() / config_path
-    if cwd_candidate.exists():
-        return cwd_candidate
-
-    if config_path.parts and config_path.parts[0] == "configs":
-        return root_candidate
-    return suite_candidate
-
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
-
-
-def _expand_config_value(value: Any) -> Any:
-    if isinstance(value, str):
-        return _expand(value)
-    if isinstance(value, list):
-        return [_expand_config_value(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_expand_config_value(item) for item in value)
-    if isinstance(value, dict):
-        return {key: _expand_config_value(item) for key, item in value.items()}
-    return value
-
-
-def _assess_record(
-    record: dict[str, Any],
-    protocol: dict[str, Any],
-    artifact_reasons: list[str],
-) -> tuple[bool, list[str], list[str]]:
-    pass_reasons: list[str] = []
-    fail_reasons: list[str] = []
-
-    if str(record.get("status", "")).lower() != "success":
-        fail_reasons.append(f"status is {record.get('status')}")
-        if record.get("failure_reason"):
-            fail_reasons.append(str(record["failure_reason"]))
-    else:
-        pass_reasons.append("status is success")
-
-    if artifact_reasons:
-        fail_reasons.extend(artifact_reasons)
-    else:
-        pass_reasons.append("required artifacts present")
-
-    algorithm_name = str(record.get("algorithm", ""))
-    if record.get("stopping", {}).get("termination_category") == "failure":
-        fail_reasons.append(
-            f"solver stopped unsuccessfully: {record.get('stop_reason')}"
-        )
-
-    for key in _required_metrics_for_algorithm(
-        protocol.get("required_metrics", []), algorithm_name
-    ):
-        if key not in record or not _is_number(record[key]):
-            fail_reasons.append(f"missing required metric {key}")
-
-    thresholds = _metric_limits_for_algorithm(
-        protocol.get("thresholds", {}), algorithm_name
-    )
-    if isinstance(thresholds, dict):
-        for key, limit in thresholds.items():
-            if key not in record or not _is_number(record[key]):
-                fail_reasons.append(f"missing threshold metric {key}")
-                continue
-            value = float(record[key])
-            if value > float(limit):
-                fail_reasons.append(f"{key}={value:g} exceeds max {float(limit):g}")
-            else:
-                pass_reasons.append(f"{key}={value:g} <= {float(limit):g}")
-
-    minimums = _metric_limits_for_algorithm(
-        protocol.get("minimums", {}), algorithm_name
-    )
-    if isinstance(minimums, dict):
-        for key, limit in minimums.items():
-            if key not in record or not _is_number(record[key]):
-                fail_reasons.append(f"missing minimum metric {key}")
-                continue
-            value = float(record[key])
-            if value < float(limit):
-                fail_reasons.append(f"{key}={value:g} below min {float(limit):g}")
-            else:
-                pass_reasons.append(f"{key}={value:g} >= {float(limit):g}")
-
-    return not fail_reasons, pass_reasons, fail_reasons
-
-
-def _assess_run_records(
-    records: list[dict[str, Any]], protocol: dict[str, Any]
-) -> tuple[list[str], list[str]]:
-    pass_reasons: list[str] = []
-    fail_reasons: list[str] = []
-
-    if records:
-        pass_reasons.append(f"{len(records)} benchmark records present")
-    else:
-        fail_reasons.append("no benchmark records present")
-
-    min_records = protocol.get("min_records")
-    if min_records is not None:
-        if len(records) < int(min_records):
-            fail_reasons.append(
-                f"record count {len(records)} below required {int(min_records)}"
-            )
-        else:
-            pass_reasons.append(f"record count {len(records)} >= {int(min_records)}")
-
-    observed_algorithms = {str(record.get("algorithm", "")) for record in records}
-    expected_algorithms = _expected_algorithms(protocol)
-    missing_algorithms = sorted(expected_algorithms - observed_algorithms)
-    if expected_algorithms:
-        if missing_algorithms:
-            fail_reasons.append(f"missing algorithms: {', '.join(missing_algorithms)}")
-        else:
-            pass_reasons.append("all expected algorithms present")
-
-    observed_cases = {str(record.get("case_id", "")) for record in records}
-    min_cases = protocol.get("min_cases")
-    if min_cases is not None:
-        if len(observed_cases) < int(min_cases):
-            fail_reasons.append(
-                f"case count {len(observed_cases)} below required {int(min_cases)}"
-            )
-        else:
-            pass_reasons.append(f"case count {len(observed_cases)} >= {int(min_cases)}")
-
-    if (
-        expected_algorithms
-        and observed_cases
-        and coerce_bool(protocol.get("require_algorithm_case_matrix", True))
-    ):
-        observed_pairs = {
-            (str(record.get("algorithm", "")), str(record.get("case_id", "")))
-            for record in records
-        }
-        missing_pairs = [
-            f"{algorithm}/{case_id}"
-            for algorithm in sorted(expected_algorithms)
-            for case_id in sorted(observed_cases)
-            if (algorithm, case_id) not in observed_pairs
-        ]
-        if missing_pairs:
-            fail_reasons.append(
-                f"missing algorithm-case records: {', '.join(missing_pairs)}"
-            )
-        else:
-            pass_reasons.append("complete algorithm-case matrix present")
-
-    allowed_statuses = protocol.get("expected_statuses")
-    if isinstance(allowed_statuses, list) and allowed_statuses:
-        allowed = {str(status).lower() for status in allowed_statuses}
-        bad = [
-            f"{record.get('algorithm')}/{record.get('case_id')}={record.get('status')}"
-            for record in records
-            if str(record.get("status", "")).lower() not in allowed
-        ]
-        if bad:
-            fail_reasons.append(f"unexpected statuses: {', '.join(bad)}")
-        else:
-            pass_reasons.append("all statuses are expected")
-
-    return pass_reasons, fail_reasons
-
-
-def _expected_algorithms(protocol: dict[str, Any]) -> set[str]:
-    explicit = protocol.get("expected_algorithms")
-    if isinstance(explicit, list):
-        return {str(value) for value in explicit}
-    algorithms = protocol.get("algorithms", [])
-    if isinstance(algorithms, list):
-        return {
-            str(entry.get("name"))
-            for entry in algorithms
-            if isinstance(entry, dict) and entry.get("name")
-        }
-    return set()
-
-
-def _metric_limits_for_algorithm(spec: Any, algorithm_name: str) -> dict[str, Any]:
-    if not isinstance(spec, dict):
-        return {}
-    if any(isinstance(value, dict) for value in spec.values()):
-        limits: dict[str, Any] = {}
-        default_limits = spec.get("default", {})
-        algorithm_limits = spec.get(algorithm_name, {})
-        if isinstance(default_limits, dict):
-            limits.update(default_limits)
-        if isinstance(algorithm_limits, dict):
-            limits.update(algorithm_limits)
-        return limits
-    return spec
-
-
-def _required_metrics_for_algorithm(spec: Any, algorithm_name: str) -> list[str]:
-    if isinstance(spec, list):
-        return [str(item) for item in spec]
-    if not isinstance(spec, dict):
-        return []
-    required: list[str] = []
-    for key in ("default", algorithm_name):
-        values = spec.get(key, [])
-        if isinstance(values, list):
-            required.extend(str(item) for item in values)
-    return sorted(set(required))
-
-
-def _artifact_check(case_dir: Path, record: dict[str, Any]) -> tuple[bool, list[str]]:
-    reasons = []
-    required = {
-        "result.h5": case_dir / "result.h5",
-        "metrics.json": case_dir / "metrics.json",
-        "metadata.yaml": case_dir / "metadata.yaml",
-    }
-    for label, path in required.items():
-        if not path.exists():
-            reasons.append(f"missing {label}")
-    if (
-        str(record.get("status", "")).lower() != "success"
-        and not (case_dir / "failure_report.md").exists()
-    ):
-        reasons.append("missing failure_report.md for non-success run")
-    return not reasons, reasons
-
-
-def _write_summary_csv(records: list[dict[str, Any]], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fields = sorted({key for record in records for key in record})
-    preferred = [
-        "algorithm",
-        "case_id",
-        "case_type",
-        "benchmark_type",
-        "status",
-        "pass",
-        "pass_reasons",
-        "fail_reasons",
-        "runtime_s",
-        "primary_image_region",
-        "rmse",
-        "psnr",
-        "ssim",
-        "water_background_rmse",
-        "process_peak_rss_mib",
-        "artifacts_complete",
-        "failure_report_present",
-    ]
-    fieldnames = preferred + [field for field in fields if field not in preferred]
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(records)
-
-
-def _write_benchmark_report(
-    records: list[dict[str, Any]],
-    path: Path,
-    *,
-    protocol: dict[str, Any],
-    run_checks: dict[str, Any],
-    provenance: dict[str, Any],
-) -> None:
-    passed = sum(1 for record in records if record.get("pass"))
-    runtimes = [
-        float(record["runtime_s"])
-        for record in records
-        if _is_number(record.get("runtime_s"))
-    ]
-    memory_values = [
-        float(record["process_peak_rss_mib"])
-        for record in records
-        if _is_number(record.get("process_peak_rss_mib"))
-    ]
-    lines = [
-        "# Benchmark report",
-        "",
-        f"- Records: {len(records)}",
-        f"- Passed: {passed}",
-        f"- Failed: {len(records) - passed}",
-        f"- Protocol: {protocol.get('name', 'ad hoc')}",
-        f"- Run checks: {'passed' if run_checks.get('passed') else 'failed'}",
-        f"- Git commit: {provenance.get('git', {}).get('commit', 'unknown')}",
-        f"- Git branch: {provenance.get('git', {}).get('branch', 'unknown')}",
-        f"- Hostname: {provenance.get('host', {}).get('hostname', 'unknown')}",
-        f"- Python: {provenance.get('python', {}).get('version', 'unknown')}",
-        f"- USCT_DATA_ROOT: {provenance.get('environment', {}).get('USCT_DATA_ROOT', '')}",
-        f"- USCT_SAMPLE_ROOT: {provenance.get('environment', {}).get('USCT_SAMPLE_ROOT', '')}",
-        f"- USCT_RUN_ROOT: {provenance.get('environment', {}).get('USCT_RUN_ROOT', '')}",
-        (
-            f"- Runtime total seconds: {sum(runtimes):.6g}"
-            if runtimes
-            else "- Runtime total seconds:"
-        ),
-        (
-            f"- Runtime max seconds: {max(runtimes):.6g}"
-            if runtimes
-            else "- Runtime max seconds:"
-        ),
-        (
-            f"- Peak memory max MB: {max(memory_values):.6g}"
-            if memory_values
-            else "- Peak memory max MB:"
-        ),
-        "",
-        "## Run checks",
-        "",
-    ]
-    for reason in run_checks.get("fail_reasons", []):
-        lines.append(f"- FAIL: {reason}")
-    for reason in run_checks.get("pass_reasons", []):
-        lines.append(f"- PASS: {reason}")
-    lines.extend(
-        [
-            "",
-            "## Results",
-            "",
-            "Image scores use each row's declared region. Do not mix historical full-image and tissue scores.",
-            "",
-            "| Algorithm | Case | Region | RMSE (m/s) | PSNR (dB) | SSIM | Water RMSE |",
-            "| --- | --- | --- | ---: | ---: | ---: | ---: |",
-        ]
-    )
-    for record in records:
-
-        def score(name):
-            value = record.get(name)
-            return f"{value:.5g}" if _is_number(value) else "N/A"
-
-        lines.append(
-            f"| {record.get('algorithm')} | {record.get('case_id')} | "
-            f"{record.get('primary_image_region', 'legacy/unspecified')} | "
-            f"{score('rmse')} | {score('psnr')} | {score('ssim')} | {score('water_background_rmse')} |"
-        )
-    lines.extend(["", "### Execution", ""])
-    for record in records:
-        lines.append(
-            f"- `{record.get('algorithm')}` / `{record.get('case_id')}`: "
-            f"case_type={record.get('case_type') or 'unknown'}, "
-            f"benchmark_type={record.get('benchmark_type') or 'unknown'}, "
-            f"status={record.get('status')}, pass={record.get('pass')}, runtime_s={record.get('runtime_s')}, "
-            f"reasons={record.get('fail_reasons') or record.get('pass_reasons')}"
-        )
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def _write_run_metadata(path: Path, *, suite_file: Path, suite: dict[str, Any]) -> None:
-    metadata = _collect_run_provenance(path.parent)
-    metadata["suite"] = {
-        "path": str(suite_file),
-        "name": suite.get("name", suite_file.stem),
-        "case_glob": suite.get("case_glob"),
-        "algorithms": [
-            entry.get("name")
-            for entry in suite.get("algorithms", [])
-            if isinstance(entry, dict)
-        ],
-    }
-    path.write_text(yaml.safe_dump(metadata, sort_keys=True), encoding="utf-8")
-
-
-def _collect_run_provenance(run_path: Path) -> dict[str, Any]:
-    return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "run_path": str(run_path),
-        "git": {
-            "commit": _run_text(["git", "rev-parse", "HEAD"]),
-            "branch": _run_text(["git", "branch", "--show-current"]),
-            "remote_origin": _run_text(["git", "remote", "get-url", "origin"]),
-        },
-        "host": {
-            "hostname": platform.node(),
-            "platform": platform.platform(),
-        },
-        "python": {
-            "executable": sys.executable,
-            "version": sys.version.replace("\n", " "),
-        },
-        "environment": {
-            key: os.environ.get(key, "")
-            for key in (
-                "USCT_WORKSPACE",
-                "USCT_DATA_ROOT",
-                "USCT_SAMPLE_ROOT",
-                "USCT_RUN_ROOT",
-            )
-        },
-        "runtime": {
-            "torch": _torch_info(),
-            "nvidia_smi": _run_text(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=name,driver_version,memory.total",
-                    "--format=csv,noheader",
-                ],
-                timeout_s=5,
-            ),
-        },
-    }
-
-
-def _torch_info() -> dict[str, Any]:
-    try:
-        import torch
-    except Exception as exc:  # pragma: no cover - depends on optional runtime.
-        return {"available": False, "error": f"{type(exc).__name__}: {exc}"}
-    return {
-        "available": True,
-        "version": str(getattr(torch, "__version__", "unknown")),
-        "cuda_available": bool(torch.cuda.is_available()),
-    }
-
-
-def _run_text(command: list[str], *, timeout_s: int = 2) -> str:
-    try:
-        proc = subprocess.run(
-            command,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout_s,
-            check=False,
-        )
-    except Exception as exc:
-        return f"unavailable: {type(exc).__name__}: {exc}"
-    if proc.returncode != 0:
-        return f"unavailable: {proc.stderr.strip() or proc.stdout.strip()}"
-    return proc.stdout.strip()
-
-
-def _classify_failure(reason: str | None) -> str:
-    text = (reason or "").lower()
-    if any(
-        token in text
-        for token in (
-            "matlab",
-            "dependency",
-            "modulenotfounderror",
-            "importerror",
-            "not installed",
-            "executable",
-        )
-    ):
-        return "external-dependency"
-    if any(
-        token in text
-        for token in ("pydantic", "validation", "schema", "model", "field required")
-    ):
-        return "schema"
-    if any(
-        token in text
-        for token in (
-            "hdf5",
-            "h5py",
-            "file not found",
-            "no such file",
-            "case",
-            "dataset",
-            "path",
-        )
-    ):
-        return "data"
-    if any(
-        token in text
-        for token in (
-            "nan",
-            "inf",
-            "singular",
-            "overflow",
-            "underflow",
-            "ill-conditioned",
-            "non-finite",
-        )
-    ):
-        return "numerical"
-    if any(
-        token in text
-        for token in ("converge", "diverge", "residual increased", "line search")
-    ):
-        return "convergence"
-    return "unknown"
-
-
-def _process_peak_rss_mib() -> float:
-    usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    # macOS reports bytes; Linux reports KiB.
-    if sys.platform == "darwin":
-        return float(usage) / (1024.0 * 1024.0)
-    return float(usage) / 1024.0
-
-
-def _is_number(value: Any) -> bool:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return False
-    return math.isfinite(number)
+    return {"run_root": str(root), "num_cases": len(cases), **evaluate(root)}

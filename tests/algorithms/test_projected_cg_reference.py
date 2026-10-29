@@ -79,7 +79,7 @@ def run(case, params, *, run_controls=None, evaluation=None):
             evaluation=evaluation or {},
         ),
     )
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert case.ground_truth.sound_speed_mps is None
     return result
 

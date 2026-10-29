@@ -8,7 +8,6 @@ import yaml
 
 from usctbench.algorithms.parameters import CGLSParameters, SIRTParameters
 from usctbench.core.config import parameter_model, prepare_config
-from usctbench.benchmark.runner import load_algorithm_config
 from usctbench.core.registry import get_algorithm
 from usctbench.core.schema import AlgorithmConfig
 from usctbench.data.synthetic import make_sound_speed_case
@@ -39,7 +38,7 @@ def test_models_have_metadata_and_reject_unknown(name, tmp_path):
     case = make_sound_speed_case(shape=(8, 8), n_transducers=8)
     for admit in (
         lambda: prepare_config(name, config),
-        lambda: load_algorithm_config(path),
+        lambda: prepare_config(None, path),
         lambda: get_algorithm(name).run(case, config),
     ):
         with pytest.raises(ValueError):
@@ -116,7 +115,7 @@ def test_nested_fields_and_unused_parameters_fail():
 
 def test_repository_configs_and_idempotent_resolution():
     for path in sorted((ROOT / "configs/algorithms").glob("*.yaml")):
-        config = load_algorithm_config(path)
+        config = prepare_config(None, path)
         assert prepare_config(config.name, config) == config, path
 
 
@@ -132,7 +131,7 @@ def test_yaml_python_and_typed_object_share_validation(tmp_path):
             }
         )
     )
-    loaded = load_algorithm_config(path)
+    loaded = prepare_config(None, path)
     direct = prepare_config(
         "straight_cgls",
         AlgorithmConfig(
@@ -159,7 +158,9 @@ def test_typed_boundary_preserves_reconstruction(name):
     algorithm = get_algorithm(name)
     raw = algorithm.run(case, config)
     typed = algorithm.run(case, prepare_config(name, config))
-    assert raw.status == typed.status == "success", typed.failure_reason
+    assert (
+        raw.status == typed.status in {"completed", "budget_exhausted"}
+    ), typed.failure_reason
     np.testing.assert_array_equal(raw.sound_speed_mps, typed.sound_speed_mps)
     np.testing.assert_array_equal(
         raw.metrics["residual_curve"], typed.metrics["residual_curve"]

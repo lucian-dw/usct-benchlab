@@ -98,7 +98,7 @@ def test_training_holdout_isolation_without_truth(algorithm):
     assert stop["update_variable"] == "full_slowness"
     assert stop["update_units"] == "s/m"
     assert stop["update_norm_scope"] == "full_physical_grid"
-    assert stop["resolved_policy"] == stop["policy"]
+    assert stop["resolved_policy"]["update_rtol"] is None
 
 
 @pytest.mark.parametrize("algorithm", ALGORITHMS)

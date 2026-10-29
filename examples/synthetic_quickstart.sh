@@ -10,9 +10,9 @@ RUN_ROOT="$ROOT/runs"
 
 cd "$REPO_DIR"
 
-PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli data make-synthetic-smoke \
+PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli data prepare --dataset synthetic \
   --out "$DATA_ROOT" \
-  --shape 32 \
+  --shape 32 32 \
   --n-transducers 32
 
 PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli run straight_cgls \

@@ -1,8 +1,10 @@
 name: fwi_wust_demo
-case_glob: ${USCT_WUST_CASE_GLOB:-data/fwi_wust_demo/cases/*.h5}
+case_glob: ${USCT_WUST_CASE_GLOB:-../../data/fwi_wust_demo/cases/*.h5}
 outputs:
-  root: ${USCT_RUN_ROOT:-runs}
+  root: ${USCT_RUN_ROOT:-../../runs}
+deployment:
+  runtime_root: ${WUST_RUNTIME_ROOT}
+  backend: ${WUST_BACKEND:-gpu}
 algorithms:
   - name: fwi_wust
-    config: configs/algorithms/fwi_wust.yaml
-min_cases: 1
+    config: ../algorithms/fwi_wust.yaml

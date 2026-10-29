@@ -142,7 +142,7 @@ def test_schedule_and_budget_mapping(wave_case, config, count, cap, expected, re
         "fwi_wust", config, case=wave_case, host_limits={"max_iterations": cap}
     )
     result = module.WUSTFWIAlgorithm().run(wave_case, config)
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["completed_iterations"] == expected
     assert result.metrics["resolved_run_policy"]["max_iterations"] == min(
         v for v in (count if count is not None else 3, cap) if v is not None
@@ -161,7 +161,7 @@ def test_schedule_and_budget_mapping(wave_case, config, count, cap, expected, re
 
 def test_input_geometry_sign_axes_masks_and_no_gt_leak(wave_case, config, tmp_path):
     first = module.WUSTFWIAlgorithm().run(wave_case, config)
-    assert first.status == "success", first.failure_reason
+    assert first.status in {"completed", "budget_exhausted"}, first.failure_reason
     doc, a = read_artifact(
         Path(first.artifacts["wust_directory"]) / "frequency.json",
         "wust.frequency_input",
@@ -172,7 +172,7 @@ def test_input_geometry_sign_axes_masks_and_no_gt_leak(wave_case, config, tmp_pa
     assert doc["metadata"]["fourier_sign"] == 1
     wave_case.ground_truth.sound_speed_mps[:] = 1450
     second = module.WUSTFWIAlgorithm().run(wave_case, config)
-    assert second.status == "success", second.failure_reason
+    assert second.status in {"completed", "budget_exhausted"}, second.failure_reason
     for name in ("frequency", "initial"):
         _, a = read_artifact(
             Path(first.artifacts["wust_directory"]) / (name + ".json"),
@@ -209,7 +209,7 @@ def test_deadline_is_shared_and_failure_has_no_image(wave_case, config, monkeypa
 
     monkeypatch.setattr(module, "WUSTClient", SlowClient)
     result = module.WUSTFWIAlgorithm().run(wave_case, config)
-    assert result.status == "failed" and result.sound_speed_mps is None
+    assert result.status == "budget_exhausted" and result.sound_speed_mps is None
     assert result.metrics["stop_reason"] == "time_budget"
 
 
@@ -295,7 +295,7 @@ def test_explicit_map_empty_schedule_and_frequency_mask(wave_case, config):
     ).copy()
     wave_case.measurement.valid_mask[1, 0, 2] = False
     result = module.WUSTFWIAlgorithm().run(wave_case, config)
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     np.testing.assert_array_equal(result.sound_speed_mps, initial)
     assert result.metrics["completed_iterations"] == 0
     assert result.metrics["resolved_run_policy"]["max_iterations"] == 0
@@ -321,5 +321,5 @@ def test_invalid_scientific_input_fails(wave_case, config, mutation):
 def test_no_gt_case_is_valid(wave_case, config):
     wave_case.ground_truth.sound_speed_mps = None
     result = module.WUSTFWIAlgorithm().run(wave_case, config)
-    assert result.status == "success", result.failure_reason
+    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["final_data_residual"] is None
