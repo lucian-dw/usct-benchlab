@@ -5,7 +5,12 @@ import h5py
 import pytest
 from skimage.metrics import structural_similarity
 
-from usctbench.core.io import read_case_hdf5, read_result_hdf5, write_result_hdf5
+from usctbench.core.io import (
+    read_case_hdf5,
+    read_result_hdf5,
+    write_result_hdf5,
+    write_case_hdf5,
+)
 from usctbench.core.registry import (
     clear_registry,
     get_algorithm,
@@ -14,6 +19,8 @@ from usctbench.core.registry import (
 )
 from usctbench.core.schema import (
     AlgorithmConfig,
+    GeometrySpec,
+    GridSpec,
     GroundTruthSpec,
     MeasurementDomain,
     MeasurementSpec,
@@ -44,6 +51,49 @@ def test_case_and_result_hdf5_roundtrip(written_case, tmp_path):
     assert loaded.algorithm == "dummy"
     assert loaded.case_id == case.case_id
     assert loaded.metrics["ok"] is True
+
+
+def test_complex_layout_units_and_valid_zero_roundtrip(tmp_path):
+    pressure = np.arange(24).reshape(2, 3, 4).astype(complex) * (1 + 2j)
+    valid = np.ones(pressure.shape, dtype=bool)
+    valid[1, 2, 3] = False
+    pressure[1, 2, 3] = np.nan
+    case = USCTCase(
+        case_id="rectangular",
+        grid=GridSpec(shape=(7, 9), spacing_m=(0.001, 0.002), origin_m=(0.02, -0.01)),
+        geometry=GeometrySpec(tx_pos_m=np.zeros((3, 2)), rx_pos_m=np.ones((4, 2))),
+        measurement=MeasurementSpec(
+            domain="frequency",
+            frequencies_hz=[1e5, 2e5],
+            freq_data=pressure,
+            valid_mask=valid,
+        ),
+        metadata={"frequency_data_units": "Pa*s"},
+    )
+    path = write_case_hdf5(case, tmp_path / "complex.h5")
+    restored = read_case_hdf5(path)
+    np.testing.assert_array_equal(restored.measurement.freq_data, pressure)
+    np.testing.assert_array_equal(restored.measurement.valid_mask, valid)
+    assert restored.grid == case.grid
+    assert (
+        restored.measurement.freq_data[0, 0, 0] == 0
+        and restored.measurement.valid_mask[0, 0, 0]
+    )
+    with h5py.File(path, "a") as handle:
+        assert handle["measurement/freq_data"].attrs["units"] == "Pa*s"
+        assert handle["measurement/freq_data"].attrs["axes"] == "frequency,tx,rx"
+        handle["measurement/freq_data"].attrs["axes"] = "tx,rx,frequency"
+    with pytest.raises(ValueError, match="axes"):
+        read_case_hdf5(path)
+
+
+def test_provenance_is_not_inferred_from_descriptive_text():
+    from usctbench.core.provenance import case_measurement_metadata
+
+    facts = case_measurement_metadata(
+        {"source_dataset": "kwave", "case_type": "oracle"}
+    )
+    assert facts["measurement_provenance"] == "unknown"
 
 
 def test_sound_speed_contract_has_no_material_absorption_output(written_case, tmp_path):

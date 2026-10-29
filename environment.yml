@@ -4,14 +4,5 @@ channels:
 dependencies:
   - python=3.10
   - pip
-  - numpy
-  - scipy
-  - h5py
-  - pydantic
-  - pyyaml
-  - scikit-image
-  - pytest
-  - ruff
-  - black
   - pip:
       - -e .[dev,viz]

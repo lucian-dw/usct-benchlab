@@ -101,3 +101,11 @@ Additional raw NBPslices2D `att`/`y` and k-Wave material maps are intentionally
 ignored; they are not converted into reconstruction labels or features. Density
 metadata and geometry handling remain unchanged. Older attenuation-bearing
 BenchLab HDF5 files have no compatibility guarantee; see [parameter contract](parameter_contract.md).
+
+## Persisted Measurements
+
+Case HDF5 measurement datasets share one field table in `core/io.py` for both
+reading and writing. Arrays retain their values, masks and complex dtype. Axis
+attributes explicitly distinguish `time,tx,rx`, `frequency,tx,rx` and `tx,rx`;
+ToF uses seconds. Pressure units come from acquisition metadata and otherwise
+remain `unknown`. Provenance is never inferred from a dataset name or free text.

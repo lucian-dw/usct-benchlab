@@ -99,3 +99,19 @@ campaign was run; these are small interface and numerical regression fixtures.
   removed. Resolve this at P5, not by declaring absolute-gradient convergence.
 
 Next: P4 unifies typed configuration, host limits, static discovery and outputs.
+
+## P4: persisted data, provenance and installation
+
+Completed: measurement HDF5 reads/writes now share an explicit axis/unit table;
+pressure units remain acquisition facts and unknown units are not invented.
+Removed unused result placeholders and inferred provenance/risk flags. Pillow
+owns optional preview encoding. Python dependencies now have one source in
+pyproject.toml, with installation callers migrated from requirements.txt.
+
+Validation: A100 full CPU suite passed (586 tests, 9.34 s); the added rectangular
+complex-data roundtrip covers masks, valid zeros, units and rejected axis labels.
+The provenance regression confirms that free text does not imply acquisition
+facts. Black, Ruff and diff whitespace checks passed for this unit.
+
+Next: replace legacy config aliases and dict roundtrips with one prepared typed
+configuration, independent deployment settings and resolved run controls.

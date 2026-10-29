@@ -65,7 +65,7 @@ usct list-algorithms --json
 bash examples/synthetic_quickstart.sh
 ```
 
-The quickstart writes under `/tmp/usctbench_examples` without MATLAB/GPU. Alternatively run `pip install -r requirements.txt` and `pip install -e ".[viz]"`. Optional `.[performance]` enables compiled native loops.
+The quickstart writes under `/tmp/usctbench_examples` without MATLAB/GPU. Optional `.[performance]` enables compiled native loops; `.[viz]` installs preview and plotting support. Python dependencies are defined only in `pyproject.toml`.
 
 ## Environment and Data Preparation
 

@@ -65,7 +65,7 @@ usct list-algorithms --json
 bash examples/synthetic_quickstart.sh
 ```
 
-quickstart 写入 `/tmp/usctbench_examples`，不需要 MATLAB/GPU。也可先 `pip install -r requirements.txt`，再 `pip install -e ".[viz]"`。可选 `.[performance]` 启用原生循环的编译加速。
+quickstart 写入 `/tmp/usctbench_examples`，不需要 MATLAB/GPU。可选 `.[performance]` 启用原生循环的编译加速，`.[viz]` 安装预览与绘图依赖。Python 依赖统一由 `pyproject.toml` 维护。
 
 ## 环境与数据准备
 

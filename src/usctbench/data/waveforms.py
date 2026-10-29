@@ -293,7 +293,6 @@ def convert_kwave_pressure_mat(
         benchmark_type="pressure_waveform",
         forward_model="external_pressure_acquisition",
         feature_source="full_dataset pressure samples (not property-map projections)",
-        uses_complex_wavefield=keep_frequency,
     )
     case = USCTCase(
         case_id=source.stem,

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import h5py
 
 from usctbench.core.schema import (
     GeometrySpec,
@@ -20,14 +21,25 @@ from usctbench.core.schema import (
 SCHEMA_VERSION = "0.1"
 
 
-def _h5py():
-    try:
-        import h5py
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "h5py is required for USCT HDF5 I/O; install usct-benchlab or requirements.txt"
-        ) from exc
-    return h5py
+# Pressure units are acquisition facts, not inferred from numerical magnitude.
+MEASUREMENT_FIELDS = {
+    "frequencies_hz": ("frequency", "Hz"),
+    "freq_data": ("frequency,tx,rx", "metadata.frequency_data_units"),
+    "time_data": ("time,tx,rx", "metadata.pressure_units"),
+    "water_reference": ("frequency,tx,rx", "metadata.frequency_data_units"),
+    "water_reference_time": ("time,tx,rx", "metadata.pressure_units"),
+    "source_spectrum": ("frequency|frequency,tx", "metadata.source_units"),
+    "source_wavelet": ("time", "metadata.source_units"),
+    "time_axis_s": ("time", "s"),
+    "tof_s": ("tx,rx", "s"),
+    "delta_tof_s": ("tx,rx", "s"),
+    "tof_first_arrival_s": ("tx,rx", "s"),
+    "tof_xcorr_s": ("tx,rx", "s"),
+    "phase_slope_delay_s": ("tx,rx", "s"),
+    "valid_mask": ("tx,rx|frequency,tx,rx", "1"),
+    "feature_quality": ("tx,rx", "1"),
+    "ray_weights": ("tx,rx", "1"),
+}
 
 
 def _json_default(value: Any) -> Any:
@@ -81,7 +93,6 @@ def _prepare_path(path: str | Path) -> Path:
 def write_case_hdf5(case: USCTCase, path: str | Path) -> Path:
     """Write a USCT case to the standard HDF5 layout."""
 
-    h5py = _h5py()
     out = _prepare_path(path)
     with h5py.File(out, "w") as handle:
         handle.attrs["schema_version"] = SCHEMA_VERSION
@@ -104,25 +115,28 @@ def write_case_hdf5(case: USCTCase, path: str | Path) -> Path:
 
         measurement = handle.create_group("measurement")
         measurement.attrs["domain"] = str(case.measurement.domain)
-        for name in (
-            "frequencies_hz",
-            "freq_data",
-            "time_data",
-            "water_reference",
-            "water_reference_time",
-            "source_spectrum",
-            "source_wavelet",
-            "time_axis_s",
-            "tof_s",
-            "delta_tof_s",
-            "tof_first_arrival_s",
-            "tof_xcorr_s",
-            "phase_slope_delay_s",
-            "valid_mask",
-            "feature_quality",
-            "ray_weights",
-        ):
-            _write_dataset(measurement, name, getattr(case.measurement, name))
+        for name, (axes, units) in MEASUREMENT_FIELDS.items():
+            value = getattr(case.measurement, name)
+            if value is not None:
+                dataset = measurement.create_dataset(name, data=value)
+                layout = next(
+                    (
+                        item
+                        for item in axes.split("|")
+                        if len(item.split(",")) == value.ndim
+                    ),
+                    None,
+                )
+                if layout is None:
+                    raise ValueError(
+                        f"Unsupported rank for persisted {name}: {value.ndim}"
+                    )
+                dataset.attrs["axes"] = layout
+                dataset.attrs["units"] = (
+                    case.metadata.get(units.removeprefix("metadata."), "unknown")
+                    if units.startswith("metadata.")
+                    else units
+                )
 
         ground_truth = handle.create_group("ground_truth")
         _write_dataset(
@@ -137,8 +151,9 @@ def write_case_hdf5(case: USCTCase, path: str | Path) -> Path:
 def read_case_hdf5(path: str | Path) -> USCTCase:
     """Read a USCT case from the standard HDF5 layout."""
 
-    h5py = _h5py()
     with h5py.File(path, "r") as handle:
+        if _read_str_attr(handle.attrs, "schema_version") != SCHEMA_VERSION:
+            raise ValueError("Unsupported USCTCase schema version")
         case_id = _read_str_attr(handle.attrs, "case_id")
         metadata = _json_loads(handle.attrs.get("metadata_json", ""))
 
@@ -159,26 +174,24 @@ def read_case_hdf5(path: str | Path) -> USCTCase:
         )
 
         measurement_group = handle["measurement"]
+        for name, (axes, units) in MEASUREMENT_FIELDS.items():
+            if name not in measurement_group:
+                continue
+            attrs = measurement_group[name].attrs
+            if "axes" in attrs and _read_str_attr(attrs, "axes") not in axes.split("|"):
+                raise ValueError(f"Invalid persisted axes for {name}")
+            if (
+                "units" in attrs
+                and not units.startswith("metadata.")
+                and attrs["units"] != units
+            ):
+                raise ValueError(f"Invalid persisted units for {name}")
         measurement = MeasurementSpec(
             domain=_read_str_attr(measurement_group.attrs, "domain"),
-            frequencies_hz=_read_dataset(measurement_group, "frequencies_hz"),
-            freq_data=_read_dataset(measurement_group, "freq_data"),
-            time_data=_read_dataset(measurement_group, "time_data"),
-            water_reference=_read_dataset(measurement_group, "water_reference"),
-            water_reference_time=_read_dataset(
-                measurement_group, "water_reference_time"
-            ),
-            source_spectrum=_read_dataset(measurement_group, "source_spectrum"),
-            source_wavelet=_read_dataset(measurement_group, "source_wavelet"),
-            time_axis_s=_read_dataset(measurement_group, "time_axis_s"),
-            tof_s=_read_dataset(measurement_group, "tof_s"),
-            delta_tof_s=_read_dataset(measurement_group, "delta_tof_s"),
-            tof_first_arrival_s=_read_dataset(measurement_group, "tof_first_arrival_s"),
-            tof_xcorr_s=_read_dataset(measurement_group, "tof_xcorr_s"),
-            phase_slope_delay_s=_read_dataset(measurement_group, "phase_slope_delay_s"),
-            valid_mask=_read_dataset(measurement_group, "valid_mask"),
-            feature_quality=_read_dataset(measurement_group, "feature_quality"),
-            ray_weights=_read_dataset(measurement_group, "ray_weights"),
+            **{
+                name: _read_dataset(measurement_group, name)
+                for name in MEASUREMENT_FIELDS
+            },
         )
 
         ground_truth_group = handle["ground_truth"]
@@ -199,7 +212,6 @@ def read_case_hdf5(path: str | Path) -> USCTCase:
 def write_result_hdf5(result: ReconstructionResult, path: str | Path) -> Path:
     """Write a reconstruction result to HDF5."""
 
-    h5py = _h5py()
     out = _prepare_path(path)
     with h5py.File(out, "w") as handle:
         handle.attrs["schema_version"] = SCHEMA_VERSION
@@ -213,26 +225,20 @@ def write_result_hdf5(result: ReconstructionResult, path: str | Path) -> Path:
         handle.attrs["metrics_json"] = _json_dumps(result.metrics)
         handle.attrs["artifacts_json"] = _json_dumps(result.artifacts)
 
-        for name in (
-            "sound_speed_mps",
-            "reflectivity",
-            "uncertainty",
-        ):
-            _write_dataset(handle, name, getattr(result, name))
+        _write_dataset(handle, "sound_speed_mps", result.sound_speed_mps)
     return out
 
 
 def read_result_hdf5(path: str | Path) -> ReconstructionResult:
     """Read a reconstruction result from HDF5."""
 
-    h5py = _h5py()
     with h5py.File(path, "r") as handle:
+        if _read_str_attr(handle.attrs, "schema_version") != SCHEMA_VERSION:
+            raise ValueError("Unsupported reconstruction schema version")
         return ReconstructionResult(
             algorithm=_read_str_attr(handle.attrs, "algorithm"),
             case_id=_read_str_attr(handle.attrs, "case_id"),
             sound_speed_mps=_read_dataset(handle, "sound_speed_mps"),
-            reflectivity=_read_dataset(handle, "reflectivity"),
-            uncertainty=_read_dataset(handle, "uncertainty"),
             metrics=_json_loads(handle.attrs.get("metrics_json", "")),
             runtime_s=float(handle.attrs["runtime_s"]),
             status=_read_str_attr(handle.attrs, "status"),

@@ -303,8 +303,6 @@ class ReconstructionResult(_ArrayModel):
     algorithm: str
     case_id: str
     sound_speed_mps: np.ndarray | None = None
-    reflectivity: np.ndarray | None = None
-    uncertainty: np.ndarray | None = None
     metrics: dict[str, Any] = Field(default_factory=dict)
     runtime_s: float = 0.0
     status: ResultStatus = ResultStatus.SUCCESS
@@ -313,8 +311,6 @@ class ReconstructionResult(_ArrayModel):
 
     @field_validator(
         "sound_speed_mps",
-        "reflectivity",
-        "uncertainty",
         mode="before",
     )
     @classmethod
