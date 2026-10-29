@@ -33,16 +33,8 @@ def pressure_spectrum(pressure, time_s, frequencies_hz):
     sign; for real traces its spectra are the complex conjugate of these.
     Missing samples are not silently replaced or interpolated.
     """
-    p = np.asarray(pressure)
-    t = np.asarray(time_s, dtype=float)
+    p, t, dt = _validate_sampling(pressure, time_s)
     f = np.asarray(frequencies_hz, dtype=float)
-    if t.ndim != 1 or t.size < 2 or not np.all(np.isfinite(t)):
-        raise ValueError("time_s must be a finite vector with at least two samples")
-    dt = float(np.mean(np.diff(t)))
-    if dt <= 0 or not np.allclose(np.diff(t), dt, rtol=1e-6, atol=1e-15):
-        raise ValueError("time_s must be uniformly sampled and strictly increasing")
-    if p.ndim < 1 or p.shape[0] != t.size or np.iscomplexobj(p):
-        raise ValueError("pressure must be real with time as its first axis")
     if (
         f.ndim != 1
         or not f.size
@@ -62,6 +54,19 @@ def pressure_spectrum(pressure, time_s, frequencies_hz):
             for frequency in f
         ]
     )
+
+
+def _validate_sampling(pressure, time_s):
+    p = np.asarray(pressure)
+    t = np.asarray(time_s, dtype=float)
+    if t.ndim != 1 or t.size < 2 or not np.all(np.isfinite(t)):
+        raise ValueError("time_s must be a finite vector with at least two samples")
+    dt = float(np.mean(np.diff(t)))
+    if dt <= 0 or not np.allclose(np.diff(t), dt, rtol=1e-6, atol=1e-15):
+        raise ValueError("time_s must be uniformly sampled and strictly increasing")
+    if p.ndim < 1 or p.shape[0] != t.size or np.iscomplexobj(p):
+        raise ValueError("pressure must be real with time as its first axis")
+    return p, t, dt
 
 
 def _selection(values, size, name):
@@ -211,21 +216,48 @@ def convert_kwave_pressure_mat(
         for key, field in (("C", "sound_speed_mps"),):
             if key in handle:
                 image = np.asarray(handle[key], dtype=float)
-                if image.shape != image_grid.shape:
-                    from skimage.transform import resize
+                from scipy.interpolate import RegularGridInterpolator
 
-                    image = resize(
-                        image, image_grid.shape, preserve_range=True, anti_aliasing=True
+                source_grid = _coordinate_grid(handle, None)
+                if image.shape != source_grid.shape:
+                    raise ValueError("C shape must match yi_orig/xi_orig coordinates")
+                source_axes = tuple(
+                    np.asarray(handle[k], dtype=float).ravel()
+                    for k in ("yi_orig", "xi_orig")
+                )
+                target_axes = tuple(
+                    origin + (np.arange(n) + 0.5) * spacing
+                    for origin, spacing, n in zip(
+                        image_grid.origin_m, image_grid.spacing_m, image_grid.shape
                     )
+                )
+                if any(
+                    axis[0] < edge - 1e-12 or axis[-1] > edge + n * spacing + 1e-12
+                    for axis, edge, n, spacing in zip(
+                        target_axes,
+                        source_grid.origin_m,
+                        source_grid.shape,
+                        source_grid.spacing_m,
+                    )
+                ):
+                    raise ValueError("target GT grid exceeds source physical FOV")
+                yy, xx = np.meshgrid(
+                    *(
+                        np.clip(dst, src[0], src[-1])
+                        for dst, src in zip(target_axes, source_axes)
+                    ),
+                    indexing="ij",
+                )
+                image = RegularGridInterpolator(source_axes, image)(
+                    np.stack((yy, xx), axis=-1)
+                )
                 truth[field] = image
     # Always validate sampling, including imports that keep only time data.
-    validation_frequency = (
-        np.array([0.25 / np.mean(np.diff(time))])
-        if frequencies_hz is None
-        else frequencies_hz
-    )
-    spectrum = pressure_spectrum(pressure, time, validation_frequency)
     keep_frequency = frequencies_hz is not None
+    _validate_sampling(pressure, time)
+    spectrum = (
+        pressure_spectrum(pressure, time, frequencies_hz) if keep_frequency else None
+    )
     reference_time = reference
     if reference is not None and keep_frequency:
         reference = pressure_spectrum(reference, time, frequencies_hz)

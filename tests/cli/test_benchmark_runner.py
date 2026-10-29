@@ -4,10 +4,77 @@ import yaml
 import json
 import h5py
 import numpy as np
+import pytest
 
 from usctbench.benchmark.runner import run_algorithm_case, run_benchmark_suite
 from usctbench.cli import register_builtin_algorithms
 from usctbench.core.io import write_case_hdf5
+
+
+@pytest.mark.parametrize("failed_stage", ["evaluation", "preview"])
+def test_postprocessing_failure_keeps_completed_numerical_result(
+    synthetic_case, tmp_path, monkeypatch, failed_stage
+):
+    from usctbench.benchmark import runner
+
+    register_builtin_algorithms()
+    case_path = write_case_hdf5(synthetic_case, tmp_path / "case.h5")
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("name: straight_cgls\nparameters:\n  iterations: 2\n")
+    out = tmp_path / "run" / synthetic_case.case_id
+    numerical_bytes = []
+
+    def fail(*args, **kwargs):
+        numerical_bytes.append((out / "result.h5").read_bytes())
+        with h5py.File(out / "result.h5") as handle:
+            assert np.isfinite(handle["sound_speed_mps"][()]).all()
+        raise RuntimeError("postprocessing unavailable")
+
+    monkeypatch.setattr(
+        runner,
+        (
+            "compute_regional_image_metrics"
+            if failed_stage == "evaluation"
+            else "write_preview_png"
+        ),
+        fail,
+    )
+    runner.run_algorithm_case("straight_cgls", case_path, cfg, tmp_path / "run")
+    assert numerical_bytes and numerical_bytes[-1] == (out / "result.h5").read_bytes()
+    metadata = yaml.safe_load((out / "metadata.yaml").read_text())
+    assert metadata["status"] == "success"
+    assert metadata["runtime_s"] > 0
+    assert metadata["stages"]["save"]["status"] == "completed"
+    assert metadata["stages"][failed_stage]["status"] == "failed"
+    assert "postprocessing unavailable" in metadata["stages"][failed_stage]["message"]
+
+
+def test_runner_supplies_gt_free_shallow_case(synthetic_case, tmp_path, monkeypatch):
+    from usctbench.benchmark import runner
+    from usctbench.core.schema import ReconstructionResult
+
+    monkeypatch.setattr(runner, "read_case_hdf5", lambda path: synthetic_case)
+
+    class Algorithm:
+        def run(self, case, config):
+            assert case.ground_truth.sound_speed_mps is None
+            assert case.measurement is synthetic_case.measurement
+            assert case.geometry is synthetic_case.geometry
+            return ReconstructionResult(
+                algorithm="straight_cgls",
+                case_id=case.case_id,
+                sound_speed_mps=np.full(case.grid.shape, 1500.0),
+                runtime_s=0,
+            )
+
+    monkeypatch.setattr(runner, "get_algorithm", lambda name: Algorithm())
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("name: straight_cgls\nparameters: {}\n")
+    out = runner.run_algorithm_case("straight_cgls", "ignored.h5", cfg, tmp_path)
+    assert synthetic_case.ground_truth.sound_speed_mps is not None
+    metadata = yaml.safe_load((out / "metadata.yaml").read_text())
+    assert metadata["status"] == "success"
+    assert metadata["stages"]["evaluation"]["status"] == "completed"
 
 
 def test_no_ground_truth_keeps_holdout_scores_without_image_scores(

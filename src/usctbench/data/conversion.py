@@ -39,6 +39,9 @@ def convert_speed_mat_volume(
     indices: list[int] | None = None,
     index_metadata: dict[int, dict[str, Any]] | None = None,
     dataset_name: str | None = None,
+    sample_axis: int = 2,
+    image_axes: str = "yx",
+    sound_speed_units: str = "m/s",
     case_id_prefix: str | None = None,
     output_shape: tuple[int, int] = (64, 64),
     spacing_m: tuple[float, float] = (1.0e-3, 1.0e-3),
@@ -67,7 +70,10 @@ def convert_speed_mat_volume(
             raise ValueError(
                 f"speed dataset must be 3-D [ny, nx, n_cases] or [n_cases,ny,nx], got {shape}"
             )
-        sample_axis = _infer_speed_volume_sample_axis(shape)
+        if sample_axis not in (0, 1, 2) or image_axes not in ("yx", "xy"):
+            raise ValueError("sample_axis must be 0/1/2 and image_axes must be yx/xy")
+        if sound_speed_units not in ("m/s", "km/s"):
+            raise ValueError("sound_speed_units must be m/s or km/s")
         case_count = shape[sample_axis]
         selected_indices = indices if indices is not None else [0]
         for index in selected_indices:
@@ -77,6 +83,10 @@ def convert_speed_mat_volume(
             sound_speed = np.asarray(
                 _read_speed_volume_slice(dataset, index, sample_axis), dtype=float
             )
+            if image_axes == "xy":
+                sound_speed = sound_speed.T
+            if sound_speed_units == "km/s":
+                sound_speed = sound_speed * 1000.0
             sound_speed = _downsample_mean(sound_speed, output_shape)
             case_id_suffix = extra_metadata.pop("case_id_suffix", None)
             prefix = case_id_prefix or source.stem
@@ -95,6 +105,20 @@ def convert_speed_mat_volume(
                 spacing_m=spacing_m,
                 n_transducers=n_transducers,
                 reference_sound_speed_mps=reference_sound_speed_mps,
+            )
+            case.metadata.update(
+                source_sample_axis=sample_axis,
+                source_image_axes=image_axes,
+                source_sound_speed_units=sound_speed_units,
+                spatial_metadata_source="conversion_parameters",
+                geometry_source="synthetic_ring",
+                category_source=(
+                    extra_metadata.get(
+                        "openbreastus_class_source", "provided_index_metadata"
+                    )
+                    if extra_metadata
+                    else "unknown"
+                ),
             )
             if extra_metadata:
                 case = case.model_copy(
@@ -151,6 +175,7 @@ def convert_kwave_channel_mat(
     case_id_prefix: str | None = None,
     output_shape: tuple[int, int] = (64, 64),
     n_transducers: int = 32,
+    reference_sound_speed_mps: float = 1500.0,
 ) -> list[dict[str, Any]]:
     """Convert a compact k-Wave channel MAT file to a standard USCTCase.
 
@@ -207,6 +232,7 @@ def convert_kwave_channel_mat(
         xi=xi,
         yi=yi,
         n_transducers=n_transducers,
+        reference_sound_speed_mps=reference_sound_speed_mps,
     )
     case = case.model_copy(update={"case_id": case_id})
     case_path = out_path / f"{case_id}.h5"
@@ -403,18 +429,19 @@ def _kwave_arrays_to_case(
     xi: np.ndarray | None,
     yi: np.ndarray | None,
     n_transducers: int,
+    reference_sound_speed_mps: float,
 ) -> USCTCase:
     grid = _grid_from_coordinates(sound_speed_mps.shape, xi=xi, yi=yi)
     geometry = _geometry_from_xy_positions(positions_xy, n_transducers=n_transducers)
     projector = StraightRayProjector.from_grid_geometry(grid, geometry)
-    c0 = float(np.nanmedian(sound_speed_mps))
+    c0 = reference_sound_speed_mps
     delta_slowness = (1.0 / sound_speed_mps) - (1.0 / c0)
     delta_tof_s = projector.forward(delta_slowness).reshape(projector.ray_shape)
     valid_mask = ~np.eye(projector.ray_shape[0], projector.ray_shape[1], dtype=bool)
     metadata = stamp_measurement_metadata(
         {
             "source_dataset": "kWave_USCT_simulation",
-            "case_type": "openbreastus_wavefield",
+            "case_type": "kwave_property_map_surrogate",
             "source_path": str(source),
             "source_label": source_label,
             "source_npy_path": source_npy_path,
@@ -433,6 +460,8 @@ def _kwave_arrays_to_case(
                 "source channel waveforms are present but are not copied into the standard smoke HDF5 case",
             ],
             "reference_sound_speed_mps": c0,
+            "spatial_metadata_source": "xi_orig_yi_orig",
+            "geometry_source": "transducerPositionsXY",
             "time_range_s": (
                 [float(np.nanmin(time_s)), float(np.nanmax(time_s))]
                 if time_s.size
@@ -491,7 +520,7 @@ def _nbp_handle_to_case_record(
     label_small = _downsample_label(label_crop, output_shape)
     roi_mask = label_small > 0
     if not np.any(roi_mask):
-        roi_mask = np.ones(output_shape, dtype=bool)
+        roi_mask = None
 
     spacing_m = (
         NBP_PIXEL_SPACING_M * sos_mps_crop.shape[0] / float(output_shape[0]),
@@ -542,6 +571,11 @@ def _nbp_handle_to_case_record(
                 "density_class": density_class,
                 "density_label": density_label,
                 "nbp_type_code": type_code,
+                "category_source": "mat_type_field",
+                "roi_status": "available" if roi_mask is not None else "missing_label",
+                "source_sound_speed_units": "km/s",
+                "source_image_axes": "yx",
+                "geometry_source": "synthetic_ring",
                 "density_source_units": "g/mm^3",
                 "density_kg_per_m3_min": float(np.nanmin(density_raw) * 1.0e9),
                 "density_kg_per_m3_max": float(np.nanmax(density_raw) * 1.0e9),
@@ -592,8 +626,7 @@ def _downsample_mean(image: np.ndarray, output_shape: tuple[int, int]) -> np.nda
         raise ValueError("output_shape must be positive")
     if (ny, nx) == (out_y, out_x):
         return array.astype(float, copy=False)
-    y_src = np.linspace(0.0, ny - 1.0, out_y)
-    x_src = np.linspace(0.0, nx - 1.0, out_x)
+    y_src, x_src = _resampling_coordinates(array.shape, output_shape)
     y0 = np.floor(y_src).astype(int)
     x0 = np.floor(x_src).astype(int)
     y1 = np.clip(y0 + 1, 0, ny - 1)
@@ -668,41 +701,44 @@ def _fit_nbp_field_of_view(
 
 
 def _downsample_label(label: np.ndarray, output_shape: tuple[int, int]) -> np.ndarray:
+    """Nearest-neighbor labels on the same cell-edge FOV as continuous maps."""
     label = np.asarray(label)
-    ny, nx = label.shape
-    out_y, out_x = output_shape
-    if out_y <= 0 or out_x <= 0:
+    y_src, x_src = _resampling_coordinates(label.shape, output_shape)
+    return label[np.ix_(np.rint(y_src).astype(int), np.rint(x_src).astype(int))]
+
+
+def _resampling_coordinates(source_shape, output_shape):
+    """Map target cell centers into source indices, preserving physical edges."""
+    if len(source_shape) != 2 or len(output_shape) != 2:
+        raise ValueError("resampling requires two-dimensional grids")
+    if min(source_shape) <= 0 or min(output_shape) <= 0:
         raise ValueError("output_shape must be positive")
-    if out_y > ny or out_x > nx:
-        y_idx = np.linspace(0, ny - 1, out_y).round().astype(int)
-        x_idx = np.linspace(0, nx - 1, out_x).round().astype(int)
-        return label[np.ix_(y_idx, x_idx)].astype(label.dtype, copy=False)
-    block_y = max(1, ny // out_y)
-    block_x = max(1, nx // out_x)
-    crop_y = out_y * block_y
-    crop_x = out_x * block_x
-    start_y = (ny - crop_y) // 2
-    start_x = (nx - crop_x) // 2
-    cropped = label[start_y : start_y + crop_y, start_x : start_x + crop_x]
-    return cropped.reshape(out_y, block_y, out_x, block_x).max(axis=(1, 3))
+    return tuple(
+        np.clip((np.arange(dst) + 0.5) * src / dst - 0.5, 0, src - 1)
+        for src, dst in zip(source_shape, output_shape)
+    )
 
 
 def _grid_from_coordinates(
     shape: tuple[int, int], *, xi: np.ndarray | None, yi: np.ndarray | None
 ) -> GridSpec:
     if xi is not None and yi is not None and xi.size > 1 and yi.size > 1:
-        x_min, x_max = float(np.nanmin(xi)), float(np.nanmax(xi))
-        y_min, y_max = float(np.nanmin(yi)), float(np.nanmax(yi))
-        dy = (y_max - y_min) / float(max(shape[0] - 1, 1))
-        dx = (x_max - x_min) / float(max(shape[1] - 1, 1))
-        if dy > 0.0 and dx > 0.0:
-            return GridSpec(
-                shape=shape,
-                spacing_m=(dy, dx),
-                origin_m=(y_min, x_min),
-                roi_mask=np.ones(shape, dtype=bool),
+        axes = [np.asarray(a, dtype=float).reshape(-1) for a in (yi, xi)]
+        steps = [float(np.mean(np.diff(a))) for a in axes]
+        if any(
+            not np.isfinite(a).all() or d <= 0 or not np.allclose(np.diff(a), d)
+            for a, d in zip(axes, steps)
+        ):
+            raise ValueError(
+                "source coordinates must be finite, uniform and increasing"
             )
-    return make_grid(shape=shape, spacing_m=(1.0e-3, 1.0e-3))
+        return GridSpec(
+            shape=shape,
+            spacing_m=tuple(d * len(a) / n for a, d, n in zip(axes, steps, shape)),
+            origin_m=tuple(a[0] - d / 2 for a, d in zip(axes, steps)),
+            roi_mask=np.ones(shape, dtype=bool),
+        )
+    raise ValueError("xi_orig and yi_orig cell-center coordinates are required")
 
 
 def _geometry_from_xy_positions(
@@ -837,13 +873,11 @@ def _largest_3d_dataset_name(handle: Any) -> str:
 @contextmanager
 def _open_speed_volume(path: Path, *, dataset_name: str | None = None):
     h5py = _h5py()
-    try:
+    if h5py.is_hdf5(path):
         with h5py.File(path, "r") as handle:
             name = dataset_name or _largest_3d_dataset_name(handle)
             yield {"name": name, "dataset": handle[name], "format": "matlab-v7.3-hdf5"}
             return
-    except OSError:
-        pass
 
     try:
         from scipy.io import loadmat

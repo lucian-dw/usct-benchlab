@@ -22,6 +22,15 @@ def test_minimal_policy_disables_optional_quality_rules():
     assert not policy.allow_ground_truth_stopping
 
 
+def test_stationarity_is_not_update_stagnation():
+    policy = RunControls().to_stop_policy(default_iterations=3)
+    monitor = StopMonitor(policy, WorkLedger(policy))
+    monitor.reason = "stationary_gradient"
+    assert monitor.record()["termination_category"] == "stationarity"
+    monitor.reason = "small_model_update"
+    assert monitor.record()["termination_category"] == "stagnation"
+
+
 def test_caps_intersect_and_zero_is_not_missing():
     requested = RunControls(max_iterations=30, max_elapsed_s=2, max_forward_calls=10)
     actual = requested.capped(

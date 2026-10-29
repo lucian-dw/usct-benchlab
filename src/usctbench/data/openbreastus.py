@@ -456,6 +456,9 @@ def make_smoke_subset(
     converted_shape: tuple[int, int] = (64, 64),
     spacing_m: tuple[float, float] = (1.0e-3, 1.0e-3),
     n_transducers: int = 32,
+    sample_axis: int = 2,
+    image_axes: str = "yx",
+    sound_speed_units: str = "m/s",
     subset_role: str = "interface_smoke",
 ) -> dict[str, Any]:
     """Select a small smoke subset and write a manifest plus source links.
@@ -498,7 +501,6 @@ def make_smoke_subset(
     converted_cases = []
     if convert_speed_mat:
         converted_root = out_path / "cases"
-        _clear_converted_cases(converted_root)
         for case in selected:
             for file_record in case["files"]:
                 source = root_path / file_record["path"]
@@ -528,6 +530,9 @@ def make_smoke_subset(
                             output_shape=converted_shape,
                             spacing_m=spacing_m,
                             n_transducers=n_transducers,
+                            sample_axis=sample_axis,
+                            image_axes=image_axes,
+                            sound_speed_units=sound_speed_units,
                         )
                     )
 
@@ -567,6 +572,9 @@ def make_quality_subset(
     converted_shape: tuple[int, int] = (256, 256),
     spacing_m: tuple[float, float] = (1.0e-3, 1.0e-3),
     n_transducers: int = 128,
+    sample_axis: int = 2,
+    image_axes: str = "yx",
+    sound_speed_units: str = "m/s",
 ) -> dict[str, Any]:
     """Create OpenBreastUS map-surrogate cases for visual quality comparison."""
 
@@ -579,6 +587,9 @@ def make_quality_subset(
         converted_shape=converted_shape,
         spacing_m=spacing_m,
         n_transducers=n_transducers,
+        sample_axis=sample_axis,
+        image_axes=image_axes,
+        sound_speed_units=sound_speed_units,
         subset_role="quality_comparison",
     )
 
@@ -720,11 +731,3 @@ def _is_speed_mat_volume(file_record: dict[str, Any]) -> bool:
         and bool(largest.get("shape"))
         and not _is_kwave_channel_mat(file_record)
     )
-
-
-def _clear_converted_cases(converted_root: Path) -> None:
-    if not converted_root.exists():
-        return
-    for path in converted_root.glob("*.h5"):
-        if path.is_file() or path.is_symlink():
-            path.unlink()

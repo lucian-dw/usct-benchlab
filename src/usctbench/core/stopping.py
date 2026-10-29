@@ -392,7 +392,11 @@ class StopMonitor:
                                 "noise_discrepancy",
                                 "oracle_quality_target",
                             }
-                            else "stagnation"
+                            else (
+                                "stationarity"
+                                if self.reason == "stationary_gradient"
+                                else "stagnation"
+                            )
                         )
                     )
                 )

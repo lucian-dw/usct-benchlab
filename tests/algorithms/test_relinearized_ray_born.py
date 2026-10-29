@@ -111,6 +111,19 @@ def test_source_is_required_and_complex_source_roundtrips(tmp_path):
     assert "calibrated source_spectrum" in result.failure_reason
 
 
+@pytest.mark.parametrize(
+    "source", [1 + 0j, np.ones(3, complex), np.ones((3, 8), complex)]
+)
+def test_source_broadcast_matches_explicit_frequency_tx_calibration(source):
+    case, _, _ = nonlinear_case()
+    expected = RWaveAdapter().run(case, config(outer_iterations=1))
+    result = RWaveAdapter().run(
+        case, config(outer_iterations=1, source_spectrum=source)
+    )
+    assert result.status == expected.status == "success"
+    np.testing.assert_array_equal(result.sound_speed_mps, expected.sound_speed_mps)
+
+
 def test_relative_regularization_is_invariant_to_pressure_units():
     case, _, _ = nonlinear_case()
     other = case.model_copy(deep=True)

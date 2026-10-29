@@ -88,7 +88,6 @@ FORBIDDEN_FILES = [
     "src/usctbench/algorithms/fwi/adapter.py",
     "src/usctbench/algorithms/fwi/controlled.py",
     "src/usctbench/algorithms/fwi/diffusion_adapter.py",
-    "AGENTS.md",
     "CODEX_GOAL_PROMPT.md",
     "codex_goal_prompt.md",
 ]

@@ -78,8 +78,8 @@ def render(root, out, case_ids, stages, metric_region="tissue"):
             record.update(
                 {k: v for k, v in regional.items() if k != "image_evaluation"}
             )
-            record["evaluation_mask_sha256"] = regional["image_evaluation"][
-                "mask_sha256"
+            record["evaluation_tissue_pixels"] = regional["image_evaluation"][
+                "tissue_pixels"
             ]
             for key in (
                 "version",

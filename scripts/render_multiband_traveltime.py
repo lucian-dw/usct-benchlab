@@ -47,7 +47,12 @@ def load_run(out, truth, allow_checkpoint):
         raise ValueError(f"invalid reconstructed image: {out}")
     metrics = compute_regional_image_metrics(image, truth, water_speed_mps=1500)
     for key in ("rmse", "psnr", "ssim"):
-        if final and not np.isclose(recorded[key], metrics[key], rtol=1e-8, atol=1e-10):
+        equal = (recorded.get(key) is None and metrics[key] is None) or (
+            recorded.get(key) is not None
+            and metrics[key] is not None
+            and np.isclose(recorded[key], metrics[key], rtol=1e-8, atol=1e-10)
+        )
+        if final and not equal:
             raise ValueError(f"recorded {key} disagrees with image/GT: {out}")
     manifest_path = out / "manifest.json"
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
@@ -145,8 +150,15 @@ def main():
                 else "Channel count not recorded"
             )
             axes[row, col].set_xlabel(
-                f"RMSE {record['rmse']:.2f} / PSNR {record['psnr']:.2f}\n"
-                f"SSIM {record['ssim']:.3f}\n{counts}\n{record['status']}",
+                " / ".join(
+                    (
+                        f"{key.upper()} {record[key]:.3g}"
+                        if record[key] is not None
+                        else f"{key.upper()} unavailable"
+                    )
+                    for key in ("rmse", "psnr", "ssim")
+                )
+                + f"\n{counts}\n{record['status']}",
                 fontsize=10,
                 fontweight="bold",
             )

@@ -106,6 +106,24 @@ class RWaveAdapter:
             len(case.geometry.tx_pos_m),
             len(case.geometry.rx_pos_m),
         )
+        if source is not None:
+            source = np.asarray(source, dtype=complex)
+            if source.ndim == 1:
+                if source.shape != (data_shape[0],):
+                    raise ValueError(
+                        "source_spectrum frequency dimension does not match observations"
+                    )
+                source = source[:, None]
+            elif source.ndim != 0 and source.shape != data_shape[:2]:
+                raise ValueError("source_spectrum must have shape (frequency, tx)")
+            try:
+                source = np.broadcast_to(source, data_shape[:2]).copy()
+            except ValueError as exc:
+                raise ValueError(
+                    "source_spectrum must be scalar, (frequency,), or (frequency, tx)"
+                ) from exc
+            if not np.isfinite(source).all():
+                raise ValueError("source_spectrum must be finite")
         if observed.shape != data_shape:
             raise ValueError(
                 f"freq_data must have canonical (frequency, tx, rx) shape {data_shape}"

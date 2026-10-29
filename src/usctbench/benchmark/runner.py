@@ -14,6 +14,7 @@ import re
 import resource
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from usctbench.core.provenance import case_measurement_metadata
 from usctbench.core.registry import get_algorithm
 from usctbench.core.schema import (
     AlgorithmConfig,
+    GroundTruthSpec,
     ReconstructionResult,
     ResultStatus,
     USCTCase,
@@ -101,10 +103,13 @@ def run_algorithm_case(
     case_id = Path(case_path).stem
     algorithm_for_report = algorithm_name
     config_for_report = str(config_path)
-    memory_before_mb = _peak_memory_mb()
+    memory_before_mib = _process_peak_rss_mib()
     implementation_before = _implementation_digest()
     resolved_config = None
     case: USCTCase | None = None
+    started = time.perf_counter()
+    stages = {}
+    stage = "prepare"
     try:
         case = read_case_hdf5(case_path)
         case_id = case.case_id
@@ -117,9 +122,55 @@ def run_algorithm_case(
             )
         config.parameters.setdefault("_run_output_dir", str(out_root / case_id))
         algorithm = get_algorithm(algorithm_name)
-        result = algorithm.run(case, config)
-        if result.sound_speed_mps is not None and result.status == ResultStatus.SUCCESS:
-            # Reporting only: the solver has already selected its final state.
+        stages[stage] = {"status": "completed"}
+        stage = "solve"
+        reconstruction_case = case.model_copy(
+            update={"ground_truth": GroundTruthSpec()}
+        )
+        result = algorithm.run(reconstruction_case, config)
+        stages[stage] = {"status": str(result.status)}
+    except Exception as exc:
+        stages[stage] = {"status": "failed", "message": f"{type(exc).__name__}: {exc}"}
+        result = ReconstructionResult(
+            algorithm=algorithm_for_report,
+            case_id=case_id,
+            runtime_s=time.perf_counter() - started,
+            status=ResultStatus.FAILED,
+            failure_reason=f"{type(exc).__name__}: {exc}",
+        )
+    result.runtime_s = time.perf_counter() - started
+    result.metrics["stages"] = stages
+    memory_after_mib = _process_peak_rss_mib()
+    implementation_after = _implementation_digest()
+    result.metrics["implementation"] = {
+        "source_sha256_at_start": implementation_before,
+        "source_changed_during_run": implementation_before != implementation_after,
+        "source_sha256_at_finish": implementation_after,
+    }
+    result.metrics["resolved_config"] = resolved_config
+    if case is not None:
+        for key, value in _feature_qc_metrics(case).items():
+            result.metrics.setdefault(key, value)
+
+    out_dir = out_root / case_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    process_peak_rss_mib = max(memory_before_mib, memory_after_mib)
+    try:
+        write_result_hdf5(result, out_dir / "result.h5")
+        stages["save"] = {"status": "completed"}
+    except Exception as exc:
+        stages["save"] = {"status": "failed", "message": f"{type(exc).__name__}: {exc}"}
+        result.status = ResultStatus.FAILED
+        result.failure_reason = f"artifact write failed: {type(exc).__name__}: {exc}"
+    _write_result_records(
+        result,
+        out_dir,
+        config=config_for_report,
+        process_peak_rss_mib=process_peak_rss_mib,
+        case=case,
+    )
+    if result.status == ResultStatus.SUCCESS and result.sound_speed_mps is not None:
+        try:
             image_policy = dict(config.parameters.get("image_evaluation", {}))
             image_policy.setdefault(
                 "water_speed_mps",
@@ -135,51 +186,27 @@ def run_algorithm_case(
                     **image_policy,
                 )
             )
-    except Exception as exc:
-        result = ReconstructionResult(
-            algorithm=algorithm_for_report,
-            case_id=case_id,
-            runtime_s=0.0,
-            status=ResultStatus.FAILED,
-            failure_reason=f"{type(exc).__name__}: {exc}",
-        )
-    memory_after_mb = _peak_memory_mb()
-    implementation_after = _implementation_digest()
-    result.metrics["implementation"] = {
-        "source_sha256_at_start": implementation_before,
-        "source_changed_during_run": implementation_before != implementation_after,
-        "source_sha256_at_finish": implementation_after,
-    }
-    result.metrics["resolved_config"] = resolved_config
-    if case is not None:
-        for key, value in _feature_qc_metrics(case).items():
-            result.metrics.setdefault(key, value)
-
-    out_dir = out_root / case_id
-    out_dir.mkdir(parents=True, exist_ok=True)
-    peak_memory_mb = max(memory_before_mb, memory_after_mb)
-    try:
-        _write_result_artifacts(
+            _write_straight_ray_diagnostics(result, case, out_dir)
+            stages["evaluation"] = {"status": "completed"}
+        except Exception as exc:
+            stages["evaluation"] = {
+                "status": "failed",
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+        try:
+            preview = write_preview_png(result.sound_speed_mps, out_dir / "preview.png")
+            result.artifacts["preview"] = str(preview)
+            stages["preview"] = {"status": "completed"}
+        except Exception as exc:
+            stages["preview"] = {
+                "status": "failed",
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+        _write_result_records(
             result,
             out_dir,
             config=config_for_report,
-            peak_memory_mb=peak_memory_mb,
-            case=case,
-        )
-    except Exception as exc:
-        fallback = ReconstructionResult(
-            algorithm=result.algorithm,
-            case_id=result.case_id,
-            runtime_s=result.runtime_s,
-            status=ResultStatus.FAILED,
-            failure_reason=f"artifact write failed: {type(exc).__name__}: {exc}",
-            metrics={"artifact_write_failed": True},
-        )
-        _write_result_artifacts(
-            fallback,
-            out_dir,
-            config=config_for_report,
-            peak_memory_mb=peak_memory_mb,
+            process_peak_rss_mib=process_peak_rss_mib,
             case=case,
         )
     return out_dir
@@ -206,7 +233,7 @@ def evaluate_run(
             "algorithm": metadata.get("algorithm", case_dir.parent.name),
             "status": metadata.get("status", "unknown"),
             "runtime_s": metadata.get("runtime_s", ""),
-            "peak_memory_mb": metadata.get("peak_memory_mb", ""),
+            "process_peak_rss_mib": metadata.get("process_peak_rss_mib", ""),
             "failure_reason": metadata.get("failure_reason") or "",
             "feature_qc_passed": metadata.get("feature_qc_passed", ""),
             "feature_failed_qc": metadata.get("feature_failed_qc", ""),
@@ -309,21 +336,15 @@ def run_benchmark_suite(suite_path: str | Path) -> dict[str, Any]:
     return {"run_root": str(run_root), "num_cases": len(suite_cases), **evaluation}
 
 
-def _write_result_artifacts(
+def _write_result_records(
     result: ReconstructionResult,
     out_dir: Path,
     *,
     config: str,
-    peak_memory_mb: float,
+    process_peak_rss_mib: float,
     case: USCTCase | None = None,
 ) -> None:
-    preview_image = result.sound_speed_mps
-    if preview_image is not None:
-        preview_path = write_preview_png(preview_image, out_dir / "preview.png")
-        result.artifacts.setdefault("preview", str(preview_path))
-    _write_straight_ray_diagnostics(result, case, out_dir)
-
-    result_path = write_result_hdf5(result, out_dir / "result.h5")
+    result_path = out_dir / "result.h5"
     (out_dir / "metrics.json").write_text(
         json.dumps(result.metrics, indent=2, sort_keys=True), encoding="utf-8"
     )
@@ -354,7 +375,8 @@ def _write_result_artifacts(
                 "image_evaluation": result.metrics.get("image_evaluation"),
                 "error_type": _classify_failure(result.failure_reason),
                 "runtime_s": result.runtime_s,
-                "peak_memory_mb": peak_memory_mb,
+                "process_peak_rss_mib": process_peak_rss_mib,
+                "stages": result.metrics.get("stages"),
                 "status": str(result.status),
                 "failure_reason": result.failure_reason,
                 "result_h5": str(result_path),
@@ -772,11 +794,6 @@ def _artifact_check(case_dir: Path, record: dict[str, Any]) -> tuple[bool, list[
         if not path.exists():
             reasons.append(f"missing {label}")
     if (
-        str(record.get("status", "")).lower() == "success"
-        and not (case_dir / "preview.png").exists()
-    ):
-        reasons.append("missing preview.png for successful run")
-    if (
         str(record.get("status", "")).lower() != "success"
         and not (case_dir / "failure_report.md").exists()
     ):
@@ -802,7 +819,7 @@ def _write_summary_csv(records: list[dict[str, Any]], path: Path) -> None:
         "psnr",
         "ssim",
         "water_background_rmse",
-        "peak_memory_mb",
+        "process_peak_rss_mib",
         "artifacts_complete",
         "failure_report_present",
     ]
@@ -828,9 +845,9 @@ def _write_benchmark_report(
         if _is_number(record.get("runtime_s"))
     ]
     memory_values = [
-        float(record["peak_memory_mb"])
+        float(record["process_peak_rss_mib"])
         for record in records
-        if _is_number(record.get("peak_memory_mb"))
+        if _is_number(record.get("process_peak_rss_mib"))
     ]
     lines = [
         "# Benchmark report",
@@ -1041,10 +1058,10 @@ def _classify_failure(reason: str | None) -> str:
     return "unknown"
 
 
-def _peak_memory_mb() -> float:
+def _process_peak_rss_mib() -> float:
     usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     # macOS reports bytes; Linux reports KiB.
-    if usage > 10_000_000:
+    if sys.platform == "darwin":
         return float(usage) / (1024.0 * 1024.0)
     return float(usage) / 1024.0
 

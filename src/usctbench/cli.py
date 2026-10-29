@@ -146,6 +146,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only write the manifest; do not create HDF5 cases.",
     )
 
+    for volume_parser in (smoke_parser, quality_parser):
+        volume_parser.add_argument(
+            "--sample-axis", type=int, choices=(0, 1, 2), default=2
+        )
+        volume_parser.add_argument("--image-axes", choices=("yx", "xy"), default="yx")
+        volume_parser.add_argument(
+            "--sound-speed-units", choices=("m/s", "km/s"), default="m/s"
+        )
+
     nbp_inspect_parser = data_subparsers.add_parser(
         "inspect-nbpslice2d", help="Inspect an NBPslices2D ZIP archive."
     )
@@ -315,6 +324,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 converted_shape=(args.converted_shape, args.converted_shape),
                 spacing_m=(args.spacing_m, args.spacing_m),
                 n_transducers=args.n_transducers,
+                sample_axis=args.sample_axis,
+                image_axes=args.image_axes,
+                sound_speed_units=args.sound_speed_units,
             )
             print(args.out)
             return 0
@@ -327,6 +339,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 converted_shape=(args.converted_shape, args.converted_shape),
                 spacing_m=(args.spacing_m, args.spacing_m),
                 n_transducers=args.n_transducers,
+                sample_axis=args.sample_axis,
+                image_axes=args.image_axes,
+                sound_speed_units=args.sound_speed_units,
             )
             print(args.out)
             return 0

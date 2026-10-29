@@ -39,6 +39,33 @@ def test_make_synthetic_smoke_subset_writes_hdf5_cases(tmp_path):
     assert case.grid.shape == (8, 8)
 
 
+def test_volume_axes_units_and_missing_coordinates_are_explicit(tmp_path):
+    from usctbench.data.conversion import convert_speed_mat_volume
+
+    source = tmp_path / "volume.mat"
+    image = np.arange(24).reshape(4, 6) + 1480.0
+    with h5py.File(source, "w") as handle:
+        handle["sos"] = (image.T / 1000.0)[None, ...]
+    records = convert_speed_mat_volume(
+        source,
+        tmp_path / "converted",
+        dataset_name="sos",
+        sample_axis=0,
+        image_axes="xy",
+        sound_speed_units="km/s",
+        output_shape=image.shape,
+        spacing_m=(0.001, 0.002),
+        n_transducers=8,
+    )
+    case = read_case_hdf5(records[0]["path"])
+    np.testing.assert_allclose(case.ground_truth.sound_speed_mps, image)
+    assert case.grid.spacing_m == (0.001, 0.002)
+    assert case.metadata["source_image_axes"] == "xy"
+    assert case.metadata["category_source"] == "unknown"
+    with pytest.raises(ValueError, match="coordinates are required"):
+        _grid_from_coordinates((4, 6), xi=None, yi=None)
+
+
 def test_grid_from_coordinates_uses_point_spacing():
     xi = np.linspace(-0.01, 0.01, 5)
     yi = np.linspace(-0.02, 0.02, 9)
@@ -47,6 +74,60 @@ def test_grid_from_coordinates_uses_point_spacing():
 
     assert np.isclose(grid.spacing_m[0], 0.005)
     assert np.isclose(grid.spacing_m[1], 0.005)
+    np.testing.assert_allclose(grid.origin_m, [-0.0225, -0.0125])
+    resized = _grid_from_coordinates((7, 3), xi=xi, yi=yi)
+    np.testing.assert_allclose(
+        np.array(resized.spacing_m) * resized.shape,
+        np.array(grid.spacing_m) * grid.shape,
+    )
+    np.testing.assert_array_equal(resized.origin_m, grid.origin_m)
+
+
+def test_rectangular_maps_and_labels_share_physical_cell_centers():
+    from usctbench.data.conversion import _downsample_mean, _downsample_label
+
+    shape, target = (11, 17), (7, 9)
+    spacing = np.array([0.0002, 0.0007])
+    yy, xx = np.indices(shape)
+    speed = 1450 + 1000 * ((yy + 0.5) * spacing[0] + (xx + 0.5) * spacing[1])
+    labels = (yy >= 4).astype(np.uint8) + 2 * (xx >= 10).astype(np.uint8)
+    target_spacing = spacing * shape / target
+    ty, tx = np.indices(target)
+    expected_speed = 1450 + 1000 * (
+        (ty + 0.5) * target_spacing[0] + (tx + 0.5) * target_spacing[1]
+    )
+    iy = np.rint((ty + 0.5) * target_spacing[0] / spacing[0] - 0.5).astype(int)
+    ix = np.rint((tx + 0.5) * target_spacing[1] / spacing[1] - 0.5).astype(int)
+    np.testing.assert_allclose(_downsample_mean(speed, target), expected_speed)
+    np.testing.assert_array_equal(_downsample_label(labels, target), labels[iy, ix])
+
+
+def test_reader_does_not_intercept_caller_oserror(tmp_path):
+    from usctbench.data.conversion import _open_speed_volume
+
+    path = tmp_path / "speed.mat"
+    with h5py.File(path, "w") as handle:
+        handle["speed"] = np.ones((3, 4, 5))
+    error = OSError("consumer write failed")
+    with pytest.raises(OSError) as caught:
+        with _open_speed_volume(path):
+            raise error
+    assert caught.value is error
+
+
+def test_openbreastus_conversion_preserves_unrelated_case_files(tmp_path, monkeypatch):
+    from usctbench.data import openbreastus
+
+    root, out = tmp_path / "input", tmp_path / "output"
+    root.mkdir()
+    (out / "cases").mkdir(parents=True)
+    saved = out / "cases" / "unrelated.h5"
+    saved.write_bytes(b"existing user result")
+    monkeypatch.setattr(
+        openbreastus, "inspect_openbreastus", lambda *args: {"cases": []}
+    )
+    openbreastus.make_smoke_subset(root, out, symlink_sources=False)
+    assert saved.read_bytes() == b"existing user result"
 
 
 @pytest.mark.parametrize("dataset", ["nbp", "kwave"])
@@ -61,6 +142,8 @@ def test_raw_extra_material_maps_are_not_required_or_used(tmp_path, dataset):
             handle["type"] = [ord("A")]
         else:
             handle["C"] = speed.T
+            handle["xi_orig"] = (np.arange(8) + 0.5) * 0.001 - 0.004
+            handle["yi_orig"] = (np.arange(8) + 0.5) * 0.001 - 0.004
             angle = np.linspace(0, 2 * np.pi, 8, endpoint=False)
             handle["transducerPositionsXY"] = 0.02 * np.column_stack(
                 [np.cos(angle), np.sin(angle)]

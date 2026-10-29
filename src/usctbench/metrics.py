@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import hashlib
 from typing import Any
 
 import numpy as np
@@ -34,7 +33,7 @@ def compute_image_metrics(
     mask: np.ndarray | None = None,
     prefix: str = "",
     data_range: float | None = None,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Compute scalar image metrics over finite ROI pixels."""
 
     pred_image = np.asarray(prediction, dtype=float)
@@ -56,16 +55,18 @@ def compute_image_metrics(
     if not np.isfinite(data_range) or data_range <= 0:
         raise ValueError("data_range must be finite and positive")
     psnr = math.inf if mse == 0 else 20.0 * math.log10(data_range / math.sqrt(mse))
+    ssim = _image_ssim(
+        pred_image, truth_image, valid_mask=finite_mask, data_range=data_range
+    )
     return {
         f"{prefix}rmse": rmse,
         f"{prefix}mae": mae,
-        f"{prefix}nrmse": nrmse,
-        f"{prefix}psnr": psnr,
-        f"{prefix}ssim": _image_ssim(
-            pred_image,
-            truth_image,
-            valid_mask=finite_mask,
-            data_range=data_range,
+        f"{prefix}nrmse": nrmse if math.isfinite(nrmse) else None,
+        f"{prefix}psnr": psnr if math.isfinite(psnr) else None,
+        f"{prefix}psnr_status": "perfect_reconstruction" if mse == 0 else "available",
+        f"{prefix}ssim": ssim,
+        f"{prefix}ssim_status": (
+            "available" if ssim is not None else "unavailable_no_complete_window"
         ),
         f"{prefix}global_ssim": _global_ssim(pred, truth, data_range=data_range),
     }
@@ -170,10 +171,7 @@ def compute_regional_image_metrics(
             "data_range_mps": float(data_range_mps),
             "tissue_pixels": int(tissue.sum()),
             "full_image_pixels": int(finite.sum()),
-            "mask_sha256": hashlib.sha256(
-                np.array(tissue.shape, dtype="<i8").tobytes() + tissue.tobytes()
-            ).hexdigest(),
-            "ssim_window": "complete valid windows, up to 7 pixels; global fallback for tiny masks",
+            "ssim_window": "complete valid windows, up to 7 pixels; unavailable if none fit",
         }
     )
     if tissue.any():
@@ -265,14 +263,14 @@ def _image_ssim(
     *,
     valid_mask: np.ndarray,
     data_range: float,
-) -> float:
+) -> float | None:
     """Compute standard 2-D SSIM with invalid pixels neutralized."""
 
     pred = np.asarray(prediction, dtype=float)
     truth = np.asarray(target, dtype=float)
     valid = np.asarray(valid_mask, dtype=bool)
     if pred.ndim != 2 or truth.ndim != 2:
-        return _global_ssim(pred[valid], truth[valid], data_range=data_range)
+        return None
     if not np.any(valid):
         raise ValueError("no finite pixels available for metric computation")
 
@@ -283,7 +281,7 @@ def _image_ssim(
     truth_crop = truth[row_slice, col_slice].copy()
     valid_crop = valid[row_slice, col_slice]
     if min(pred_crop.shape) < 3:
-        return _global_ssim(pred[valid], truth[valid], data_range=data_range)
+        return None
 
     fill_value = float(np.median(truth[valid]))
     pred_crop[~valid_crop] = fill_value
@@ -295,7 +293,7 @@ def _image_ssim(
     if win_size % 2 == 0:
         win_size -= 1
     if win_size < 3:
-        return _global_ssim(pred[valid], truth[valid], data_range=data_range)
+        return None
     _, similarity_map = structural_similarity(
         truth_crop,
         pred_crop,
@@ -308,64 +306,5 @@ def _image_ssim(
 
     interior = binary_erosion(valid_crop, structure=np.ones((win_size, win_size)))
     if not np.any(interior):
-        return _global_ssim(pred[valid], truth[valid], data_range=data_range)
+        return None
     return float(np.mean(similarity_map[interior]))
-
-
-def residual_metrics(
-    predicted: np.ndarray,
-    observed: np.ndarray,
-    *,
-    mask: np.ndarray | None = None,
-    prefix: str = "data_",
-) -> dict[str, float]:
-    """Compute finite residual norms between predicted and observed data."""
-
-    pred = np.asarray(predicted, dtype=float)
-    obs = np.asarray(observed, dtype=float)
-    if pred.shape != obs.shape:
-        raise ValueError("predicted and observed data must have the same shape")
-    finite = np.isfinite(pred) & np.isfinite(obs)
-    if mask is not None:
-        finite &= np.asarray(mask, dtype=bool)
-    if not np.any(finite):
-        raise ValueError("no finite data samples available for residual metrics")
-    residual = pred[finite] - obs[finite]
-    obs_values = obs[finite]
-    norm = float(np.linalg.norm(residual))
-    observed_norm = float(np.linalg.norm(obs_values))
-    return {
-        f"{prefix}residual_norm": norm,
-        f"{prefix}observed_norm": observed_norm,
-        f"{prefix}relative_residual": (
-            norm / observed_norm if observed_norm > 0 else math.inf if norm > 0 else 0.0
-        ),
-        f"{prefix}rmse": float(np.sqrt(np.mean(residual**2))),
-        f"{prefix}mae": float(np.mean(np.abs(residual))),
-        f"{prefix}num_samples": float(residual.size),
-    }
-
-
-def baseline_improvement(
-    baseline_error: float,
-    reconstruction_error: float,
-    *,
-    prefix: str = "baseline_",
-) -> dict[str, float | bool]:
-    """Report absolute and relative improvement over a baseline error."""
-
-    baseline = float(baseline_error)
-    reconstruction = float(reconstruction_error)
-    if baseline < 0 or reconstruction < 0:
-        raise ValueError("errors must be non-negative")
-    if baseline == 0:
-        relative = math.inf if reconstruction < baseline else 0.0
-    else:
-        relative = (baseline - reconstruction) / baseline
-    return {
-        f"{prefix}error": baseline,
-        f"{prefix}reconstruction_error": reconstruction,
-        f"{prefix}absolute_improvement": baseline - reconstruction,
-        f"{prefix}relative_improvement": relative,
-        f"{prefix}improved": reconstruction < baseline,
-    }

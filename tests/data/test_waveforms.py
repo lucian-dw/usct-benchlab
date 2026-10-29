@@ -110,3 +110,26 @@ def test_no_truth_and_byte_guard(tmp_path):
         convert_kwave_pressure_mat(source, tmp_path / "no.h5", max_output_bytes=16)
     with pytest.raises(ValueError, match="indices"):
         convert_kwave_pressure_mat(source, tmp_path / "no.h5", tx_indices=[1, 1])
+
+
+def test_time_only_import_avoids_dtft_and_resamples_gt_at_physical_coordinates(
+    tmp_path, monkeypatch
+):
+    from usctbench.data import waveforms
+    from usctbench.core.schema import GridSpec
+
+    source = tmp_path / "channels.mat"
+    write_fixture(source)
+
+    def forbidden(*args):
+        raise AssertionError("time-only import must not compute a spectrum")
+
+    monkeypatch.setattr(waveforms, "pressure_spectrum", forbidden)
+    grid = GridSpec(shape=(2, 2), spacing_m=(0.002, 0.0005), origin_m=(-0.002, -0.0005))
+    case = convert_kwave_pressure_mat(source, tmp_path / "case.h5", grid=grid)
+    # Source image is 1510 + 3*row + col; sample at actual y/x, not resize indices.
+    expected = (
+        1510 + 3 * np.array([0.25, 0.75])[:, None] + np.array([0.75, 1.25])[None, :]
+    )
+    np.testing.assert_allclose(case.ground_truth.sound_speed_mps, expected)
+    assert case.measurement.freq_data is None

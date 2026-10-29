@@ -42,16 +42,16 @@ def nonlinear_least_squares(
     By default it is the initial model. Pixels outside ROI remain at the starting
     model, even when the penalty reference differs.
     """
-    for name, value in (
-        ("inner_iterations", inner_iterations),
-        ("max_backtracks", max_backtracks),
+    for name, value, minimum in (
+        ("inner_iterations", inner_iterations, 1),
+        ("max_backtracks", max_backtracks, 0),
     ):
         if (
             isinstance(value, bool)
             or not isinstance(value, (int, np.integer))
-            or value <= 0
+            or value < minimum
         ):
-            raise ValueError(f"{name} must be a positive integer")
+            raise ValueError(f"{name} must be an integer >= {minimum}")
     for name, value in (
         ("step_length", step_length),
         ("max_update_mps", max_update_mps),
@@ -238,7 +238,7 @@ def nonlinear_least_squares(
                 if roi is not None:
                     first_candidate = np.where(roi, first_candidate, initial_state)
                 initial_displacement = first_candidate - state
-                for backtrack in range(max_backtracks):
+                for backtrack in range(max_backtracks + 1):
                     fraction = 0.5**backtrack
                     # Keep the first trial bit-for-bit; later trials lie on its
                     # feasible segment instead of saturating the raw step again.

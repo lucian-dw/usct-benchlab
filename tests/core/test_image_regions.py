@@ -23,7 +23,24 @@ def test_water_artifact_cannot_change_tissue_metrics():
         assert a[key] == b[key]
     assert b["full_image_rmse"] > a["full_image_rmse"]
     assert b["water_background_rmse"] == 100
-    assert a["image_evaluation"]["mask_sha256"] == b["image_evaluation"]["mask_sha256"]
+    assert (
+        a["image_evaluation"]["tissue_pixels"]
+        == b["image_evaluation"]["tissue_pixels"]
+        == tissue.sum()
+    )
+
+
+def test_small_regions_do_not_silently_replace_local_ssim():
+    import json
+    from usctbench.metrics import compute_image_metrics
+
+    truth = np.full((2, 5), 1500.0)
+    scores = compute_image_metrics(truth, truth)
+    assert scores["ssim"] is None
+    assert scores["ssim_status"] == "unavailable_no_complete_window"
+    assert scores["psnr"] is None
+    assert scores["psnr_status"] == "perfect_reconstruction"
+    json.dumps(scores, allow_nan=False)
 
 
 def test_range_is_shared_and_constant_tissue_does_not_inflate_psnr():

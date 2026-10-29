@@ -317,7 +317,7 @@ class BornParameters(GaussNewtonParameters):
         12.0, "Bound on each nonlinear sound-speed update.", "m/s", "agent"
     )
     max_backtracks: NonnegativeInt = parameter(
-        10, "Maximum line-search backtracks.", "trials"
+        10, "Maximum backtracks after the initial trial; zero tries once.", "backtracks"
     )
     green_solver_rtol: Annotated[float, Field(strict=True, gt=0, lt=1)] = parameter(
         1e-7, "Volume-integral Green solver tolerance."

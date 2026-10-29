@@ -159,7 +159,10 @@ def test_normal_step_does_not_silently_return_on_invalid_curvature():
         )
 
 
-def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution():
+@pytest.mark.parametrize("max_backtracks", [0, 10])
+def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution(
+    max_backtracks,
+):
     from usctbench.algorithms._control import InversionControl
     from usctbench.core.schema import (
         AlgorithmConfig,
@@ -218,6 +221,7 @@ def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution()
         inner_iterations=8,
         damping=0,
         smooth_sigma=1,
+        max_backtracks=max_backtracks,
     )
     expected = initial + np.linalg.solve(matrix, observed.ravel()).reshape(shape)
     np.testing.assert_allclose(result, expected, rtol=1e-10)

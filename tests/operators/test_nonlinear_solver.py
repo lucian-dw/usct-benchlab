@@ -364,12 +364,12 @@ def test_each_rejected_halving_shrinks_both_proposals_and_preserves_checkpoint(s
     state, metrics, forward, _, control = solve(matrix, [1e-9, 1e-3])
     rows = metrics["line_search_history"]
     assert metrics["stop_reason"] == "line_search_failed"
-    assert len(rows) == 16 and len(forward.states) == 17
+    assert len(rows) == 18 and len(forward.states) == 19
     assert not any(row["accepted"] for row in rows)
-    for start in (0, 8):
-        trial_states = forward.states[1 + start : 9 + start]
+    for start in (0, 9):
+        trial_states = forward.states[1 + start : 10 + start]
         _assert_displacement_trials(
-            forward.reference, trial_states, rows[start : start + 8], trial_states[0], 1
+            forward.reference, trial_states, rows[start : start + 9], trial_states[0], 1
         )
     np.testing.assert_array_equal(state, forward.reference)
     np.testing.assert_array_equal(control.last_prediction, np.zeros((1, 2)))
@@ -410,7 +410,7 @@ def test_projected_uphill_newton_uses_projected_gradient_without_evaluation(solv
     rows = metrics["line_search_history"]
     assert metrics["direction_checks"][0]["raw_directional_derivative"] < 0
     newton_rows = [row for row in rows if row["proposal"] == "newton_proposal"]
-    assert len(newton_rows) == 8
+    assert len(newton_rows) == 9  # Initial trial plus eight backtracks.
     assert all(row["projected_directional_derivative"] > 0 for row in newton_rows)
     assert all(row["rejection"] == "non_descent_projected_step" for row in newton_rows)
     assert all(row["objective"] is None for row in newton_rows)
