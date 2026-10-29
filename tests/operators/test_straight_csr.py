@@ -55,3 +55,12 @@ def test_duplicate_segments_norm_after_summing_and_empty_rows():
 def test_invalid_backend_rejected():
     with pytest.raises(ValueError, match="backend"):
         replace(projector(), backend="not-a-backend")
+
+
+def test_homogeneous_line_integral_has_physical_length():
+    grid = GridSpec(shape=(3, 3), spacing_m=(0.001, 0.001))
+    geometry = GeometrySpec(tx_pos_m=[[0.0005, -0.001]], rx_pos_m=[[0.0005, 0.004]])
+    op = StraightRayProjector.from_grid_geometry(grid, geometry)
+    np.testing.assert_allclose(
+        op.forward(np.full(grid.shape, 1 / 1500)), [0.003 / 1500]
+    )

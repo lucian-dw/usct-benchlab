@@ -26,7 +26,7 @@ parameter combinations with hidden loops merely to lower the displayed count.
 
 One-off sweeps, run launchers, copied source snapshots, and their logs belong in
 the external run workspace, not in `src/` or `tests/`. Preserve raw observations,
-final results, source identities, and confirmed failure evidence. Delete only
+final results, software versions, and confirmed failure evidence. Delete only
 regenerable caches or verified redundant/failed startup files; never clean an
 active run's source or checkpoints. Consolidate superseded progress notes into
 the final report instead of accumulating another archive tree.
@@ -36,16 +36,13 @@ the final report instead of accumulating another archive tree.
 ```bash
 usct --help
 usct list-algorithms
-bash scripts/run_smoke.sh
+bash examples/synthetic_quickstart.sh /tmp/usct-example
 ```
 
-## Release Audit
+## Generated files
 
-```bash
-python scripts/audit_release.py
-```
-
-Additional checks:
+The `.gitignore` excludes data, runs and scientific array files. Check the staged
+diff before committing. Optional inspection commands:
 
 ```bash
 git ls-files | grep -E '\.(h5|hdf5|mat|npy|npz|zarr|pt|pth|ckpt|pkl)$' || true

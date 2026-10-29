@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-${PYTHON:-python}}"
-ROOT="${USCT_EXAMPLE_ROOT:-/tmp/usctbench_examples}"
+ROOT="${1:-${USCT_EXAMPLE_ROOT:-/tmp/usctbench_examples}}"
 DATA_ROOT="$ROOT/synthetic_demo"
 RUN_ROOT="$ROOT/runs"
 
@@ -15,7 +15,7 @@ PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench
   --shape 32 \
   --n-transducers 32
 
-USCT_SYNTHETIC_CASE_GLOB="$DATA_ROOT/cases/*.h5" \
-USCT_RUN_ROOT="$RUN_ROOT" \
-PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli bench \
-  --suite configs/benchmarks/synthetic_demo.yaml
+PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -m usctbench.cli run straight_cgls \
+  --case "$DATA_ROOT/cases/synthetic_circular_sos.h5" \
+  --config configs/algorithms/cgls.yaml \
+  --out "$RUN_ROOT/cgls"

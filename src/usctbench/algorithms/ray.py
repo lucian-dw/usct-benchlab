@@ -17,22 +17,7 @@ from usctbench.core.schema import (
     USCTCase,
 )
 
-# Historical imports remain valid after separating physics and numerical solvers.
 from usctbench.operators.straight_ray import StraightRayProjector
-from usctbench.solvers.algebraic import (  # noqa: F401
-    apply_mask,
-    masked_norm,
-    cgls_solve,
-    huber_irls_cgls_solve,
-    sirt_solve,
-    sart_solve,
-    _gaussian_smooth,
-    _post_update,
-    _regularization_forward,
-    _regularization_normal,
-    _roi_regularization_image,
-    _laplacian,
-)
 
 
 def parameter(config: AlgorithmConfig, key: str, default: Any) -> Any:

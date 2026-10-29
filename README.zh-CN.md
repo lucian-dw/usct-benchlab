@@ -50,7 +50,7 @@ $$
 
 Born 变体为 `wkb_fixed`、`wkb_nonlinear`、`full_green_fixed`、`full_green_nonlinear`。提供的 YAML 选择 nonlinear Full-Green；应查询具体变体，不能假设各入口默认相同。WKB 灵敏度是其非线性预测导数的近似；Eikonal 的离散导数依赖当前传播 stencil，分支切换处可能不光滑。
 
-规范算子入口是 `usctbench.operators.straight_ray`、`.eikonal`、`.ray_born`。前向预测、线性化和伴随分别负责不同计算，**伴随不是逆算子**。旧 `operators.forward.*` / `operators.adjoint.*` 仅作兼容导入。
+规范算子入口是 `usctbench.operators.straight_ray`、`.eikonal`、`.ray_born`。前向预测、线性化和伴随是每个物理模块中的不同方法，**伴随不是逆算子**。
 
 ## 安装与快速运行
 
@@ -94,10 +94,10 @@ mkdir -p "$USCT_RUN_ROOT"
 usct data make-synthetic-smoke --out "$USCT_WORKSPACE/data/synthetic_demo" --shape 48 --n-transducers 48
 
 usct data inspect-openbreastus --root "$USCT_DATA_ROOT" --out "$USCT_RUN_ROOT/openbreastus_index.json"
-usct data make-quality --root "$USCT_DATA_ROOT" --out "$USCT_WORKSPACE/data/openbreastus_demo" --cases-per-density 1 --converted-shape 256 --n-transducers 128
+usct data prepare-openbreastus --root "$USCT_DATA_ROOT" --out "$USCT_WORKSPACE/data/openbreastus_demo" --cases-per-density 1 --converted-shape 256 --n-transducers 128
 
 usct data inspect-nbpslice2d --zip "$USCT_NBP_ZIP_PATH" --out "$USCT_RUN_ROOT/nbpslice2d_index.json"
-usct data make-nbp-quality --zip "$USCT_NBP_ZIP_PATH" --out "$USCT_WORKSPACE/data/nbpslice2d_demo" --cases-per-type 1 --converted-shape 256 --n-transducers 128
+usct data prepare-nbpslice2d --zip "$USCT_NBP_ZIP_PATH" --out "$USCT_WORKSPACE/data/nbpslice2d_demo" --cases-per-type 1 --converted-shape 256 --n-transducers 128
 ```
 
 匹配模型的 Eikonal/Born 验证使用各自模型生成的观测。NBPslice2D 的属性图不等于内置波场；OpenBreastUS 的属性图和预计算波场也要区分。详见[数据集说明](docs/datasets.md)。
@@ -234,27 +234,12 @@ JSON 提供输入要求、schema/defaults、运行依赖和迭代单位；case �
 
 ## 重建表现
 
-**默认配置是运行示例，不是以下主图的复现实验配置。** 保存的实验采用不同预算、初始化、停止策略及评价输入。有实验数据包时可以重绘这些结果，但不能承诺当前 main 的默认 YAML 会重新反演出历史图像。见[默认配置与主图实验的差异](docs/readme_results.md#default-configs-are-not-the-figure-recipe)。
+先运行[当前示例](examples/README.md)，再通过 `scripts/render_examples.py`
+绘制已保存的结果。绘图只读取选定声速图和标量指标，保持导入后的物理坐标。
 
-以下四图替换此前混合 surrogate 的示例，来自保存的八样本实验，**不是在当前 HEAD 重跑全部算法**。每行包含 GT 及保存的高频 **FWI reference**，后者不是新 `fwi_wust` API 的运行证据。每行使用一致的组织区 PSNR/SSIM 规则与评价坐标，每个数据集共享灰度范围。
-
-### 匹配模型验证
-
-直线方法使用 straight-ray ToF；原生 Bent 使用 Eikonal ToF；fixed Born 使用匹配压力数据。FWI 列仍为单独的 k-Wave 参考，不能将这些不同输入按统一采集排名。
-
-![OpenBreastUS 匹配模型重建](docs/assets/reconstruction/openbreastus_matched.png)
-
-![NBPslice2D 匹配模型重建](docs/assets/reconstruction/nbpslice2d_matched.png)
-
-### k-Wave 采集示例
-
-五种原生方法来自共同重生成的 object/water 采集（128 TX/RX），分别使用 ToF 或复压力。历史 FWI 的采集历史、频率安排与留出策略不同。图中保留实际伪影及预算/停滞下的结果，不能据此认定公平排名或算法的成像质量上限。
-
-![OpenBreastUS k-Wave 重建](docs/assets/reconstruction/openbreastus_kwave.png)
-
-![NBPslice2D k-Wave 重建](docs/assets/reconstruction/nbpslice2d_kwave.png)
-
-[来源与重绘说明](docs/readme_results.md) · [指标与停止原因](docs/assets/reconstruction/metrics.csv) · [哈希和评价策略](docs/assets/reconstruction/manifest.json)。
+OpenBreastUS 和 NBPslice2D 的历史对比图、配置、正负结果均保留在
+[研究归档](docs/research_index.md)。匹配 surrogate 和 k-Wave 实验采用不同
+观测假设，不混排为当前算法排名，也不把历史实验配置称为默认参数配方。
 
 ## 输出文件
 
@@ -287,8 +272,6 @@ black --check src tests scripts
 ruff check src tests scripts
 python -m compileall -q src tests
 pytest -q
-bash scripts/run_smoke.sh
-python scripts/audit_release.py
 ```
 
 普通 CI 使用无硬件依赖的运行时协议测试。真实 MATLAB CPU 集成与 GPU 部署验证是独立验收环节。见[开发说明](docs/development.md)。

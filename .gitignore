@@ -4,6 +4,9 @@
 /checkpoints/
 /external/
 /third_party/
+/output/
+/figures/
+/tmp/
 
 # Environment files
 .env

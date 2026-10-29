@@ -50,7 +50,7 @@ This describes quadratic CGLS, not an identical objective for all row-action sol
 
 Born variants are `wkb_fixed`, `wkb_nonlinear`, `full_green_fixed`, `full_green_nonlinear`. The supplied YAML selects nonlinear Full-Green; query the chosen variant rather than assuming every entrypoint has the same defaults. WKB sensitivity approximates the derivative of its nonlinear predictor. Eikonal derivatives follow the active stencil, whose changes can be nonsmooth.
 
-Canonical operators live in `usctbench.operators.straight_ray`, `.eikonal`, `.ray_born`. Forward prediction, linearization and adjoint action are separate; **an adjoint is not an inverse**. Legacy `operators.forward.*` / `operators.adjoint.*` are compatibility imports.
+Canonical operators live in `usctbench.operators.straight_ray`, `.eikonal`, `.ray_born`. Forward prediction, linearization and adjoint action are separate methods in each physical module; **an adjoint is not an inverse**.
 
 ## Installation and Quick Start
 
@@ -94,10 +94,10 @@ These commands generate property-map-derived straight-ray observations, **not k-
 usct data make-synthetic-smoke --out "$USCT_WORKSPACE/data/synthetic_demo" --shape 48 --n-transducers 48
 
 usct data inspect-openbreastus --root "$USCT_DATA_ROOT" --out "$USCT_RUN_ROOT/openbreastus_index.json"
-usct data make-quality --root "$USCT_DATA_ROOT" --out "$USCT_WORKSPACE/data/openbreastus_demo" --cases-per-density 1 --converted-shape 256 --n-transducers 128
+usct data prepare-openbreastus --root "$USCT_DATA_ROOT" --out "$USCT_WORKSPACE/data/openbreastus_demo" --cases-per-density 1 --converted-shape 256 --n-transducers 128
 
 usct data inspect-nbpslice2d --zip "$USCT_NBP_ZIP_PATH" --out "$USCT_RUN_ROOT/nbpslice2d_index.json"
-usct data make-nbp-quality --zip "$USCT_NBP_ZIP_PATH" --out "$USCT_WORKSPACE/data/nbpslice2d_demo" --cases-per-type 1 --converted-shape 256 --n-transducers 128
+usct data prepare-nbpslice2d --zip "$USCT_NBP_ZIP_PATH" --out "$USCT_WORKSPACE/data/nbpslice2d_demo" --cases-per-type 1 --converted-shape 256 --n-transducers 128
 ```
 
 Matched Eikonal/Born validation instead uses each model's own observations. NBPslice2D property maps are not built-in waveforms; distinguish OpenBreastUS maps from precomputed wavefields too. See [datasets](docs/datasets.md).
@@ -234,27 +234,14 @@ With GT, report tissue RMSE/PSNR/SSIM plus full-image and water metrics. GT mask
 
 ## Example Results
 
-**Default configs are runnable examples, not the reproduction settings for these panels.** The saved study used different budgets, initialization, stopping policies and evaluation inputs. Rendering the saved results is reproducible with the study bundle; rerunning current main with default YAML is not promised to reproduce the historical images. See the [default-versus-study comparison](docs/readme_results.md#default-configs-are-not-the-figure-recipe).
+Run the [current examples](examples/README.md), then render saved results with
+`scripts/render_examples.py`. The renderer reads selected sound-speed images and
+scalar metrics, preserving their physical axes.
 
-Four panels replace the former mixed-surrogate examples. They use preserved eight-case reconstructions, **not new runs of every solver at current HEAD**. Each row includes GT and a saved high-frequency **FWI reference**, not a reconstruction through the new `fwi_wust` API. Tissue PSNR/SSIM and evaluation coordinates are consistent within each row; grayscale limits are shared within each dataset.
-
-### Model-Matched Validation
-
-Straight methods use straight-ray ToF; native Bent uses Eikonal ToF; fixed Born uses matched pressure. FWI remains a separate k-Wave reference. This checks distinct models, not shared-observation ranking.
-
-![OpenBreastUS model-matched results](docs/assets/reconstruction/openbreastus_matched.png)
-
-![NBPslice2D model-matched results](docs/assets/reconstruction/nbpslice2d_matched.png)
-
-### k-Wave Acquisition Examples
-
-Five native methods share regenerated object/water acquisitions (128 TX/RX), using ToF or complex pressure. Historical FWI has a different acquisition history, frequency schedule and validation policy. Artifacts and budget/stagnation stops remain visible; these are examples, not controlled rankings or imaging-quality ceilings.
-
-![OpenBreastUS k-Wave results](docs/assets/reconstruction/openbreastus_kwave.png)
-
-![NBPslice2D k-Wave results](docs/assets/reconstruction/nbpslice2d_kwave.png)
-
-[Provenance and reproduction](docs/readme_results.md) · [Metrics and stop reasons](docs/assets/reconstruction/metrics.csv) · [Hashes and evaluation policy](docs/assets/reconstruction/manifest.json).
+Historical OpenBreastUS and NBPslice2D panels, configurations and positive/negative
+results are retained in the [research archive](docs/research_index.md). Matched
+surrogate and k-Wave experiments have different observation assumptions; they
+are not mixed into a current algorithm ranking or a default-parameter recipe.
 
 ## Output Files
 
@@ -287,8 +274,6 @@ black --check src tests scripts
 ruff check src tests scripts
 python -m compileall -q src tests
 pytest -q
-bash scripts/run_smoke.sh
-python scripts/audit_release.py
 ```
 
 Normal CI uses hardware-free runtime protocol tests. Real MATLAB CPU integration and GPU deployment validation are separate gates. See [development](docs/development.md).

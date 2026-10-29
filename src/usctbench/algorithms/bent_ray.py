@@ -6,10 +6,10 @@ from usctbench.algorithms.configuration import validated_run
 
 import numpy as np
 from scipy.linalg import norm
+from scipy.ndimage import gaussian_filter
 
 from usctbench.algorithms._control import InversionControl, add_image_metrics
 from usctbench.algorithms.ray import (
-    _gaussian_smooth,
     configured_ray_weights,
     reference_sound_speed,
     run_with_failure_capture,
@@ -303,10 +303,8 @@ class BentRayGNAdapter:
                 smoothing_rejected = False
                 if sigma > 0:
                     if basis is None:
-                        smoothed = _gaussian_smooth(update, sigma)
+                        smoothed = gaussian_filter(update, sigma=sigma, mode="nearest")
                     else:
-                        from scipy.ndimage import gaussian_filter
-
                         smoothed = gaussian_filter(
                             update,
                             tuple(

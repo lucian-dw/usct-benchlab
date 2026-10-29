@@ -10,7 +10,7 @@ algorithms:
   - name: straight_sart
     config: configs/algorithms/sart.yaml
   - name: bent_ray_gn
-    config: configs/algorithms/bent_ray_smoke.yaml
+    config: configs/algorithms/bent_ray.yaml
 # This suite contains TOF-only surrogates. Ray-Born requires complex pressure;
 # it is validated separately in tests/algorithms/test_native_inversions.py.
 min_cases: 1

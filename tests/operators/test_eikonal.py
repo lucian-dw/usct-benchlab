@@ -55,6 +55,17 @@ def test_discrete_jacobian_and_adjoint(spatial_order):
     np.testing.assert_allclose(
         lin.jacobian.forward(v), numerical, rtol=3e-5, atol=1e-12
     )
+    # Keep the active stencil fixed while measuring the truncation-error trend.
+    errors = []
+    direction = v * 0.005
+    jv = lin.jacobian.forward(direction)
+    for epsilon in (0.01, 0.003, 0.001, 0.0003, 0.0001):
+        perturbed = model.linearize(s + epsilon * direction)
+        for original, changed in zip(lin.jacobian.tapes, perturbed.jacobian.tapes):
+            np.testing.assert_array_equal(original.parents, changed.parents)
+        errors.append(np.linalg.norm((perturbed.value - lin.value) / epsilon - jv))
+    assert errors[-1] < 0.05 * errors[0]
+    assert np.all(np.diff(errors) < 0)
 
 
 def test_refraction_converges_to_snell_layered_solution():
@@ -66,7 +77,7 @@ def test_refraction_converges_to_snell_layered_solution():
         options={"xatol": 1e-14},
     ).fun
     errors = []
-    for n in (41, 81):
+    for n in (41, 81, 161):
         h = 0.1 / (n - 1)
         yy = np.arange(n)[:, None] * h
         slowness = np.broadcast_to(
@@ -77,8 +88,8 @@ def test_refraction_converges_to_snell_layered_solution():
         receiver = np.round(np.array([0.075, 0.085]) / h).astype(int)
         actual = tape.times.reshape(n, n)[tuple(receiver)]
         errors.append(abs(actual - exact))
-    assert errors[1] < errors[0]
-    assert errors[1] / exact < 0.035
+    assert np.all(np.diff(errors) < 0)
+    assert errors[-1] / exact < 0.035
 
 
 def test_bent_prediction_is_not_fixed_straight_integral():

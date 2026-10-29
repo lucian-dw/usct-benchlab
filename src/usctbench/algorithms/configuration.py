@@ -23,7 +23,6 @@ from usctbench.algorithms.parameters import (
     Positive,
     SARTParameters,
     SIRTParameters,
-    TinyFWIParameters,
     parameter,
 )
 from usctbench.core.config import expand_config_value
@@ -36,7 +35,6 @@ PARAMETER_MODELS = {
     "straight_sart": SARTParameters,
     "bent_ray_gn": BentParameters,
     "rwave_adapter": BornParameters,
-    "fwi_tiny": TinyFWIParameters,
 }
 
 # These are existing kernel defaults, not calibrated runtime presets.
@@ -45,7 +43,6 @@ DEFAULT_ITERATIONS = {
     "straight_sirt": 50,
     "straight_sart": 10,
     "bent_ray_gn": 4,
-    "fwi_tiny": 20,
 }
 
 
@@ -121,10 +118,6 @@ def validate_algorithm_config(name, config: AlgorithmConfig) -> AlgorithmConfig:
         if "iterations" in values and values["iterations"] != legacy:
             raise ValueError("conflicting fixed-background iteration budgets")
         values["iterations"] = legacy
-    if name == "fwi_tiny" and {"stopping", "evaluation"}.intersection(values):
-        raise ValueError(
-            "fwi_tiny does not support stopping or fitting/split evaluation; use steps"
-        )
     auxiliary = {}
     budget_keys = {
         key: values.pop(key)
@@ -135,8 +128,6 @@ def validate_algorithm_config(name, config: AlgorithmConfig) -> AlgorithmConfig:
     valid_budget_keys = {"iterations"}
     if name in {"bent_ray_gn", "rwave_adapter"} and model is not FixedBornParameters:
         valid_budget_keys.add("outer_iterations")
-    if name == "fwi_tiny":
-        valid_budget_keys = {"steps"}
     if budget_keys.keys() - valid_budget_keys:
         raise ValueError(
             f"unused iteration controls for {name}: {sorted(budget_keys.keys() - valid_budget_keys)}"
@@ -190,14 +181,8 @@ def validate_algorithm_config(name, config: AlgorithmConfig) -> AlgorithmConfig:
             values[key] = values[key].tolist()
     typed = model.model_validate(values)
     backend = typed.backend_parameters()
-    if name == "fwi_tiny" and (
-        config.run_controls is not None or config.budget_caps is not None
-    ):
-        raise ValueError(
-            "fwi_tiny only supports its legacy steps budget, not online RunControls"
-        )
     if default_iterations(name, backend) is not None:
-        key = "steps" if name == "fwi_tiny" else "iterations"
+        key = "iterations"
         count = auxiliary.get("outer_iterations", default_iterations(name, backend))
         count = auxiliary.get("stopping", {}).get("max_iterations", count)
         if (

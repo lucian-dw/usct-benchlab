@@ -384,25 +384,3 @@ FixedBornParameters = create_model(
         parameter("identity", "Squared-slowness penalty operator.", exposure="agent"),
     ),
 )
-
-
-class TinyFWIParameters(Parameters):
-    sound_speed_bounds_mps: Bounds = parameter(
-        (1300.0, 1700.0), "Sanity-model projection bounds.", "m/s", "agent"
-    )
-    frequencies_hz: list[Positive] = parameter(
-        [1e5, 1.5e5, 2e5],
-        "Sanity-model frequencies, not a production schedule.",
-        "Hz",
-        min_length=1,
-    )
-    spacing_m: Positive | None = parameter(None, "Null uses case column spacing.", "m")
-    initial_sound_speed_mps: Positive | None = parameter(
-        None,
-        "Sanity-model initialization; null uses case reference, otherwise 1500 m/s.",
-        "m/s",
-        "agent",
-    )
-    learning_rate: Positive = parameter(
-        1e6, "Sanity-model update scale; no production calibration.", "model dependent"
-    )

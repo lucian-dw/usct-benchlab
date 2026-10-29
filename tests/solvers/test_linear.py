@@ -236,60 +236,31 @@ def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution(
 
 
 def test_saved_iterate_audit_checks_complete_objective_gradient():
-    import importlib.util
-    from pathlib import Path
-    from usctbench.operators.base import Linearization
+    from usctbench.solvers.least_squares import normal_regularizer
 
-    path = Path(__file__).resolve().parents[2] / "scripts/_inverse_solver_audit.py"
-    spec = importlib.util.spec_from_file_location("inverse_audit_test", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
     matrix = np.diag([1000.0, 500, 400, 600])
     initial = np.full((2, 2), 1 / 1500**2)
     state = initial * np.array([[1.01, 0.99], [0.97, 1.02]])
     jacobian = DenseJacobian(matrix, state.shape)
-    forward = SimpleNamespace(
-        linearize=lambda m: Linearization(matrix @ (m - initial).ravel(), jacobian)
+    weights = np.array([1.0, 0.5, 0, 1])
+    observed = np.array([1e-6, -2e-6, np.nan, 3e-6])
+    damping, penalty = 1e3, (0.5, 1.3)
+
+    def objective(model):
+        residual = np.where(
+            weights > 0, jacobian.forward(model - initial) - observed, 0
+        )
+        reg = regularizer(model - initial, penalty)
+        return 0.5 * (weights @ residual**2 + damping * np.vdot(reg, reg).real)
+
+    residual = np.where(weights > 0, jacobian.forward(state - initial) - observed, 0)
+    gradient = jacobian.adjoint(weights * residual) + damping * normal_regularizer(
+        state - initial, penalty
     )
-    control = controls(np.array([1.0, 0.5, 0, 1]))
-    control.observed = np.array([1e-6, -2e-6, 1e3, 3e-6])
-    control.split = SimpleNamespace(train=control.precision > 0)
-    control.weighted_residual = (
-        lambda p: np.where(control.split.train, control.observed - p, 0)
-        * control.precision
-    )
-    report = module.audit_iterate(
-        forward,
-        control,
-        state=state,
-        reference=initial,
-        bounds=(1300, 1700),
-        damping=1e3,
-        regularization=(0.5, 1.3),
-        smooth_sigma=1,
-        gradient_steps=(1.0, 0.01, 0.001),
-    )
-    assert not report["ground_truth_used"]
-    assert (
-        max(x["relative_error"] for x in report["objective_gradient_differences"])
-        < 1e-10
-    )
-    assert report["gradient_fd_requested_steps"] == [1.0, 0.01, 0.001]
-    assert [r["step"] for r in report["objective_gradient_differences"]] == [
-        1.0,
-        0.01,
-        0.001,
-    ]
-    assert all(x["inner"]["converged"] for x in report["normal_subproblems"])
-    for invalid in ([], [0.0], [-1.0], [np.nan], [[1.0]]):
-        with pytest.raises(ValueError, match="gradient steps"):
-            module.audit_iterate(
-                None,
-                None,
-                state=None,
-                reference=None,
-                bounds=None,
-                damping=None,
-                regularization=None,
-                gradient_steps=invalid,
-            )
+    direction = np.array([[1, -2], [3, -1]]) * 1e-9
+    exact = np.vdot(gradient, direction).real
+    for step in (1.0, 0.01, 0.001):
+        numeric = (
+            objective(state + step * direction) - objective(state - step * direction)
+        ) / (2 * step)
+        assert numeric == pytest.approx(exact, rel=1e-10, abs=0)

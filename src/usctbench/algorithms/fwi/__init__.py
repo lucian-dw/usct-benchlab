@@ -1,11 +1,10 @@
-"""Production WUST registration and directly importable test helpers."""
+"""Production WUST reconstruction entry point."""
 
 from __future__ import annotations
 
 from usctbench.core.registry import register_algorithm
 
 from .algorithm import WUSTFWIAlgorithm
-from .tiny import TinyFWIAlgorithm
 
 
 def register_fwi_algorithms(*, replace: bool = False) -> None:
@@ -23,6 +22,5 @@ def register_fwi_algorithms(*, replace: bool = False) -> None:
 
 __all__ = [
     "WUSTFWIAlgorithm",
-    "TinyFWIAlgorithm",
     "register_fwi_algorithms",
 ]

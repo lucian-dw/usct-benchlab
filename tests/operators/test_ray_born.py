@@ -105,6 +105,54 @@ def test_volume_born_derivative_matches_nonlinear_finite_difference():
     assert adjoint_error(lin.jacobian, dm, complex_data) < 1e-12
     assert lin.derivative_kind == "discrete_volume_integral_born_derivative"
     assert forward.green_solves > 0
+    errors = []
+    for epsilon in (0.1, 0.05, 0.025):
+        numerical = (
+            forward.forward(model + epsilon * dm)
+            - forward.forward(model - epsilon * dm)
+        ) / (2 * epsilon)
+        errors.append(
+            np.linalg.norm(numerical - lin.jacobian.forward(dm))
+            / np.linalg.norm(lin.jacobian.forward(dm))
+        )
+    assert errors[-1] < 1e-6
+    assert errors[-1] < errors[0]
+
+
+def test_born_remainder_is_second_order_against_dense_multiple_scattering():
+    # Independent dense Lippmann-Schwinger reference on the same cell grid.
+    # This checks the Born linearization, not continuum accuracy in tissue.
+    op = setup_operator()
+    omega = 2 * np.pi * op.frequencies_hz[0]
+    points = np.indices(op.grid.shape).reshape(2, -1).T
+    points = np.array(op.grid.origin_m) + (points + 0.5) * op.grid.spacing_m
+    radius = np.maximum(
+        np.linalg.norm(points[:, None] - points[None], axis=-1), op.source_radius_m
+    )
+    gpp = 0.25j * hankel1(0, omega / 1500 * radius)
+    gs = (
+        0.25j
+        * hankel1(
+            0, omega / 1500 * np.linalg.norm(points - op.geometry.tx_pos_m[0], axis=-1)
+        )
+        * op.source_spectrum[0, 0]
+    )
+    gr = 0.25j * hankel1(
+        0,
+        omega
+        / 1500
+        * np.linalg.norm(op.geometry.rx_pos_m[:, None] - points[None], axis=-1),
+    )
+    errors = []
+    for scale in (1, 0.5, 0.25, 0.125):
+        delta = np.full(op.grid.shape, 2e-10 * scale)
+        potential = omega**2 * op.area * delta.ravel()
+        total = np.linalg.solve(np.eye(op.n_pixels) - gpp * potential, gs)
+        errors.append(
+            np.linalg.norm(gr @ (potential * total) - op.forward(delta)[0, 0])
+        )
+    orders = np.log2(np.array(errors[:-1]) / errors[1:])
+    assert np.all((orders > 1.9) & (orders < 2.1))
 
 
 def setup_operator(heterogeneous=False, cache=0):

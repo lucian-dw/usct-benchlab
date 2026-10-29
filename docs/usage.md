@@ -79,7 +79,7 @@ usct data inspect-openbreastus \
 Create one case per density class when available:
 
 ```bash
-usct data make-quality \
+usct data prepare-openbreastus \
   --root "$USCT_DATA_ROOT" \
   --out "$USCT_WORKSPACE/data/openbreastus_demo" \
   --cases-per-density 1 \
@@ -106,7 +106,7 @@ usct data inspect-nbpslice2d \
 Create one case per A/B/C/D class when available:
 
 ```bash
-usct data make-nbp-quality \
+usct data prepare-nbpslice2d \
   --zip "$USCT_NBP_ZIP_PATH" \
   --out "$USCT_WORKSPACE/data/nbpslice2d_demo" \
   --cases-per-type 1 \

@@ -1,6 +1,6 @@
 # Native ray-Born reference operator
 
-`operators.forward.ray_born.RayBornOperator` maps a **real squared-slowness
+`operators.ray_born.RayBornOperator` maps a **real squared-slowness
 perturbation** to complex pressure with shape `(frequency, transmitter, receiver)`.
 The outgoing 2-D Green function uses time dependence `exp(-i omega t)`:
 

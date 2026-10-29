@@ -17,7 +17,7 @@ inverse reconstruction algorithm.
 
 ## Native bent-ray core
 
-`operators.forward.eikonal.EikonalForward` solves the first-arrival Eikonal
+`operators.eikonal.EikonalForward` solves the first-arrival Eikonal
 problem `|grad T| = s`, where `s = 1/c` is absolute slowness in seconds/meter.
 It defaults to causal first-order Godunov fast marching. Optional `spatial_order=2`
 (`eikonal_order: 2` in Bent configuration) uses mixed second-order upwinding with
@@ -30,7 +30,7 @@ grid bias, not the heterogeneous discretization error.
 
 The derivative follows the accepted upwind stencil. For each accepted node,
 `dT_i = a_i ds_i + sum_j w_ij dT_j`; reverse accumulation through exactly those
-same dependencies is implemented in `operators.adjoint.eikonal`. There is no
+same dependencies is implemented in `operators.eikonal`. There is no
 straight-ray projector in this forward or adjoint. The derivative is local to
 the active stencil; changes of the first-arrival branch can be nonsmooth.
 

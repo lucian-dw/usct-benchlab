@@ -133,3 +133,6 @@ def test_time_only_import_avoids_dtft_and_resamples_gt_at_physical_coordinates(
     )
     np.testing.assert_allclose(case.ground_truth.sound_speed_mps, expected)
     assert case.measurement.freq_data is None
+    outside = grid.model_copy(update={"origin_m": (0.02, 0.02)})
+    with pytest.raises(ValueError, match="exceeds source physical FOV"):
+        convert_kwave_pressure_mat(source, tmp_path / "outside.h5", grid=outside)

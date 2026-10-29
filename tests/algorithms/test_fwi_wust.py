@@ -252,15 +252,6 @@ def test_unknown_convention_and_invalid_mask_fail(wave_case, tmp_path):
         frequency_input(wave_case, tmp_path / "bad.json")
 
 
-def test_tiny_fwi_loss_decreases(synthetic_case):
-    from usctbench.algorithms.fwi.tiny import TinyFWIAlgorithm
-
-    result = TinyFWIAlgorithm().run(
-        synthetic_case, AlgorithmConfig(parameters={"steps": 5, "learning_rate": 1e6})
-    )
-    assert result.status == "success" and result.metrics["loss_decreased"] is True
-
-
 @pytest.mark.parametrize(
     "corruption",
     ["axes", "units", "shape", "backend", "convergence"],

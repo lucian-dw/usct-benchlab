@@ -76,3 +76,26 @@ the specified existing numerical update ordering; P6 consolidates docs and tests
 Next: P3 archives the explicitly listed historical tools/assets outside both
 repositories and removes repeated CI/compatibility entrypoints. No new imaging
 campaign was run; these are small interface and numerical regression fixtures.
+
+## P3: source/research separation
+
+- Moved 85 explicitly listed research files into the sibling archive; originals
+  of deleted/merged files were also preserved there. `docs/research_index.md`
+  records locations and source commits. Original data, runs and user checkout
+  were not touched.
+- Removed auto-edit CI, duplicate audit/smoke workflows, Tiny FWI and legacy
+  operator import wrappers. Default CI runs Black, Ruff and one CPU pytest.
+- Kept independent adjoint, Taylor/FD, Snell and dense Born remainder checks in
+  their owning operator/solver tests. Removed source-inspection and historical
+  report certification tests. Simulation, rendering and quickstart entrypoints
+  now have separate responsibilities.
+- Local and A100 full pytest: 584 passed (20.08 s / 9.12 s). WUST Python: 15
+  passed. Ruff, Black and diff checks passed. Synthetic CGLS quickstart wrote
+  result.h5, metrics.json, metadata.yaml and preview.png successfully.
+- Running the old broad synthetic suite with the formal Bent config exposed
+  an existing roundoff-scale homogeneous-case line-search failure (initial
+  residual 7.1e-20). A trial classification change was rejected because it also
+  hid deliberately unusable inner directions; no mathematical assertions were
+  removed. Resolve this at P5, not by declaring absolute-gradient convergence.
+
+Next: P4 unifies typed configuration, host limits, static discovery and outputs.

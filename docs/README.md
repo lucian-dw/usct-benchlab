@@ -4,7 +4,7 @@ User-facing documentation:
 
 - [Mathematical formulation](math_formulation.md)
 - [Usage guide](usage.md)
-- [README reconstruction panels, metrics and provenance](readme_results.md)
+- [Historical research and reconstruction panels](research_index.md)
 - [Algorithms](algorithms.md)
 - [Typed parameter contract and migrations](parameter_contract.md)
 - [Machine-readable research Agent API](agent_algorithm_api.md)
@@ -16,6 +16,5 @@ User-facing documentation:
 - [Development and release checks](development.md)
 - [References](references.bib)
 
-Small README-ready images live in `assets/`. Raw datasets, generated runs,
-checkpoints, external repositories, and large scientific arrays remain outside
-Git.
+Historical figures are in the sibling research archive. Raw datasets, generated
+runs, checkpoints and large scientific arrays remain outside Git.

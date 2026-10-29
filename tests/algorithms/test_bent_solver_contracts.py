@@ -193,7 +193,9 @@ def test_weighted_regularized_solution_matches_fine_grid_dense_reference(
 
 def test_descent_smoothing_that_fails_armijo_retries_raw_newton(monkeypatch):
     case, _ = _dense(monkeypatch, np.eye(4), [1e-6, -1e-6, 2e-6, -2e-6])
-    monkeypatch.setattr(bent, "_gaussian_smooth", lambda update, sigma: update * 1e6)
+    monkeypatch.setattr(
+        bent, "gaussian_filter", lambda update, sigma, mode: update * 1e6
+    )
     result = bent.BentRayGNAdapter().run(case, _config(iterations=1, smooth_sigma=1))
     assert result.status == "success", result.failure_reason
     assert not result.metrics["direction_checks"][0]["smoothing_rejected"]

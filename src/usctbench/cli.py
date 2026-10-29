@@ -15,12 +15,10 @@ from usctbench.benchmark.runner import (
 from usctbench.data.nbpslice2d import (
     inspect_nbp_slice2d_zip,
     make_nbp_slice2d_quality_subset,
-    make_nbp_slice2d_smoke_subset,
 )
 from usctbench.data.openbreastus import (
     inspect_openbreastus,
     make_quality_subset,
-    make_smoke_subset,
     write_schema_report,
 )
 from usctbench.data.synthetic import make_synthetic_smoke_subset
@@ -84,38 +82,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--out", default="openbreastus_index.json", help="Output index JSON path."
     )
 
-    smoke_parser = data_subparsers.add_parser(
-        "make-smoke", help="Create a smoke benchmark subset."
-    )
-    smoke_parser.add_argument("--root", required=True, help="OpenBreastUS data root.")
-    smoke_parser.add_argument("--out", required=True, help="Output smoke subset root.")
-    smoke_parser.add_argument("--cases-per-density", type=int, default=1)
-    smoke_parser.add_argument(
-        "--converted-shape",
-        type=int,
-        default=64,
-        help="Square image size for converted speed-map cases.",
-    )
-    smoke_parser.add_argument(
-        "--n-transducers",
-        type=int,
-        default=32,
-        help="Synthetic ring transducers for converted speed-map cases.",
-    )
-    smoke_parser.add_argument(
-        "--spacing-m",
-        type=float,
-        default=1.0e-3,
-        help="Assumed pixel spacing for converted speed-map cases.",
-    )
-    smoke_parser.add_argument(
-        "--no-convert-speed-mat",
-        action="store_true",
-        help="Only write the manifest; do not create HDF5 cases.",
-    )
-
     quality_parser = data_subparsers.add_parser(
-        "make-quality", help="Create 256x256 OpenBreastUS quality-comparison cases."
+        "prepare-openbreastus",
+        help="Create 256x256 OpenBreastUS quality-comparison cases.",
     )
     quality_parser.add_argument("--root", required=True, help="OpenBreastUS data root.")
     quality_parser.add_argument(
@@ -146,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only write the manifest; do not create HDF5 cases.",
     )
 
-    for volume_parser in (smoke_parser, quality_parser):
+    for volume_parser in (quality_parser,):
         volume_parser.add_argument(
             "--sample-axis", type=int, choices=(0, 1, 2), default=2
         )
@@ -165,37 +134,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--out", default="nbpslice2d_index.json", help="Output index JSON path."
     )
 
-    nbp_smoke_parser = data_subparsers.add_parser(
-        "make-nbp-smoke", help="Create an NBPslices2D smoke benchmark subset."
-    )
-    nbp_smoke_parser.add_argument("--zip", required=True, help="NBPslices2D ZIP path.")
-    nbp_smoke_parser.add_argument(
-        "--out", required=True, help="Output smoke subset root."
-    )
-    nbp_smoke_parser.add_argument(
-        "--cases-per-type",
-        type=int,
-        default=1,
-        help="Cases to convert for each A/B/C/D density label.",
-    )
-    nbp_smoke_parser.add_argument(
-        "--converted-shape",
-        type=int,
-        default=64,
-        help="Square image size for converted cases.",
-    )
-    nbp_smoke_parser.add_argument(
-        "--n-transducers",
-        type=int,
-        default=32,
-        help="Synthetic ring transducers for converted cases.",
-    )
-    nbp_smoke_parser.add_argument(
-        "--reference-sound-speed-mps", type=float, default=1500.0
-    )
-
     nbp_quality_parser = data_subparsers.add_parser(
-        "make-nbp-quality", help="Create 256x256 NBPslice2D quality-comparison cases."
+        "prepare-nbpslice2d", help="Create 256x256 NBPslice2D quality-comparison cases."
     )
     nbp_quality_parser.add_argument(
         "--zip", required=True, help="NBPslices2D ZIP path."
@@ -315,22 +255,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             write_schema_report(index, Path(args.out).with_suffix(".schema_report.md"))
             print(args.out)
             return 0
-        if args.data_command == "make-smoke":
-            make_smoke_subset(
-                args.root,
-                args.out,
-                cases_per_density=args.cases_per_density,
-                convert_speed_mat=not args.no_convert_speed_mat,
-                converted_shape=(args.converted_shape, args.converted_shape),
-                spacing_m=(args.spacing_m, args.spacing_m),
-                n_transducers=args.n_transducers,
-                sample_axis=args.sample_axis,
-                image_axes=args.image_axes,
-                sound_speed_units=args.sound_speed_units,
-            )
-            print(args.out)
-            return 0
-        if args.data_command == "make-quality":
+        if args.data_command == "prepare-openbreastus":
             make_quality_subset(
                 args.root,
                 args.out,
@@ -349,18 +274,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             inspect_nbp_slice2d_zip(args.zip, args.out)
             print(args.out)
             return 0
-        if args.data_command == "make-nbp-smoke":
-            make_nbp_slice2d_smoke_subset(
-                args.zip,
-                args.out,
-                cases_per_type=args.cases_per_type,
-                converted_shape=(args.converted_shape, args.converted_shape),
-                n_transducers=args.n_transducers,
-                reference_sound_speed_mps=args.reference_sound_speed_mps,
-            )
-            print(args.out)
-            return 0
-        if args.data_command == "make-nbp-quality":
+        if args.data_command == "prepare-nbpslice2d":
             make_nbp_slice2d_quality_subset(
                 args.zip,
                 args.out,

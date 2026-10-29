@@ -100,47 +100,6 @@ def test_fixed_born_budget_alias_against_run_controls(count, accepted):
             validate_algorithm_config("rwave_adapter", config)
 
 
-@pytest.mark.parametrize(
-    "key,value",
-    [
-        ("stopping", {}),
-        ("stopping", {"max_iterations": 2}),
-        ("evaluation", {}),
-        ("evaluation", {"receiver_fraction": 0.2}),
-    ],
-)
-def test_tiny_rejects_unsupported_legacy_controls(tmp_path, key, value):
-    from usctbench.algorithms.fwi.tiny import TinyFWIAlgorithm
-
-    assert_admission_paths(
-        tmp_path,
-        "fwi_tiny",
-        {"steps": 2, key: value},
-        False,
-        algorithm=TinyFWIAlgorithm(),
-    )
-
-
-def test_tiny_steps_behavior_unchanged(tmp_path):
-    from usctbench.algorithms.fwi.tiny import TinyFWIAlgorithm
-
-    resolved = assert_admission_paths(
-        tmp_path,
-        "fwi_tiny",
-        {"steps": 2},
-        True,
-        algorithm=TinyFWIAlgorithm(),
-    )
-    case = make_sound_speed_case(shape=(8, 8), n_transducers=8)
-    algorithm = TinyFWIAlgorithm()
-    before = algorithm.run.__wrapped__(
-        algorithm, case, AlgorithmConfig(parameters={"steps": 2})
-    )
-    after = algorithm.run(case, resolved)
-    assert after.status == before.status == "success"
-    np.testing.assert_array_equal(after.sound_speed_mps, before.sound_speed_mps)
-
-
 @pytest.mark.parametrize("mode", ["fixed_background", "nonlinear"])
 @pytest.mark.parametrize(
     "field,value,accepted",
@@ -170,7 +129,6 @@ def test_born_operator_parameter_limits(tmp_path, mode, field, value, accepted):
         "bent_ray_gn",
         "rwave_adapter",
         "fwi_wust",
-        "fwi_tiny",
     ],
 )
 def test_models_have_schema_metadata_and_reject_unknown(name):
