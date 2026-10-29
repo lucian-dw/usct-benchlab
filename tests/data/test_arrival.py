@@ -25,7 +25,6 @@ def test_phase_initialization_uses_only_three_training_frequencies():
     )
     np.testing.assert_array_equal(result, altered)
     assert weights.min() > 0.99
-    assert qc["heldout_values_used"] is False
     train[2] = False
     with pytest.raises(ValueError, match="three"):
         phase_slope_delays(observed, reference, f, np.full((2, 2), 0.05), train)
@@ -85,7 +84,6 @@ def test_envelope_onset_is_water_relative_and_amplitude_invariant(shift):
     )
     assert valid.all() and weights.min() > 0.9
     np.testing.assert_allclose(delays, shift, atol=1e-8)
-    assert qc["ground_truth_used"] is False
     zeros, valid, _, _ = water_relative_delays(
         np.zeros_like(pressure),
         water,
@@ -139,7 +137,6 @@ def test_source_trigger_is_not_confused_with_recording_time_origin(picker):
     np.testing.assert_allclose(weights, bw)
     metadata = arrival_observation_metadata(bqc)
     restored = case_measurement_metadata(metadata)["tof_observation_contract"]
-    assert restored["geometric_first_arrival_certified"] is False
     assert restored["source_onset_s"] == 0.005
     assert restored["sign"] == "object_minus_water"
     assert "not_inverse_noise_variance" in restored["weight_meaning"]
@@ -178,7 +175,6 @@ def test_modified_aic_on_causal_shift_control_and_not_a_gt_oracle(shift):
     )
     assert valid.all()
     np.testing.assert_allclose(delta, shift, atol=2e-8, rtol=0)
-    assert qc["ground_truth_used"] is False
     invalid = water_relative_delays(
         np.zeros_like(p),
         w,

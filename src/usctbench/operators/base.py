@@ -31,10 +31,13 @@ class Linearization:
     derivative_kind: str = "exact_discrete"
 
 
-def adjoint_error(
-    operator: LinearOperator, image: np.ndarray, data: np.ndarray
-) -> float:
-    """Relative real-inner-product error, with no dimensional absolute floor."""
-    left = float(np.vdot(operator.forward(image), data).real)
-    right = float(np.vdot(image, operator.adjoint(data)).real)
-    return abs(left - right) / max(abs(left), abs(right), np.finfo(float).tiny)
+@dataclass(frozen=True)
+class LinearSolveInfo:
+    method: str
+    iterations: int
+    stop_reason: str
+    relative_residual: float
+    residual_norm: float
+    converged: bool
+    scipy_stop_code: int | None = None
+    condition_estimate: float | None = None

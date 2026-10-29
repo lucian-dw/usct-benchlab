@@ -3,8 +3,23 @@ import pytest
 from scipy.optimize import minimize_scalar
 
 from usctbench.core.schema import GeometrySpec, GridSpec
-from usctbench.operators import adjoint_error
+from tests.helpers import adjoint_error
 from usctbench.operators.eikonal import EikonalForward, fast_march
+
+
+def test_homogeneous_calibration_has_exact_geometric_reference():
+    grid = GridSpec(shape=(7, 9), spacing_m=(0.001, 0.0013))
+    geometry = GeometrySpec(tx_pos_m=[[-0.002, 0.001]], rx_pos_m=[[0.009, 0.006]])
+    model = EikonalForward(grid, geometry, background_speed_mps=1500)
+    expected = (
+        np.linalg.norm(
+            geometry.tx_pos_m[:, None] - geometry.rx_pos_m[None], axis=-1
+        ).ravel()
+        / 1500
+    )
+    np.testing.assert_array_equal(
+        model.forward(np.full(grid.shape, 1 / 1500)), expected
+    )
 
 
 def test_compiled_marching_matches_reference_discretization():

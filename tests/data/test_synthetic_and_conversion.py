@@ -12,11 +12,11 @@ from usctbench.data.conversion import convert_nbp_slice2d_mat, convert_kwave_cha
 from usctbench.operators.straight_ray import StraightRayProjector
 from usctbench.data.nbpslice2d import (
     inspect_nbp_slice2d_zip,
-    prepare_cases as prepare_nbp_cases,
+    prepare_nbpslice2d as prepare_nbp_cases,
 )
 from usctbench.data.synthetic import (
     make_sound_speed_case,
-    make_synthetic_smoke_subset,
+    prepare_synthetic_demo,
 )
 
 
@@ -27,12 +27,12 @@ def test_synthetic_cases_have_algorithm_ready_features():
     assert sos_case.ground_truth.sound_speed_mps.shape == (10, 10)
 
 
-def test_make_synthetic_smoke_subset_writes_hdf5_cases(tmp_path):
-    records = make_synthetic_smoke_subset(
+def test_prepare_synthetic_demo_writes_hdf5_cases(tmp_path):
+    records = prepare_synthetic_demo(
         tmp_path / "synthetic", shape=(8, 8), n_transducers=8
     )
 
-    assert len(records) == 2
+    assert len(records) == 1
     case = read_case_hdf5(
         tmp_path / "synthetic" / "cases" / "synthetic_circular_sos.h5"
     )
@@ -126,7 +126,7 @@ def test_openbreastus_conversion_preserves_unrelated_case_files(tmp_path, monkey
     monkeypatch.setattr(
         openbreastus, "inspect_openbreastus", lambda *args: {"cases": []}
     )
-    openbreastus.prepare_cases(root, out, symlink_sources=False)
+    openbreastus.prepare_openbreastus(root, out, symlink_sources=False)
     assert saved.read_bytes() == b"existing user result"
 
 
@@ -205,5 +205,5 @@ def test_nbpslice2d_zip_inspection_and_smoke_conversion(tmp_path):
     )
 
     assert index["summary"]["num_cases"] == 1
-    assert manifest["converted_cases"]
+    assert manifest["cases"]
     assert (tmp_path / "nbp" / "cases").exists()

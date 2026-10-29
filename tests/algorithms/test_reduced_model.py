@@ -1,12 +1,12 @@
 import numpy as np
 import pytest
 
-from usctbench.algorithms.ray import (
+from usctbench.algorithms.straight import (
     StraightRayCGLSAlgorithm,
     StraightRaySIRTAlgorithm,
     StraightRaySARTAlgorithm,
 )
-from usctbench.algorithms.bent_ray import BentRayGNAdapter
+from usctbench.algorithms.bent_ray import BentRayAlgorithm
 from usctbench.core.schema import AlgorithmConfig, GroundTruthSpec
 from usctbench.data.synthetic import make_sound_speed_case
 from usctbench.operators.eikonal import EikonalForward
@@ -57,7 +57,7 @@ def test_model_prior_uses_no_gt_or_validation_for_updates_and_obeys_budget(name)
         "straight_cgls": StraightRayCGLSAlgorithm,
         "straight_sirt": StraightRaySIRTAlgorithm,
         "straight_sart": StraightRaySARTAlgorithm,
-        "bent_ray_gn": BentRayGNAdapter,
+        "bent_ray_gn": BentRayAlgorithm,
     }[name]()
     a, b = algo.run(case, config), algo.run(altered, config)
     assert a.status == b.status in {"completed", "budget_exhausted"}, (

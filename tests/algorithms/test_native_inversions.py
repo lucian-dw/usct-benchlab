@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from usctbench.algorithms.bent_ray import BentRayGNAdapter
-from usctbench.algorithms.rwave import RWaveAdapter
+from usctbench.algorithms.bent_ray import BentRayAlgorithm
+from usctbench.algorithms.rwave import RayBornAlgorithm
 from usctbench.core.schema import AlgorithmConfig, GroundTruthSpec, MeasurementSpec
 from usctbench.data.synthetic import make_sound_speed_case
 from usctbench.operators.eikonal import EikonalForward
@@ -49,13 +49,13 @@ def test_born_zero_cache_preserves_reconstruction(mode):
         "green_solver_rtol": 1e-7,
     }
     config = AlgorithmConfig(parameters=parameters, run_controls={"max_iterations": 2})
-    cached = RWaveAdapter().run(case, config)
+    cached = RayBornAlgorithm().run(case, config)
     uncached_config = AlgorithmConfig(
         parameters={**parameters, "max_cache_bytes": 0},
         run_controls={"max_iterations": 2},
     )
-    uncached = RWaveAdapter().run(case, uncached_config)
-    repeated = RWaveAdapter().run(
+    uncached = RayBornAlgorithm().run(case, uncached_config)
+    repeated = RayBornAlgorithm().run(
         case, prepare_config("rwave_adapter", uncached_config)
     )
     assert (
@@ -71,7 +71,7 @@ def test_born_zero_cache_preserves_reconstruction(mode):
 
 
 @pytest.mark.parametrize(
-    "physics,algorithm", [("bent", BentRayGNAdapter), ("born", RWaveAdapter)]
+    "physics,algorithm", [("bent", BentRayAlgorithm), ("born", RayBornAlgorithm)]
 )
 def test_native_inversions_reduce_residual_and_need_no_truth(physics, algorithm):
     case = small_case(physics)
@@ -104,7 +104,7 @@ def test_native_inversions_reduce_residual_and_need_no_truth(physics, algorithm)
 
 
 @pytest.mark.parametrize(
-    "physics,algorithm", [("bent", BentRayGNAdapter), ("born", RWaveAdapter)]
+    "physics,algorithm", [("bent", BentRayAlgorithm), ("born", RayBornAlgorithm)]
 )
 def test_heldout_values_do_not_change_training_trajectory(physics, algorithm):
     case = small_case(physics)
@@ -140,7 +140,7 @@ def test_heldout_values_do_not_change_training_trajectory(physics, algorithm):
 
 
 @pytest.mark.parametrize(
-    "physics,algorithm", [("bent", BentRayGNAdapter), ("born", RWaveAdapter)]
+    "physics,algorithm", [("bent", BentRayAlgorithm), ("born", RayBornAlgorithm)]
 )
 def test_zero_budget_returns_initial_checkpoint_with_reason(physics, algorithm):
     case = small_case(physics)
@@ -155,7 +155,7 @@ def test_zero_budget_returns_initial_checkpoint_with_reason(physics, algorithm):
 
 def test_frequency_holdout_does_not_train_or_leak_reciprocal_receiver():
     case = small_case("born")
-    result = RWaveAdapter().run(
+    result = RayBornAlgorithm().run(
         case,
         AlgorithmConfig(
             parameters={"variant": "wkb_fixed"},
@@ -170,7 +170,7 @@ def test_frequency_holdout_does_not_train_or_leak_reciprocal_receiver():
 
 
 def test_approximate_wkb_failure_is_not_a_successful_inverse_solve():
-    result = RWaveAdapter().run(
+    result = RayBornAlgorithm().run(
         small_case("born"),
         AlgorithmConfig(
             parameters={"variant": "wkb_nonlinear"},
@@ -184,7 +184,7 @@ def test_approximate_wkb_failure_is_not_a_successful_inverse_solve():
     )
     assert result.metrics["stop_reason"] == "line_search_failed"
     assert result.status == "failed"
-    assert result.metrics["recovered_checkpoint_only"]
+    assert np.isfinite(result.sound_speed_mps).all()
 
 
 def test_bent_cgls_initialization_does_not_use_heldout_data():
@@ -207,7 +207,7 @@ def test_bent_cgls_initialization_does_not_use_heldout_data():
         },
         evaluation={"receiver_indices": [1]},
     )
-    a, b = [BentRayGNAdapter().run(c, config) for c in (case, altered)]
+    a, b = [BentRayAlgorithm().run(c, config) for c in (case, altered)]
     assert a.status == b.status in {"completed", "budget_exhausted"}, a.failure_reason
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
     assert a.metrics["initialization_training_only"] is True

@@ -31,25 +31,10 @@ def row_action(
     """
     x = np.array(initial, dtype=float, copy=True)
     start = x.copy()
-    if not np.isfinite(relaxation) or not 0 < relaxation < 2:
-        raise ValueError("relaxation must be finite and in (0, 2)")
-    if isinstance(subsets, bool) or int(subsets) != subsets or subsets <= 0:
-        raise ValueError("subsets must be a positive integer")
 
     def output():
         selected, metrics = control.output(start)
-        metrics.update(
-            {
-                "objective_name": "row_normalized_weighted_least_squares",
-                "effective_objective_precision": "input_precision_divided_by_ray_row_sum",
-                "objective_role": (
-                    "SIRT_fixed_point_objective_before_optional_postprocessing"
-                    if subsets == 1
-                    else "SART_global_monitor_not_a_monotonic_minimization_guarantee"
-                ),
-                "data_residual_precision": "input_precision_without_row_normalization",
-            }
-        )
+        metrics["objective_name"] = "row_normalized_weighted_least_squares"
         return selected, metrics
 
     try:
@@ -137,6 +122,6 @@ def row_action(
             control.monitor.finish("max_iterations")
     except BudgetExhausted as exc:
         control.monitor.finish(exc.reason)
-    except FloatingPointError:
-        control.monitor.finish("numerical_failure")
+    except FloatingPointError as exc:
+        control.fail(exc)
     return output()

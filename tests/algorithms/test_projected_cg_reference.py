@@ -7,7 +7,7 @@ import pytest
 from scipy.optimize import lsq_linear, minimize, minimize_scalar
 
 from usctbench.algorithms._control import InversionControl
-from usctbench.algorithms.ray import StraightRayCGLSAlgorithm
+from usctbench.algorithms.straight import StraightRayCGLSAlgorithm
 from usctbench.core.schema import (
     AlgorithmConfig,
     GeometrySpec,
@@ -358,7 +358,8 @@ def test_quadratic_weights_roi_and_penalty_match_dense_augmented_reference(
         control,
         initial=np.zeros(shape),
         reference=np.ones(shape),
-        project=lambda x: np.where(roi, x, 0),
+        lower=-np.inf,
+        upper=np.inf,
         to_image=lambda x: x,
         damping=0.4,
         regularization=kind,

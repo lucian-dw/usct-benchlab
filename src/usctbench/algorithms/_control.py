@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 import numpy as np
 
 from usctbench.core.stopping import StopMonitor, WorkLedger
@@ -47,6 +48,8 @@ class InversionControl:
         self.precision = np.where(self.split.train, self.split.weights, 0.0)
         self.safe_observed = np.where(self.split.train, self.observed, 0)
         self.last_prediction = self.best_prediction = None
+        self.inner_solver_history = []
+        self.numerical_error = None
         self.update_semantics = {
             "optimization_variable": None,
             "update_variable": None,
@@ -78,6 +81,13 @@ class InversionControl:
 
     def call(self, kind, function, *args, **kwargs):
         return self.work.call(kind, function, *args, **kwargs)
+
+    def fail(self, exception):
+        self.numerical_error = exception
+        self.monitor.finish("numerical_failure")
+
+    def record_linear(self, info):
+        self.inner_solver_history.append(asdict(info))
 
     def weighted_residual(self, prediction):
         # Index first: 0 * NaN must never poison gradients on excluded channels.
@@ -164,7 +174,11 @@ class InversionControl:
             ),
             "residual_curve": [row["residual_norm"] for row in self.monitor.history],
         }
-        if getattr(self, "inner_solver_history", None):
+        if self.numerical_error is not None:
+            metrics["numerical_error"] = (
+                f"{type(self.numerical_error).__name__}: {self.numerical_error}"
+            )
+        if self.inner_solver_history:
             metrics["inner_solver_history"] = self.inner_solver_history
         if prediction is not None:
             evaluation = self.split.evaluate(prediction, self.observed)

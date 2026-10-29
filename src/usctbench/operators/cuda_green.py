@@ -5,7 +5,6 @@ directional-derivative and adjoint agreement are required acceptance gates.
 """
 
 from collections import OrderedDict
-import inspect
 
 import numpy as np
 
@@ -32,11 +31,6 @@ def solve_fields(solver, incident, device):
         n = int(np.prod(solver.shape))
         operator = LinearOperator((n, n), matvec=matvec, dtype=cp.complex128)
         result = np.empty_like(incident, dtype=complex)
-        tolerance = {
-            (
-                "rtol" if "rtol" in inspect.signature(gmres).parameters else "tol"
-            ): solver.rtol
-        }
         restart = min(40, n)
         for index, rhs in enumerate(incident):
             b = cp.asarray(rhs, dtype=cp.complex128)
@@ -46,8 +40,9 @@ def solve_fields(solver, incident, device):
                 x0=b,
                 atol=0,
                 restart=restart,
+                # CuPy 13 counts inner iterations; CPU maxiter counts restarts.
                 maxiter=restart * solver.maxiter,
-                **tolerance,
+                tol=solver.rtol,
             )
             residual = float(cp.linalg.norm(matvec(value) - b) / cp.linalg.norm(b))
             solver.solves += 1

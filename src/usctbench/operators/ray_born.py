@@ -66,13 +66,34 @@ class RayBornForward:
     The model variable is squared slowness in s^2/m^2, not speed.
     """
 
-    def __init__(self, grid, geometry, frequencies_hz, **settings):
-        if "background_sound_speed_mps" in settings:
-            raise ValueError("the current model supplies the background")
+    def __init__(
+        self,
+        grid,
+        geometry,
+        frequencies_hz,
+        *,
+        exterior_speed_mps=1500.0,
+        source_spectrum=None,
+        max_cache_bytes=128 * 1024**2,
+        green_backend="eikonal_wkb",
+        green_solver_rtol=1e-7,
+        green_solver_maxiter=20,
+        budget_check=None,
+        green_device=None,
+    ):
         self.grid, self.geometry = grid, geometry
         self.frequencies_hz = np.asarray(frequencies_hz)
-        self.settings = dict(settings)
-        self.settings.setdefault("reference_cache", {})
+        self.settings = dict(
+            exterior_speed_mps=exterior_speed_mps,
+            source_spectrum=source_spectrum,
+            max_cache_bytes=max_cache_bytes,
+            green_backend=green_backend,
+            green_solver_rtol=green_solver_rtol,
+            green_solver_maxiter=green_solver_maxiter,
+            budget_check=budget_check,
+            green_device=green_device,
+            reference_cache={},
+        )
         self.eikonal_solves = 0
         self.background_builds = 0
         self.green_solves = 0
@@ -217,15 +238,11 @@ class RayBornOperator:
         if source_spectrum is None:
             source_spectrum = np.ones(self.data_shape[:2], dtype=complex)
         source_spectrum = np.asarray(source_spectrum, dtype=complex)
-        if source_spectrum.shape == (self.data_shape[0],):
-            source_spectrum = np.repeat(
-                source_spectrum[:, None], self.data_shape[1], axis=1
-            )
         if source_spectrum.shape != self.data_shape[:2] or not np.all(
             np.isfinite(source_spectrum)
         ):
             raise ValueError(
-                "source_spectrum must have shape (n_frequency, n_tx) or (n_frequency,)"
+                "source_spectrum must have canonical shape (frequency, tx)"
             )
         self.source_spectrum = source_spectrum.copy()
         all_positions = np.vstack((geometry.tx_pos_m, geometry.rx_pos_m))

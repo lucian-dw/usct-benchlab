@@ -10,6 +10,7 @@ import numpy as np
 from scipy.fft import fft2, ifft2, next_fast_len
 from scipy.sparse.linalg import LinearOperator, gmres
 from scipy.special import hankel1
+from usctbench.operators.base import LinearSolveInfo
 
 
 class VolumeIntegralGreen:
@@ -25,16 +26,13 @@ class VolumeIntegralGreen:
         budget_check=None,
         device=None,
     ):
-        if not np.isfinite(rtol) or not 0 < rtol < 1:
-            raise ValueError("green_solver_rtol must be between zero and one")
-        if isinstance(maxiter, bool) or int(maxiter) != maxiter or maxiter < 1:
-            raise ValueError("green_solver_maxiter must be a positive integer")
         self.grid, self.rtol, self.maxiter = grid, float(rtol), int(maxiter)
         self.budget_check = budget_check
         self.device = device
         self.shape = tuple(grid.shape)
         self.fft_shape = tuple(next_fast_len(2 * n - 1) for n in self.shape)
         self.solves, self.matvecs, self.maximum_relative_residual = 0, 0, 0.0
+        self.last_solve = None
         omega = 2 * np.pi * frequency_hz
         area = float(np.prod(grid.spacing_m))
         self.potential = (
@@ -86,6 +84,12 @@ class VolumeIntegralGreen:
             return solve_fields(self, incident, self.device)
         result = np.empty_like(incident)
         for index, rhs in enumerate(incident):
+            iteration_count = 0
+
+            def completed_iteration(_):
+                nonlocal iteration_count
+                iteration_count += 1
+
             value, info = gmres(
                 self.operator,
                 rhs,
@@ -94,6 +98,8 @@ class VolumeIntegralGreen:
                 atol=0.0,
                 restart=min(40, rhs.size),
                 maxiter=self.maxiter,
+                callback=completed_iteration,
+                callback_type="pr_norm",
             )
             residual = float(
                 np.linalg.norm(self._matvec(value) - rhs) / np.linalg.norm(rhs)
@@ -102,7 +108,19 @@ class VolumeIntegralGreen:
             self.maximum_relative_residual = max(
                 self.maximum_relative_residual, residual
             )
-            if info != 0 or not np.isfinite(residual) or residual > self.rtol * 1.01:
+            converged = (
+                info == 0 and np.isfinite(residual) and residual <= self.rtol * 1.01
+            )
+            self.last_solve = LinearSolveInfo(
+                "gmres",
+                iteration_count,
+                "residual_tolerance" if converged else "solve_failed",
+                residual,
+                residual * float(np.linalg.norm(rhs)),
+                converged,
+                int(info),
+            )
+            if not converged:
                 raise FloatingPointError(
                     f"volume-integral Green solve failed: info={info}, relative residual={residual:.3g}"
                 )

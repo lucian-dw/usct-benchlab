@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-from usctbench.core.config import prepared_run
-
-import time
-from typing import Any
 
 import numpy as np
 
 from usctbench.core.schema import (
     AlgorithmConfig,
-    ReconstructionResult,
-    ResultStatus,
     USCTCase,
 )
 
@@ -171,67 +165,6 @@ def coverage_preconditioner(
     return preconditioner, coverage
 
 
-def image_diagnostic_metrics(
-    prediction: np.ndarray,
-    truth: np.ndarray,
-    *,
-    roi_mask: np.ndarray | None = None,
-    coverage: np.ndarray | None = None,
-    boundary_band_pixels: int = 4,
-) -> dict[str, float]:
-    """Return coverage/error and boundary-band image diagnostics."""
-
-    pred = np.asarray(prediction, dtype=float)
-    target = np.asarray(truth, dtype=float)
-    roi = (
-        np.ones(pred.shape, dtype=bool)
-        if roi_mask is None
-        else np.asarray(roi_mask, dtype=bool)
-    )
-    finite = roi & np.isfinite(pred) & np.isfinite(target)
-    error = np.abs(pred - target)
-    metrics: dict[str, float] = {}
-    if coverage is not None:
-        cov = np.asarray(coverage, dtype=float)
-        metrics["coverage_abs_error_corr"] = _corr(cov[finite], error[finite])
-        metrics["coverage_mean"] = _masked_mean(cov, finite)
-        metrics["coverage_p10"] = _masked_percentile(cov, finite, 10.0)
-    boundary = boundary_band_mask(roi, pixels=boundary_band_pixels)
-    boundary_finite = boundary & np.isfinite(pred) & np.isfinite(target)
-    metrics["boundary_band_pixels"] = float(boundary_band_pixels)
-    metrics["boundary_band_fraction"] = float(
-        np.sum(boundary_finite) / max(1, int(np.sum(finite)))
-    )
-    if np.any(boundary_finite):
-        metrics["boundary_band_rmse"] = float(
-            np.sqrt(np.mean((pred[boundary_finite] - target[boundary_finite]) ** 2))
-        )
-        metrics["boundary_band_mae"] = float(np.mean(error[boundary_finite]))
-    else:
-        metrics["boundary_band_rmse"] = float("nan")
-        metrics["boundary_band_mae"] = float("nan")
-    return metrics
-
-
-def boundary_band_mask(roi_mask: np.ndarray, *, pixels: int) -> np.ndarray:
-    roi = np.asarray(roi_mask, dtype=bool)
-    if pixels <= 0 or not np.any(roi):
-        return np.zeros_like(roi, dtype=bool)
-    eroded = roi.copy()
-    for _ in range(int(pixels)):
-        padded = np.pad(
-            eroded, ((1, 1), (1, 1)), mode="constant", constant_values=False
-        )
-        eroded = (
-            padded[1:-1, 1:-1]
-            & padded[:-2, 1:-1]
-            & padded[2:, 1:-1]
-            & padded[1:-1, :-2]
-            & padded[1:-1, 2:]
-        )
-    return roi & ~eroded
-
-
 def target_delta_tof(
     case: USCTCase, projector: StraightRayProjector
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -247,138 +180,3 @@ def target_delta_tof(
     mask = valid_ray_mask(case, projector) & np.isfinite(target)
     target = np.where(mask, target, 0.0)
     return target, mask
-
-
-def residual_metrics(initial_norm: float, final_norm: float) -> dict[str, float]:
-    if initial_norm > 0.0:
-        relative = final_norm / initial_norm
-        reduction = 1.0 - relative
-    else:
-        relative = 0.0 if final_norm == 0.0 else float("inf")
-        reduction = 0.0
-    return {
-        "data_residual_norm": float(final_norm),
-        "initial_data_residual_norm": float(initial_norm),
-        "data_relative_residual": float(relative),
-        "data_residual_reduction": float(reduction),
-    }
-
-
-def slowness_to_sound_speed(
-    delta_slowness: np.ndarray, c0: float, bounds_mps: tuple[float, float]
-) -> np.ndarray:
-    low, high = bounds_mps
-    min_slowness = 1.0 / high
-    max_slowness = 1.0 / low
-    slowness = np.clip((1.0 / c0) + delta_slowness, min_slowness, max_slowness)
-    return 1.0 / slowness
-
-
-def _corr(a: np.ndarray, b: np.ndarray) -> float:
-    x = np.asarray(a, dtype=float).reshape(-1)
-    y = np.asarray(b, dtype=float).reshape(-1)
-    finite = np.isfinite(x) & np.isfinite(y)
-    if int(np.sum(finite)) < 2:
-        return float("nan")
-    x = x[finite]
-    y = y[finite]
-    x = x - float(np.mean(x))
-    y = y - float(np.mean(y))
-    denom = float(np.linalg.norm(x) * np.linalg.norm(y))
-    if denom <= 0.0:
-        return float("nan")
-    return float(np.dot(x, y) / denom)
-
-
-def _masked_mean(values: np.ndarray, mask: np.ndarray) -> float:
-    finite = np.asarray(mask, dtype=bool) & np.isfinite(values)
-    if not np.any(finite):
-        return float("nan")
-    return float(np.mean(np.asarray(values, dtype=float)[finite]))
-
-
-def _masked_percentile(
-    values: np.ndarray, mask: np.ndarray, percentile: float
-) -> float:
-    finite = np.asarray(mask, dtype=bool) & np.isfinite(values)
-    if not np.any(finite):
-        return float("nan")
-    return float(
-        np.percentile(np.asarray(values, dtype=float)[finite], float(percentile))
-    )
-
-
-def run_with_failure_capture(
-    algorithm: str,
-    case: USCTCase,
-    func: Any,
-) -> ReconstructionResult:
-    started = time.perf_counter()
-    try:
-        result = func()
-    except (
-        Exception
-    ) as exc:  # pragma: no cover - exercised through CLI/integration failures.
-        return ReconstructionResult(
-            algorithm=algorithm,
-            case_id=case.case_id,
-            runtime_s=time.perf_counter() - started,
-            status=ResultStatus.FAILED,
-            failure_reason=f"{type(exc).__name__}: {exc}",
-        )
-    result.runtime_s = time.perf_counter() - started
-    reason = result.metrics.get("stop_reason")
-    if reason in {
-        "numerical_failure",
-        "linear_solver_breakdown",
-        "line_search_failed",
-    } or (result.metrics.get("stopping", {}).get("termination_category") == "failure"):
-        # A finite last checkpoint is useful for diagnosis, not a successful solve.
-        result.status = ResultStatus.FAILED
-        result.failure_reason = f"Native inversion terminated with {reason}"
-        result.metrics["recovered_checkpoint_only"] = True
-    return result
-
-
-class StraightRayCGLSAlgorithm:
-    name = "straight_cgls"
-
-    @prepared_run
-    def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
-        from usctbench.algorithms.straight import reconstruct
-
-        return run_with_failure_capture(
-            self.name, case, lambda: reconstruct(case, config, self.name)
-        )
-
-
-class StraightRaySIRTAlgorithm:
-    name = "straight_sirt"
-
-    @prepared_run
-    def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
-        from usctbench.algorithms.straight import reconstruct
-
-        return run_with_failure_capture(
-            self.name, case, lambda: reconstruct(case, config, self.name)
-        )
-
-
-class StraightRaySARTAlgorithm:
-    name = "straight_sart"
-
-    @prepared_run
-    def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
-        from usctbench.algorithms.straight import reconstruct
-
-        return run_with_failure_capture(
-            self.name, case, lambda: reconstruct(case, config, self.name)
-        )
-
-
-__all__ = [
-    "StraightRayProjector",
-    "StraightRayCGLSAlgorithm",
-    "StraightRaySARTAlgorithm",
-    "StraightRaySIRTAlgorithm",
-]

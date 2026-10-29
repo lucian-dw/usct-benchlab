@@ -8,14 +8,14 @@ from typing import Protocol
 
 from .schema import AlgorithmConfig, ReconstructionResult, USCTCase
 from .algorithm_specs import AlgorithmSpecification, SPECS
-from usctbench.algorithms.bent_ray import BentRayGNAdapter
+from usctbench.algorithms.bent_ray import BentRayAlgorithm
 from usctbench.algorithms.fwi import WUSTFWIAlgorithm
-from usctbench.algorithms.ray import (
+from usctbench.algorithms.straight import (
     StraightRayCGLSAlgorithm,
     StraightRaySIRTAlgorithm,
     StraightRaySARTAlgorithm,
 )
-from usctbench.algorithms.rwave import RWaveAdapter
+from usctbench.algorithms.rwave import RayBornAlgorithm
 
 
 class Algorithm(Protocol):
@@ -49,8 +49,8 @@ _REGISTRY = {
         ("straight_cgls", StraightRayCGLSAlgorithm),
         ("straight_sirt", StraightRaySIRTAlgorithm),
         ("straight_sart", StraightRaySARTAlgorithm),
-        ("bent_ray_gn", BentRayGNAdapter),
-        ("rwave_adapter", RWaveAdapter),
+        ("bent_ray_gn", BentRayAlgorithm),
+        ("rwave_adapter", RayBornAlgorithm),
         ("fwi_wust", WUSTFWIAlgorithm),
     )
 }

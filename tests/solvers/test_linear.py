@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from scipy.ndimage import gaussian_filter
 
 from usctbench.core.stopping import WorkLedger
 from usctbench.core.run_controls import RunControls
-from usctbench.solvers.least_squares import normal_step, regularizer
+from usctbench.solvers.linear import solve_linearized
+from usctbench.operators.regularization import regularizer
 
 
 class DenseJacobian:
@@ -32,9 +32,10 @@ def controls(precision):
     )
 
 
+@pytest.mark.parametrize("method", ["normal_cg", "lsmr", "lsqr"])
 @pytest.mark.parametrize("complex_data", [False, True])
 @pytest.mark.parametrize("penalty", ["identity", "laplacian", (0.2, 1.3)])
-def test_normal_step_matches_dense_augmented_lstsq(complex_data, penalty):
+def test_linearized_step_matches_dense_augmented_lstsq(method, complex_data, penalty):
     rng = np.random.default_rng(641)
     shape = (3, 4)
     matrix = rng.normal(size=(40, 12))
@@ -67,12 +68,14 @@ def test_normal_step_matches_dense_augmented_lstsq(complex_data, penalty):
     )
     expected = np.linalg.lstsq(design, target, rcond=None)[0]
     control = controls(weights)
-    actual = normal_step(
+    actual, info = solve_linearized(
         DenseJacobian(matrix, shape),
         weights * b,
         current,
         control,
-        iterations=30,
+        weights=weights,
+        method=method,
+        iterations=40,
         damping=damping,
         regularization=penalty,
         roi=roi,
@@ -81,190 +84,109 @@ def test_normal_step_matches_dense_augmented_lstsq(complex_data, penalty):
     np.testing.assert_array_equal(actual[~roi], 0)
     gradient = design.T @ (design @ actual[roi] - target)
     assert np.linalg.norm(gradient) < 1e-8
-    assert control.inner_solver_history[-1]["converged"]
-    assert control.inner_solver_history[-1]["true_relative_residual"] < 1e-7
+    assert info.converged
+    assert info.relative_residual < 1e-7
 
 
-def test_normal_cg_nonzero_squared_rhs_underflow_is_not_convergence():
-    matrix = np.array([[1e-90]])
-    residual = np.array([1e-90])
-    jacobian = DenseJacobian(matrix, (1, 1))
-    rhs = jacobian.adjoint(residual)
-    assert rhs.item() > 0
-    assert np.vdot(rhs, rhs).real == 0
-    # The one-dimensional system has condition number one and exact step one.
-    expected = residual[0] / matrix[0, 0]
+@pytest.mark.parametrize("method", ["lsmr", "lsqr"])
+def test_rank_deficient_masked_complex_problem_matches_minimum_norm(method):
+    rng = np.random.default_rng(134)
+    matrix = (rng.normal(size=(8, 3)) + 1j * rng.normal(size=(8, 3))) @ rng.normal(
+        size=(3, 6)
+    )
+    matrix[-1] = np.nan
+    target = rng.normal(size=8) + 1j * rng.normal(size=8)
+    target[-1] = np.nan
+    weights = np.ones(8)
+    weights[-1] = 0
+
+    class Masked(DenseJacobian):
+        def adjoint(self, values):
+            return (self.matrix[:-1].conj().T @ values[:-1]).real.reshape(self.shape)
+
+    step, info = solve_linearized(
+        Masked(matrix, (2, 3)),
+        target,
+        np.zeros((2, 3)),
+        controls(weights),
+        weights=weights,
+        iterations=40,
+        method=method,
+    )
+    design = np.vstack([matrix[:-1].real, matrix[:-1].imag])
+    expected = np.linalg.lstsq(
+        design, np.r_[target[:-1].real, target[:-1].imag], rcond=None
+    )[0]
+    np.testing.assert_allclose(step.ravel(), expected, rtol=1e-8, atol=1e-10)
+    assert info.converged
+
+
+@pytest.mark.parametrize("method", ["lsmr", "lsqr"])
+@pytest.mark.parametrize("scale", [1e-6, 1.0, 1e6])
+def test_scaled_rectangular_penalty_column_preconditioning(method, scale):
+    rng = np.random.default_rng(189)
+    a = rng.normal(size=(15, 6)) * scale
+    penalty_matrix = rng.normal(size=(9, 6)) * scale
+    current = rng.normal(size=(2, 3))
+    residual = rng.normal(size=15) * scale
+    roi = np.ones((2, 3), dtype=bool)
+    roi[0, 0] = False
+    weight = rng.uniform(0.3, 2, 15)
+    damping = 0.2
+    penalty = DenseJacobian(penalty_matrix, current.shape)
+    step, info = solve_linearized(
+        DenseJacobian(a, current.shape),
+        weight * residual,
+        current,
+        controls(weight),
+        weights=weight,
+        iterations=50,
+        damping=damping,
+        regularization=penalty,
+        roi=roi,
+        method=method,
+        preconditioner="column_rms",
+    )
+    design = np.vstack(
+        [np.sqrt(weight)[:, None] * a, np.sqrt(damping) * penalty_matrix]
+    )[:, roi.ravel()]
+    target = np.r_[
+        np.sqrt(weight) * residual, -np.sqrt(damping) * penalty_matrix @ current.ravel()
+    ]
+    expected = np.linalg.lstsq(design, target, rcond=None)[0]
+    np.testing.assert_allclose(step[roi], expected, rtol=1e-8, atol=1e-10)
+    np.testing.assert_array_equal(step[~roi], 0)
+    assert info.converged
+
+
+def test_normal_cg_reports_squared_rhs_underflow():
     control = controls(np.ones(1))
-    actual = normal_step(
-        jacobian,
-        residual,
+    step, info = solve_linearized(
+        DenseJacobian(np.array([[1e-90]]), (1, 1)),
+        np.array([1e-90]),
         np.zeros((1, 1)),
         control,
+        weights=np.ones(1),
         iterations=8,
         method="normal_cg",
     )
-    record = control.inner_solver_history[-1]
-    assert not record["converged"]
-    assert record["stop_reason"] == "arithmetic_precision_limit"
-    assert record["iterations"] == 0
-    assert record["true_relative_residual"] == 1.0
-    assert record["recursive_relative_residual"] == 1.0
-    assert record["initial_normal_residual_norm"] == rhs.item()
-    assert record["physical_normal_residual_norm"] == rhs.item()
-    np.testing.assert_array_equal(actual, 0)
-    assert abs(actual.item() - expected) == 1.0
+    assert not info.converged
+    assert info.stop_reason == "arithmetic_precision_limit"
+    assert info.relative_residual == 1
+    np.testing.assert_array_equal(step, 0)
 
 
-def test_gaussian_postprocessing_can_turn_newton_step_into_ascent():
-    # A convex, diagonal quadratic: smoothing a Newton step is not in general
-    # equivalent to a positive-definite gradient preconditioner.
-    gradient = np.array([-3.0, 0.6, 0.6, -0.5])
-    hessian = np.diag([1000.0, 1.0, 1.0, 1.0])
-    step = -np.linalg.solve(hessian, gradient).reshape(2, 2)
-    smoothed = gaussian_filter(step, 1, mode="nearest")
-    assert gradient @ step.ravel() < 0
-    assert gradient @ smoothed.ravel() > 0
-
-
-def test_normal_step_masks_nonfinite_excluded_jacobian_rows():
-    class PartialJacobian(DenseJacobian):
-        def forward(self, x):
-            out = super().forward(x)
-            out[-1] = np.nan
-            return out
-
-    matrix = np.vstack([np.eye(4), np.ones(4)])
-    precision = np.array([1.0, 1, 1, 1, 0])
-    result = normal_step(
-        PartialJacobian(matrix, (2, 2)),
-        np.array([1.0, 2, 3, 4, 0]),
-        np.zeros((2, 2)),
-        controls(precision),
-        iterations=8,
+def test_iteration_limit_is_not_convergence():
+    rng = np.random.default_rng(87)
+    a = rng.normal(size=(20, 6))
+    _, info = solve_linearized(
+        DenseJacobian(a, (2, 3)),
+        rng.normal(size=20),
+        np.zeros((2, 3)),
+        controls(np.ones(20)),
+        weights=np.ones(20),
+        iterations=1,
     )
-    np.testing.assert_allclose(result.ravel(), [1, 2, 3, 4])
-
-
-def test_normal_step_does_not_silently_return_on_invalid_curvature():
-    class BrokenAdjoint(DenseJacobian):
-        def adjoint(self, y):
-            return -super().adjoint(y)
-
-    with pytest.raises(FloatingPointError, match="curvature"):
-        normal_step(
-            BrokenAdjoint(np.eye(4), (2, 2)),
-            np.ones(4),
-            np.zeros((2, 2)),
-            controls(np.ones(4)),
-            iterations=8,
-        )
-
-
-@pytest.mark.parametrize("max_backtracks", [0, 10])
-def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution(
-    max_backtracks,
-):
-    from usctbench.algorithms._control import InversionControl
-    from usctbench.core.schema import (
-        AlgorithmConfig,
-        GridSpec,
-        GeometrySpec,
-        MeasurementSpec,
-        USCTCase,
-    )
-    from usctbench.operators.base import Linearization
-    from usctbench.solvers.nonlinear import nonlinear_least_squares
-
-    shape = (2, 2)
-    initial = np.full(shape, 1 / 1500**2)
-    matrix = np.diag(np.sqrt([1000.0, 1, 1, 1])) * 1e-6 / initial[0, 0]
-    normalized_gradient = np.array([-3.0, 0.6, 0.6, -0.5])
-    observed = (-0.02e-6 * normalized_gradient / np.sqrt([1000.0, 1, 1, 1])).reshape(
-        shape
-    )
-
-    class Forward:
-        background_builds = eikonal_solves = 0
-
-        def linearize(self, model):
-            self.background_builds += 1
-            jacobian = DenseJacobian(matrix, shape)
-            return Linearization(
-                jacobian.forward(model - initial).reshape(shape),
-                SimpleNamespace(
-                    forward=jacobian.forward,
-                    adjoint=lambda y: jacobian.adjoint(y.ravel()),
-                ),
-            )
-
-    positions = [[-0.01, 0], [0.01, 0]]
-    case = USCTCase(
-        case_id="convex_newton_smoothing_counterexample",
-        grid=GridSpec(shape=shape, spacing_m=(0.001, 0.001)),
-        geometry=GeometrySpec(tx_pos_m=positions, rx_pos_m=positions),
-        measurement=MeasurementSpec(domain="features", delta_tof_s=observed),
-    )
-    config = AlgorithmConfig(
-        parameters={},
-        run_controls={
-            "max_iterations": 3,
-            "target_relative_residual": 1e-08,
-            "restore_best_validation": False,
-        },
-    )
-    from usctbench.core.config import prepare_config
-
-    control = InversionControl(
-        case, prepare_config("straight_cgls", config), observed, default_iterations=3
-    )
-    result, metrics = nonlinear_least_squares(
-        Forward(),
-        control,
-        initial=initial,
-        bounds=(1400, 1600),
-        inner_iterations=8,
-        damping=0,
-        smooth_sigma=1,
-        max_backtracks=max_backtracks,
-    )
-    expected = initial + np.linalg.solve(matrix, observed.ravel()).reshape(shape)
-    np.testing.assert_allclose(result, expected, rtol=1e-10)
-    assert metrics["data_relative_residual"] < 1e-8
-    assert metrics["direction_checks"][0]["smoothing_rejected"]
-    assert metrics["direction_checks"][0]["raw_directional_derivative"] < 0
-    assert all(
-        row["projected_directional_derivative"] < 0
-        for row in metrics["line_search_history"]
-        if row["accepted"]
-    )
-
-
-def test_saved_iterate_audit_checks_complete_objective_gradient():
-    from usctbench.solvers.least_squares import normal_regularizer
-
-    matrix = np.diag([1000.0, 500, 400, 600])
-    initial = np.full((2, 2), 1 / 1500**2)
-    state = initial * np.array([[1.01, 0.99], [0.97, 1.02]])
-    jacobian = DenseJacobian(matrix, state.shape)
-    weights = np.array([1.0, 0.5, 0, 1])
-    observed = np.array([1e-6, -2e-6, np.nan, 3e-6])
-    damping, penalty = 1e3, (0.5, 1.3)
-
-    def objective(model):
-        residual = np.where(
-            weights > 0, jacobian.forward(model - initial) - observed, 0
-        )
-        reg = regularizer(model - initial, penalty)
-        return 0.5 * (weights @ residual**2 + damping * np.vdot(reg, reg).real)
-
-    residual = np.where(weights > 0, jacobian.forward(state - initial) - observed, 0)
-    gradient = jacobian.adjoint(weights * residual) + damping * normal_regularizer(
-        state - initial, penalty
-    )
-    direction = np.array([[1, -2], [3, -1]]) * 1e-9
-    exact = np.vdot(gradient, direction).real
-    for step in (1.0, 0.01, 0.001):
-        numeric = (
-            objective(state + step * direction) - objective(state - step * direction)
-        ) / (2 * step)
-        assert numeric == pytest.approx(exact, rel=1e-10, abs=0)
+    assert info.iterations == 1
+    assert not info.converged
+    assert info.stop_reason == "iteration_limit"

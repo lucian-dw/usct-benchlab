@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 import zipfile
 from collections import Counter
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -60,7 +60,7 @@ def inspect_nbp_slice2d_zip(
     return index
 
 
-def prepare_cases(
+def prepare_nbpslice2d(
     zip_path: str | Path,
     out: str | Path,
     *,
@@ -68,41 +68,34 @@ def prepare_cases(
     converted_shape: tuple[int, int] = (64, 64),
     n_transducers: int = 32,
     reference_sound_speed_mps: float = 1500.0,
-    subset_role: str = "interface_smoke",
+    case_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Create standard USCTCase smoke cases from NBPslices2D."""
+    """Prepare selected property maps and model-matched travel-time observations."""
 
     out_path = Path(out).expanduser().resolve()
     out_path.mkdir(parents=True, exist_ok=True)
-    index = inspect_nbp_slice2d_zip(zip_path, out_path / "nbpslice2d_index.json")
     cases_root = out_path / "cases"
     converted_cases = convert_nbp_slice2d_zip(
         zip_path,
         cases_root,
         cases_per_type=cases_per_type,
+        case_ids=case_ids,
         output_shape=converted_shape,
         n_transducers=n_transducers,
         reference_sound_speed_mps=reference_sound_speed_mps,
     )
     manifest = {
-        "schema_version": "0.1",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source_zip": str(Path(zip_path).expanduser().resolve()),
-        "subset_root": str(out_path),
-        "cases_per_type": cases_per_type,
-        "converted_shape": list(converted_shape),
-        "n_transducers": n_transducers,
-        "subset_role": subset_role,
-        "reference_sound_speed_mps": reference_sound_speed_mps,
-        "index_summary": index["summary"],
-        "converted_cases": converted_cases,
-        "notes": [
-            "NBPslices2D contains numerical phantom property maps, not measured RF data.",
-            "Converted cases use straight-ray surrogate travel-time features.",
-            "Sound speed is converted from mm/us to m/s.",
+        "cases": [
+            {"case_id": c["case_id"], "path": c["path"]} for c in converted_cases
         ],
+        "source_zip": str(Path(zip_path).expanduser().resolve()),
+        "settings": {
+            "shape": list(converted_shape),
+            "n_transducers": n_transducers,
+            "reference_sound_speed_mps": reference_sound_speed_mps,
+        },
     }
-    manifest_path = out_path / "nbpslice2d_smoke_manifest.json"
+    manifest_path = out_path / "manifest.json"
     manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
     )

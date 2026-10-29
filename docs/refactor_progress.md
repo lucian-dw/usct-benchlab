@@ -165,3 +165,27 @@ CPU protocol gate passed on a 23x27 grid: one fixture invocation (10.89 s), one
 two-update reconstruction invocation (10.79 s), stop reason max_iterations.
 
 Next: P5 removes duplicate physical kernels and consolidates numerical solvers.
+
+## P5: mathematical kernels and preparation
+
+Completed: one CSR straight-ray operator; one interpreted/Numba marching kernel;
+explicit Ray-Born physics options and canonical (frequency,TX) source arrays;
+one masked weighted water calibration; shared property-map surrogate assembly.
+Public data writers now use prepare names and explicit case/slice selection.
+Projected CG receives bounds/ROI directly. Linearized normal-CG/LSMR/LSQR share
+one linear module and return a step plus LinearSolveInfo. Fine-grid regularizers
+live with operators. Phase initialization uses training-only weights.
+Numerical failures retain their original message and last complete iterate.
+
+The only discrete numerical correction is homogeneous Eikonal cancellation:
+subtract numerical object/water times before adding the geometric water time.
+This removes roundoff-only line-search failure at the exactly homogeneous model.
+All other changes preserve update formulas and trial projection order.
+
+Validation: local CPU 462 passed (16.27 s); A100 CPU 462 passed (6.80 s).
+The suite includes rectangular weighted complex LS, rank deficiency, independent
+bounded/Huber optima, discrete adjoints/FD and full nonlinear objective checks.
+Ruff and git diff --check pass; Black formatted the changed modules.
+
+Next: finish WUST P5 hardware validation, then P6 consolidates test ownership,
+current docs, examples and final installation/integration acceptance.

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from usctbench.algorithms.ray import (
+from usctbench.algorithms.straight import (
     StraightRayCGLSAlgorithm,
     StraightRaySIRTAlgorithm,
     StraightRaySARTAlgorithm,
@@ -12,7 +12,7 @@ from usctbench.algorithms.ray import (
 from usctbench.core.schema import AlgorithmConfig, GroundTruthSpec
 from usctbench.data.synthetic import make_sound_speed_case
 from usctbench.evaluation.data import residual_statistics, make_data_split
-from usctbench.operators.base import adjoint_error
+from tests.helpers import adjoint_error
 from usctbench.operators.straight_ray import (
     StraightRayProjector as ForwardProjector,
 )

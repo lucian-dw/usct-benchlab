@@ -50,7 +50,8 @@ def test_exact_data_fit_does_not_bypass_regularizer():
         control,
         initial=np.ones((2, 2)),
         reference=np.zeros((2, 2)),
-        project=lambda x: x,
+        lower=-np.inf,
+        upper=np.inf,
         to_image=lambda x: x,
         damping=1,
     )

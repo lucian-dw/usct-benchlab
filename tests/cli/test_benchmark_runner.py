@@ -11,6 +11,28 @@ from usctbench.core.io import write_case_hdf5
 from usctbench.core.schema import ReconstructionResult
 
 
+@pytest.mark.parametrize(
+    "name", ["straight_cgls", "straight_sirt", "straight_sart", "bent_ray_gn"]
+)
+def test_native_algorithm_public_run(synthetic_case, name):
+    result = run(
+        name,
+        synthetic_case,
+        {"run_controls": {"max_iterations": 1}},
+        score=False,
+        preview=False,
+    )
+    assert result.status in {"completed", "budget_exhausted"}
+    assert np.isfinite(result.sound_speed_mps).all()
+    assert result.metrics["data_relative_residual"] >= 0
+
+
+def test_pressure_algorithm_rejects_tof_only_case(synthetic_case):
+    result = run("rwave_adapter", synthetic_case, {}, score=False, preview=False)
+    assert result.status == "failed"
+    assert "TOF-only" in result.failure_reason
+
+
 @pytest.mark.parametrize("stage", ["evaluation", "preview"])
 def test_postprocessing_failure_keeps_numerical_result(
     synthetic_case, tmp_path, monkeypatch, stage

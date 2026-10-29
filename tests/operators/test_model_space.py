@@ -8,9 +8,12 @@ from usctbench.operators.model_space import (
     BilinearBasis,
     FineGridRegularizer,
     ReducedLinearOperator,
-    SpatialGradient,
 )
-from usctbench.solvers.least_squares import normal_regularizer, regularizer
+from usctbench.operators.regularization import (
+    SpatialGradient,
+    normal_regularizer,
+    regularizer,
+)
 
 
 def fixture():
@@ -75,7 +78,7 @@ def test_physical_gradient_and_reduced_transpose_on_rectangular_grid():
 def test_straight_composition_and_norms():
     grid, geom, basis = fixture()
     a = StraightRayProjector.from_grid_geometry(grid, geom)
-    ab = ReducedLinearOperator(a, basis)
+    ab = ReducedLinearOperator(a, basis, matrix=a.matrix)
     rng = np.random.default_rng(399)
     x, y = rng.normal(size=basis.shape), rng.normal(size=ab.n_rays)
     np.testing.assert_allclose(ab.forward(x), a.forward(basis.forward(x)), atol=1e-16)

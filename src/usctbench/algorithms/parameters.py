@@ -72,9 +72,6 @@ class RayParameters(SoundSpeedParameters):
 
 
 class CGLSParameters(RayParameters):
-    projector_backend: Literal["csr", "reference"] = parameter(
-        "csr", "Equivalent straight-ray implementation.", exposure="internal"
-    )
     regularization: Literal["identity", "laplacian"] = parameter(
         "identity", "Penalty operator L in lambda^2 ||L x||^2.", exposure="agent"
     )
@@ -114,9 +111,6 @@ class CGLSParameters(RayParameters):
 
 
 class SIRTParameters(RayParameters):
-    projector_backend: Literal["csr", "reference"] = parameter(
-        "csr", "Equivalent straight-ray implementation.", exposure="internal"
-    )
     relaxation: Annotated[float, Field(strict=True, gt=0, lt=2)] = parameter(
         0.3,
         "Algebraic update relaxation; stability also depends on smoothing/projection.",

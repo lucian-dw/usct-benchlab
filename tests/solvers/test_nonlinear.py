@@ -1,6 +1,9 @@
 """Nonlinear outer-loop scale, feasible-step and acceptance regressions."""
 
 import math
+from types import SimpleNamespace
+from tests.solvers.test_linear import DenseJacobian
+from usctbench.solvers.linear import LinearSolveInfo
 
 import numpy as np
 import pytest
@@ -81,13 +84,19 @@ def run_outer(request, monkeypatch):
             calls.append(settings)
             assert current.shape == initial.shape
             if direction == "tiny":
-                return np.full_like(current, 1e-170)
+                return np.full_like(current, 1e-170), LinearSolveInfo(
+                    "fixture", 0, "iteration_limit", 1, 1, False
+                )
             if direction == "zero":
-                return np.zeros_like(current)
-            return residual / diagonal
+                return np.zeros_like(current), LinearSolveInfo(
+                    "fixture", 0, "iteration_limit", 1, 1, False
+                )
+            return residual / diagonal, LinearSolveInfo(
+                "fixture", 1, "normal_residual_target", 0, 0, True
+            )
 
         if request.param == "nonlinear":
-            monkeypatch.setattr(nonlinear, "normal_step", inner_step)
+            monkeypatch.setattr(nonlinear, "solve_linearized", inner_step)
             from usctbench.core.config import prepare_config
 
             control = InversionControl(
@@ -107,9 +116,9 @@ def run_outer(request, monkeypatch):
                 max_update_mps=100,
             )
         else:
-            monkeypatch.setattr(bent, "normal_step", inner_step)
+            monkeypatch.setattr(bent, "solve_linearized", inner_step)
             monkeypatch.setattr(bent, "EikonalForward", lambda *a, **kw: forward)
-            result = bent.BentRayGNAdapter().run(case, config)
+            result = bent.BentRayAlgorithm().run(case, config)
             expected_status = "failed" if direction == "tiny" else "budget_exhausted"
             assert result.status == expected_status, result.failure_reason
             state, metrics = 1 / result.sound_speed_mps, result.metrics
@@ -177,15 +186,15 @@ class _DenseForward:
 
 @pytest.fixture
 def solve(monkeypatch):
-    original_step = nonlinear.normal_step
+    original_step = nonlinear.solve_linearized
     directions = []
 
     def capture_step(*args, **kwargs):
-        direction = original_step(*args, **kwargs)
+        direction, info = original_step(*args, **kwargs)
         directions.append(direction.copy())
-        return direction
+        return direction, info
 
-    monkeypatch.setattr(nonlinear, "normal_step", capture_step)
+    monkeypatch.setattr(nonlinear, "solve_linearized", capture_step)
 
     def run(matrix, observed, *, initial=None, **options):
         if initial is None:
@@ -441,3 +450,82 @@ def test_projected_uphill_newton_uses_projected_gradient_without_evaluation(solv
     assert len(forward.states) == 1 + sum(row["objective"] is not None for row in rows)
     assert state[0, 0] == initial[0, 0]
     _assert_armijo(metrics)
+
+
+@pytest.mark.parametrize("max_backtracks", [0, 10])
+def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution(
+    max_backtracks,
+):
+    from usctbench.algorithms._control import InversionControl
+    from usctbench.core.schema import (
+        AlgorithmConfig,
+        GridSpec,
+        GeometrySpec,
+        MeasurementSpec,
+        USCTCase,
+    )
+    from usctbench.operators.base import Linearization
+    from usctbench.solvers.nonlinear import nonlinear_least_squares
+
+    shape = (2, 2)
+    initial = np.full(shape, 1 / 1500**2)
+    matrix = np.diag(np.sqrt([1000.0, 1, 1, 1])) * 1e-6 / initial[0, 0]
+    normalized_gradient = np.array([-3.0, 0.6, 0.6, -0.5])
+    observed = (-0.02e-6 * normalized_gradient / np.sqrt([1000.0, 1, 1, 1])).reshape(
+        shape
+    )
+
+    class Forward:
+        background_builds = eikonal_solves = 0
+
+        def linearize(self, model):
+            self.background_builds += 1
+            jacobian = DenseJacobian(matrix, shape)
+            return Linearization(
+                jacobian.forward(model - initial).reshape(shape),
+                SimpleNamespace(
+                    forward=jacobian.forward,
+                    adjoint=lambda y: jacobian.adjoint(y.ravel()),
+                ),
+            )
+
+    positions = [[-0.01, 0], [0.01, 0]]
+    case = USCTCase(
+        case_id="convex_newton_smoothing_counterexample",
+        grid=GridSpec(shape=shape, spacing_m=(0.001, 0.001)),
+        geometry=GeometrySpec(tx_pos_m=positions, rx_pos_m=positions),
+        measurement=MeasurementSpec(domain="features", delta_tof_s=observed),
+    )
+    config = AlgorithmConfig(
+        parameters={},
+        run_controls={
+            "max_iterations": 3,
+            "target_relative_residual": 1e-08,
+            "restore_best_validation": False,
+        },
+    )
+    from usctbench.core.config import prepare_config
+
+    control = InversionControl(
+        case, prepare_config("straight_cgls", config), observed, default_iterations=3
+    )
+    result, metrics = nonlinear_least_squares(
+        Forward(),
+        control,
+        initial=initial,
+        bounds=(1400, 1600),
+        inner_iterations=8,
+        damping=0,
+        smooth_sigma=1,
+        max_backtracks=max_backtracks,
+    )
+    expected = initial + np.linalg.solve(matrix, observed.ravel()).reshape(shape)
+    np.testing.assert_allclose(result, expected, rtol=1e-10)
+    assert metrics["data_relative_residual"] < 1e-8
+    assert metrics["direction_checks"][0]["smoothing_rejected"]
+    assert metrics["direction_checks"][0]["raw_directional_derivative"] < 0
+    assert all(
+        row["projected_directional_derivative"] < 0
+        for row in metrics["line_search_history"]
+        if row["accepted"]
+    )

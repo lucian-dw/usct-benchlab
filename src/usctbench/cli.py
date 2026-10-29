@@ -3,14 +3,13 @@
 import argparse
 import json
 import os
-from pathlib import Path
 
 from usctbench import describe, evaluate, list_algorithms, run, suite
 from usctbench.core.config import load_yaml
-from usctbench.core.io import read_case_hdf5, write_case_hdf5
+from usctbench.core.io import read_case_hdf5
 from usctbench.core.schema import GridSpec
 from usctbench.data import openbreastus, nbpslice2d
-from usctbench.data.synthetic import make_sound_speed_case
+from usctbench.data.synthetic import make_sound_speed_case, prepare_synthetic_demo
 from usctbench.data.waveforms import convert_kwave_pressure_mat
 
 
@@ -42,18 +41,18 @@ def _describe(args):
 
 def _prepare(args):
     if args.dataset == "synthetic":
-        case = make_sound_speed_case(
+        prepare_synthetic_demo(
+            args.out,
             shape=tuple(args.shape),
             n_transducers=args.n_transducers,
             background_mps=args.reference_sound_speed_mps,
             inclusion_mps=args.inclusion_mps,
             inclusion_radius_m=args.inclusion_radius_m,
         )
-        write_case_hdf5(case, Path(args.out) / "cases" / f"{case.case_id}.h5")
     elif args.dataset == "openbreastus":
         if not args.root or args.spacing_m is None:
             raise ValueError("OpenBreastUS requires --root and explicit --spacing-m")
-        openbreastus.prepare_cases(
+        openbreastus.prepare_openbreastus(
             args.root,
             args.out,
             cases_per_density=args.cases_per_class,
@@ -67,7 +66,7 @@ def _prepare(args):
     else:
         if not args.root:
             raise ValueError("NBPslice2D requires --root pointing to NBPslices2D.zip")
-        nbpslice2d.prepare_cases(
+        nbpslice2d.prepare_nbpslice2d(
             args.root,
             args.out,
             cases_per_type=args.cases_per_class,

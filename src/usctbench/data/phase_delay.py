@@ -71,12 +71,11 @@ def phase_slope_delays(
         confidence,
         {
             "method": "training_only_reference_relative_phase_slope",
+            "valid_frequency_count": int(len(indices)),
             "frequencies_hz": frequencies[indices].tolist(),
             "valid_fraction": float(active.sum() / max(np.all(train, axis=0).sum(), 1)),
             "phase_rms_median": float(np.median(rms[active])) if active.any() else None,
-            "heldout_values_used": False,
             "max_phase_rms": float(max_phase_rms),
             "min_amplitude_ratio": float(min_amplitude_ratio),
-            "limitation": "group-delay initialization; phase-unwrapping aliases and multipath remain possible",
         },
     )

@@ -8,7 +8,6 @@ and spectra use (frequency, tx, rx).
 
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 
 import h5py
@@ -313,21 +312,3 @@ def convert_kwave_pressure_mat(
     )
     write_case_hdf5(case, out_path)
     return case
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mat_path")
-    parser.add_argument("out_path")
-    parser.add_argument("--frequencies-hz", type=float, nargs="+")
-    parser.add_argument("--tx-indices", type=int, nargs="+")
-    parser.add_argument("--rx-indices", type=int, nargs="+")
-    parser.add_argument("--reference-sound-speed-mps", type=float, default=1500.0)
-    parser.add_argument("--water-dataset")
-    args = vars(parser.parse_args())
-    case = convert_kwave_pressure_mat(**args)
-    print(f"{case.case_id}: preserved pressure {case.measurement.time_data.shape}")
-
-
-if __name__ == "__main__":
-    main()

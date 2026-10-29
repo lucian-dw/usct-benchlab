@@ -3,7 +3,7 @@ import pytest
 from scipy.special import hankel1
 
 from usctbench.core.schema import GeometrySpec, GridSpec
-from usctbench.operators import adjoint_error
+from tests.helpers import adjoint_error
 from usctbench.operators.ray_born import RayBornOperator
 from usctbench.operators.ray_born import RayBornForward
 from usctbench.operators.volume_integral import VolumeIntegralGreen

@@ -14,8 +14,8 @@ from usctbench.algorithms.ray import (
     speed_bounds,
     target_delta_tof,
 )
-from usctbench.core.config import coerce_bool
-from usctbench.core.schema import ReconstructionResult
+from usctbench.core.config import prepared_run
+from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, USCTCase
 from usctbench.operators.straight_ray import StraightRayProjector
 from usctbench.operators.model_space import (
     BilinearBasis,
@@ -27,9 +27,7 @@ from usctbench.solvers.row_action import row_action
 
 
 def reconstruct(case, config, algorithm):
-    projector = StraightRayProjector.from_case(
-        case, backend=config.parameters.projector_backend
-    )
+    projector = StraightRayProjector.from_case(case)
     target, mask = target_delta_tof(case, projector)
     weights = configured_ray_weights(case, projector, mask, config)
     p = config.parameters
@@ -56,7 +54,7 @@ def reconstruct(case, config, algorithm):
         valid_mask=mask.reshape(projector.ray_shape),
         iteration_unit="cgls_step" if is_cg else "full_sweep",
     )
-    roi_only = coerce_bool(p.roi_update_only)
+    roi_only = p.roi_update_only
     roi_laplacian = p.roi_laplacian if is_cg else False
     roi = case.grid.roi_mask if roi_only else None
     basis = None
@@ -69,7 +67,9 @@ def reconstruct(case, config, algorithm):
             raise ValueError("reduced model currently requires no inversion ROI")
         basis = BilinearBasis(case.grid, p.model_grid_shape)
         model_shape = basis.shape
-        solver_operator = ReducedLinearOperator(projector, basis)
+        solver_operator = ReducedLinearOperator(
+            projector, basis, matrix=projector.matrix
+        )
         solver_kind = FineGridRegularizer(basis, kind)
     initial = np.zeros(model_shape)
     control.declare_update(
@@ -107,7 +107,7 @@ def reconstruct(case, config, algorithm):
                 roi_mask=roi,
                 eps=float(p.coverage_preconditioner_eps),
                 max_scale=float(p.coverage_preconditioner_max_scale),
-                normalize=coerce_bool(p.coverage_preconditioner_normalize),
+                normalize=p.coverage_preconditioner_normalize,
             )
         except BudgetExhausted as exc:
             control.monitor.finish(exc.reason)
@@ -124,7 +124,8 @@ def reconstruct(case, config, algorithm):
             control,
             initial=initial,
             reference=s0,
-            project=project,
+            lower=1.0 / high - 1.0 / c0,
+            upper=1.0 / low - 1.0 / c0,
             to_image=to_speed,
             damping=lambda_value**2,
             regularization=solver_kind,
@@ -169,7 +170,6 @@ def reconstruct(case, config, algorithm):
     metrics.update(
         {
             "backend": "native_siddon_straight_ray",
-            "projector_backend": projector.backend,
             "model_parameterization": (
                 {"kind": "pixels"} if basis is None else basis.metadata()
             ),
@@ -216,3 +216,27 @@ def reconstruct(case, config, algorithm):
         sound_speed_mps=sound_speed,
         metrics=metrics,
     )
+
+
+class StraightRayCGLSAlgorithm:
+    name = "straight_cgls"
+
+    @prepared_run
+    def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
+        return reconstruct(case, config, self.name)
+
+
+class StraightRaySIRTAlgorithm:
+    name = "straight_sirt"
+
+    @prepared_run
+    def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
+        return reconstruct(case, config, self.name)
+
+
+class StraightRaySARTAlgorithm:
+    name = "straight_sart"
+
+    @prepared_run
+    def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
+        return reconstruct(case, config, self.name)

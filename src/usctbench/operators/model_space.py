@@ -9,10 +9,9 @@ physical penalty when the coefficient-grid size changes.
 
 from __future__ import annotations
 
-from functools import cached_property
-
 import numpy as np
-from scipy.sparse import csr_array, diags, eye, kron, vstack
+from scipy.sparse import csr_array, kron
+from usctbench.operators.regularization import regularizer
 
 from usctbench.core.schema import GridSpec
 
@@ -60,18 +59,10 @@ class BilinearBasis:
 
     def forward(self, coefficients):
         a = np.asarray(coefficients)
-        if a.shape != self.shape or np.iscomplexobj(a) or not np.isfinite(a).all():
-            raise ValueError("coefficients must be a finite real model grid")
         return np.asarray(self.matrix @ a.ravel()).reshape(self.fine_grid.shape)
 
     def adjoint(self, fine_image):
         a = np.asarray(fine_image)
-        if (
-            a.shape != self.fine_grid.shape
-            or np.iscomplexobj(a)
-            or not np.isfinite(a).all()
-        ):
-            raise ValueError("basis-adjoint input must be a finite real fine grid")
         return np.asarray(self.matrix.T @ a.ravel()).reshape(self.shape)
 
     def metadata(self):
@@ -81,43 +72,28 @@ class BilinearBasis:
             "propagation_shape": list(self.fine_grid.shape),
             "boundary": "edge_replication",
             "penalty_grid": "original_fine_grid",
-            "ground_truth_used": False,
-            "post_reconstruction_filter": False,
         }
 
 
 class ReducedLinearOperator:
     """A B and B^T A^T; optionally cache the sparse product for straight rays."""
 
-    def __init__(self, operator, basis):
+    def __init__(self, operator, basis, *, matrix=None):
         self.operator, self.basis = operator, basis
         self.grid, self.n_pixels = basis.grid, int(np.prod(basis.shape))
         self.n_rays, self.ray_shape = operator.n_rays, operator.ray_shape
-        self.sparse = hasattr(type(operator), "matrix")
-
-    @cached_property
-    def matrix(self):
-        if not self.sparse:
-            raise ValueError("this Jacobian has no explicit sparse matrix")
-        return (self.operator.matrix @ self.basis.matrix).tocsr()
+        self.sparse = matrix is not None
+        self.matrix = None if matrix is None else (matrix @ basis.matrix).tocsr()
 
     def forward(self, image):
         if self.sparse:
             a = np.asarray(image)
-            if (
-                a.shape != self.basis.shape
-                or np.iscomplexobj(a)
-                or not np.isfinite(a).all()
-            ):
-                raise ValueError("image must be a finite coefficient grid")
             return np.asarray(self.matrix @ a.ravel()).ravel()
         return self.operator.forward(self.basis.forward(image))
 
     def adjoint(self, values):
         if self.sparse:
             a = np.asarray(values)
-            if a.size != self.n_rays or np.iscomplexobj(a) or not np.isfinite(a).all():
-                raise ValueError("adjoint input must be a finite real data array")
             return np.asarray(self.matrix.T @ a.ravel()).reshape(self.basis.shape)
         return self.basis.adjoint(self.operator.adjoint(values))
 
@@ -134,53 +110,6 @@ class ReducedLinearOperator:
         )
 
 
-class SpatialGradient:
-    """Dimensionless ell * gradient on interior edges, with its exact transpose.
-
-    Edges use [row=y, col=x] spacing. No differences against an artificial
-    zero-valued exterior are added, so a constant image has zero penalty.
-    """
-
-    def __init__(self, grid: GridSpec, length_m: float):
-        if not np.isfinite(length_m) or length_m <= 0:
-            raise ValueError("gradient length_m must be finite and positive")
-        self.grid, self.length_m = grid, float(length_m)
-        ny, nx = grid.shape
-
-        def difference(n, spacing):
-            if n == 1:
-                return csr_array((0, 1))
-            return diags(
-                [-np.ones(n - 1), np.ones(n - 1)], [0, 1], shape=(n - 1, n)
-            ) * (length_m / spacing)
-
-        self.matrix = csr_array(
-            vstack(
-                [
-                    kron(difference(ny, grid.spacing_m[0]), eye(nx)),
-                    kron(eye(ny), difference(nx, grid.spacing_m[1])),
-                ],
-                format="csr",
-            )
-        )
-
-    def forward(self, image):
-        a = np.asarray(image)
-        if a.shape != self.grid.shape or np.iscomplexobj(a) or not np.isfinite(a).all():
-            raise ValueError("gradient input must be a finite real image")
-        return np.asarray(self.matrix @ a.ravel())
-
-    def adjoint(self, edges):
-        a = np.asarray(edges)
-        if (
-            a.shape != (self.matrix.shape[0],)
-            or np.iscomplexobj(a)
-            or not np.isfinite(a).all()
-        ):
-            raise ValueError("gradient adjoint input must be a finite real edge vector")
-        return np.asarray(self.matrix.T @ a).reshape(self.grid.shape)
-
-
 class FineGridRegularizer:
     """L B with transpose B^T L^T, including rectangular fine-grid penalties."""
 
@@ -188,13 +117,9 @@ class FineGridRegularizer:
         self.basis, self.kind = basis, kind
 
     def forward(self, coefficients):
-        from usctbench.solvers.least_squares import regularizer
-
         return regularizer(self.basis.forward(coefficients), self.kind)
 
     def adjoint(self, values):
-        from usctbench.solvers.least_squares import regularizer
-
         transposed = (
             self.kind.adjoint(values)
             if hasattr(self.kind, "adjoint")

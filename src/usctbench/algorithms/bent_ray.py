@@ -12,10 +12,8 @@ from usctbench.algorithms._control import InversionControl
 from usctbench.algorithms.ray import (
     configured_ray_weights,
     reference_sound_speed,
-    run_with_failure_capture,
     speed_bounds,
 )
-from usctbench.core.config import coerce_bool
 from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, USCTCase
 from usctbench.core.stopping import BudgetExhausted
 from usctbench.operators.eikonal import EikonalForward
@@ -24,10 +22,11 @@ from usctbench.operators.model_space import (
     FineGridRegularizer,
     ReducedLinearOperator,
 )
-from usctbench.solvers.least_squares import normal_step, normal_regularizer, regularizer
+from usctbench.solvers.linear import solve_linearized
+from usctbench.operators.regularization import normal_regularizer, regularizer
 
 
-class BentRayGNAdapter:
+class BentRayAlgorithm:
     """Bounded, regularized Gauss-Newton inversion of absolute or differential TOF.
 
     ``gradient_rtol`` (default 1e-8) is relative to the first checked regularized
@@ -38,11 +37,6 @@ class BentRayGNAdapter:
 
     @prepared_run
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
-        return run_with_failure_capture(
-            self.name, case, lambda: self._run(case, config)
-        )
-
-    def _run(self, case, config):
         p = config.parameters
         c0 = reference_sound_speed(case, config)
         differential = case.measurement.delta_tof_s is not None
@@ -94,42 +88,15 @@ class BentRayGNAdapter:
             normalization="norm(q_new-q_old)/norm(q_old); positive bounded slowness",
         )
         inner = int(p.inner_iterations)
-        if inner < 1:
-            raise ValueError("inner_iterations must be positive")
-        inner_solver = str(p.inner_solver)
+        inner_solver = p.inner_solver
         inner_options = p.inner_options.model_dump()
-        allowed = {
-            "rtol",
-            "atol",
-            "btol",
-            "conlim",
-            "preconditioner",
-            "preconditioner_probes",
-            "preconditioner_seed",
-        }
-        if (
-            inner_solver not in {"normal_cg", "lsmr", "lsqr"}
-            or inner_options.keys() - allowed
-        ):
-            raise ValueError("invalid inner_solver or inner_options")
         kind = str(p.regularization)
         damping = p.regularization_lambda**2
         step = float(p.step_length)
         sigma = float(p.smooth_sigma)
         gradient_rtol = float(p.gradient_rtol)
-        if not np.isfinite(gradient_rtol) or gradient_rtol < 0:
-            raise ValueError("gradient_rtol must be finite and nonnegative")
-        if (
-            not np.isfinite([damping, step, sigma]).all()
-            or damping < 0
-            or step <= 0
-            or sigma < 0
-        ):
-            raise ValueError(
-                "damping/smoothing must be nonnegative; step_length positive"
-            )
-        line_search = coerce_bool(p.line_search)
-        roi_only = coerce_bool(p.roi_update_only)
+        line_search = p.line_search
+        roi_only = p.roi_update_only
         roi = case.grid.roi_mask if roi_only else None
         s0 = np.full(case.grid.shape, 1 / c0)
         initial_speed = np.broadcast_to(
@@ -147,15 +114,7 @@ class BentRayGNAdapter:
         initial = s.copy()
         offset = distance / c0 if differential else np.zeros_like(distance)
         initialization = str(p.initialization)
-        if initialization not in {"configured", "cgls"}:
-            raise ValueError("initialization must be configured or cgls")
         initialization_iterations = p.initialization_iterations
-        if (
-            isinstance(initialization_iterations, bool)
-            or not isinstance(initialization_iterations, (int, np.integer))
-            or initialization_iterations <= 0
-        ):
-            raise ValueError("initialization_iterations must be a positive integer")
 
         basis = None
         coefficients = None
@@ -206,11 +165,12 @@ class BentRayGNAdapter:
                 water_prediction = (
                     np.zeros_like(observed) if differential else distance / c0
                 )
-                seed_update = normal_step(
+                seed_update, info = solve_linearized(
                     initializer,
                     control.weighted_residual(water_prediction),
                     np.zeros_like(s),
                     control,
+                    weights=control.precision,
                     iterations=initialization_iterations,
                     method=inner_solver,
                     **inner_options,
@@ -218,6 +178,7 @@ class BentRayGNAdapter:
                     regularization=kind,
                     roi=roi,
                 )
+                control.record_linear(info)
                 s = np.clip(s0 + seed_update, 1 / bounds[1], 1 / bounds[0])
                 if roi is not None:
                     s = np.where(roi, s, s0)
@@ -273,11 +234,12 @@ class BentRayGNAdapter:
                 if feasible_norm == 0:
                     control.monitor.finish("stationary_projected_gradient")
                     break
-                update = normal_step(
+                update, info = solve_linearized(
                     jacobian,
                     residual,
                     current,
                     control,
+                    weights=control.precision,
                     iterations=inner,
                     method=inner_solver,
                     **inner_options,
@@ -285,6 +247,7 @@ class BentRayGNAdapter:
                     regularization=solver_kind,
                     roi=roi,
                 )
+                control.record_linear(info)
                 if not np.isfinite(update).all():
                     raise FloatingPointError("non-finite Eikonal update")
                 if roi is not None:
@@ -417,8 +380,8 @@ class BentRayGNAdapter:
                 control.monitor.finish("max_iterations")
         except BudgetExhausted as exc:
             control.monitor.finish(exc.reason)
-        except FloatingPointError:
-            control.monitor.finish("numerical_failure")
+        except FloatingPointError as exc:
+            control.fail(exc)
         s, metrics = control.output(initial)
         sound_speed = 1 / s
         metrics.update(
@@ -472,4 +435,4 @@ class BentRayGNAdapter:
         )
 
 
-__all__ = ["BentRayGNAdapter"]
+__all__ = ["BentRayAlgorithm"]

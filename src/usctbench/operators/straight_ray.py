@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import cached_property
 
 import numpy as np
+from scipy.sparse import csr_array
 
 from usctbench.core.schema import GeometrySpec, GridSpec, USCTCase
 
@@ -20,44 +20,21 @@ class StraightRayProjector:
     grid: GridSpec
     tx_pos_m: np.ndarray
     rx_pos_m: np.ndarray
-    indices_by_ray: tuple[np.ndarray, ...]
-    lengths_by_ray_m: tuple[np.ndarray, ...]
-    backend: str = "csr"
-
-    def __post_init__(self):
-        if self.backend not in {"csr", "reference"}:
-            raise ValueError("straight-ray backend must be csr or reference")
-
-    @cached_property
-    def matrix(self):
-        """CSR of identical Siddon coefficients; callers must not mutate it.
-
-        Duplicate cell entries are summed before computing matrix norms.
-        The original intersection lists remain available for reference tests.
-        """
-        from scipy.sparse import csr_array
-
-        indptr = np.r_[0, np.cumsum([len(i) for i in self.indices_by_ray])]
-        indices = np.concatenate(self.indices_by_ray)
-        data = np.concatenate(self.lengths_by_ray_m)
-        matrix = csr_array((data, indices, indptr), shape=(self.n_rays, self.n_pixels))
-        matrix.sum_duplicates()
-        matrix.sort_indices()
-        return matrix
+    matrix: csr_array
 
     @property
     def storage_bytes(self):
-        """Additional CSR bytes, excluding the retained intersection lists."""
+        """Stored Siddon coefficients and CSR indices in bytes."""
         a = self.matrix
         return int(a.data.nbytes + a.indices.nbytes + a.indptr.nbytes)
 
     @classmethod
-    def from_case(cls, case: USCTCase, *, backend="csr") -> "StraightRayProjector":
-        return cls.from_grid_geometry(case.grid, case.geometry, backend=backend)
+    def from_case(cls, case: USCTCase) -> "StraightRayProjector":
+        return cls.from_grid_geometry(case.grid, case.geometry)
 
     @classmethod
     def from_grid_geometry(
-        cls, grid: GridSpec, geometry: GeometrySpec, *, backend="csr"
+        cls, grid: GridSpec, geometry: GeometrySpec
     ) -> "StraightRayProjector":
         indices: list[np.ndarray] = []
         lengths: list[np.ndarray] = []
@@ -66,18 +43,23 @@ class StraightRayProjector:
                 ray_indices, ray_lengths = _trace_ray(grid, tx, rx)
                 indices.append(ray_indices)
                 lengths.append(ray_lengths)
+        indptr = np.r_[0, np.cumsum([len(i) for i in indices])]
+        matrix = csr_array(
+            (np.concatenate(lengths), np.concatenate(indices), indptr),
+            shape=(len(indices), int(np.prod(grid.shape))),
+        )
+        matrix.sum_duplicates()
+        matrix.sort_indices()
         return cls(
             grid=grid,
             tx_pos_m=np.asarray(geometry.tx_pos_m, dtype=float),
             rx_pos_m=np.asarray(geometry.rx_pos_m, dtype=float),
-            indices_by_ray=tuple(indices),
-            lengths_by_ray_m=tuple(lengths),
-            backend=backend,
+            matrix=matrix,
         )
 
     @property
     def n_rays(self) -> int:
-        return len(self.indices_by_ray)
+        return self.matrix.shape[0]
 
     @property
     def n_pixels(self) -> int:
@@ -94,20 +76,14 @@ class StraightRayProjector:
         flat = np.asarray(image, dtype=float).reshape(-1)
         if flat.size != self.n_pixels:
             raise ValueError(f"image has {flat.size} pixels, expected {self.n_pixels}")
-        if self.backend == "csr":
-            return np.asarray(self.matrix @ flat).ravel()
-        out = np.zeros(self.n_rays, dtype=float)
-        for ray_id, (indices, lengths) in enumerate(
-            zip(self.indices_by_ray, self.lengths_by_ray_m, strict=True)
-        ):
-            if indices.size:
-                out[ray_id] = float(np.dot(lengths, flat[indices]))
-        return out
+        return np.asarray(self.matrix @ flat).ravel()
 
     def adjoint(self, ray_values: np.ndarray) -> np.ndarray:
         """Backproject ray values using the exact transpose of `forward`."""
 
-        return backproject(self, ray_values)
+        return np.asarray(self.matrix.T @ np.asarray(ray_values).reshape(-1)).reshape(
+            self.grid.shape
+        )
 
     def row_norms(self, power: int = 2) -> np.ndarray:
         """Return per-ray sums of path lengths raised to `power`."""
@@ -171,21 +147,3 @@ def _trace_ray(
     if not indices:
         return np.empty(0, dtype=int), np.empty(0, dtype=float)
     return np.asarray(indices, dtype=int), np.asarray(lengths, dtype=float)
-
-
-def backproject(projector, ray_values: np.ndarray) -> np.ndarray:
-    """Use the identical intersection lengths; never retrace an approximate ray."""
-    values = np.asarray(ray_values, dtype=float).reshape(-1)
-    if values.size != projector.n_rays:
-        raise ValueError(
-            f"ray_values has {values.size} entries, expected {projector.n_rays}"
-        )
-    if projector.backend == "csr":
-        return np.asarray(projector.matrix.T @ values).reshape(projector.grid.shape)
-    flat = np.zeros(projector.n_pixels, dtype=float)
-    for value, indices, lengths in zip(
-        values, projector.indices_by_ray, projector.lengths_by_ray_m, strict=True
-    ):
-        if indices.size:
-            np.add.at(flat, indices, value * lengths)
-    return flat.reshape(projector.grid.shape)

@@ -336,7 +336,11 @@ class ReconstructionResult(_ArrayModel):
                 "line_search_failed",
             }:
                 self.status = ResultStatus.FAILED
-                self.failure_reason = self.failure_reason or str(reason)
+                self.failure_reason = (
+                    self.failure_reason
+                    or self.metrics.get("numerical_error")
+                    or str(reason)
+                )
         if self.status == ResultStatus.FAILED and not self.failure_reason:
             raise ValueError("failed results must include failure_reason")
         return self

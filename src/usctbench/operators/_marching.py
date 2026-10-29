@@ -10,13 +10,17 @@ import numpy as np
 
 try:
     from numba import njit
+    from numba.extending import register_jitable
 except ImportError:
 
     def njit(*args, **kwargs):
         return lambda function: function
 
+    def register_jitable(function):
+        return function
 
-@njit(cache=True)
+
+@register_jitable
 def update_node(
     node,
     ny,
@@ -80,7 +84,7 @@ def update_node(
     heapq.heappush(heap, (value, node))
 
 
-@njit(cache=True)
+@register_jitable
 def update_node_second(
     node, ny, nx, hy, hx, flat, accepted, times, parents, weights, local, heap
 ):

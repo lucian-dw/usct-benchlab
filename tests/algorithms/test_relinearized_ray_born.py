@@ -3,11 +3,11 @@
 import numpy as np
 import pytest
 
-from usctbench.algorithms.rwave import RWaveAdapter
+from usctbench.algorithms.rwave import RayBornAlgorithm
 from usctbench.core.io import read_case_hdf5, write_case_hdf5
 from usctbench.core.schema import AlgorithmConfig, GroundTruthSpec, MeasurementSpec
 from usctbench.data.synthetic import make_sound_speed_case
-from usctbench.operators import adjoint_error
+from tests.helpers import adjoint_error
 from usctbench.operators.ray_born import RayBornForward
 
 
@@ -47,7 +47,7 @@ def config(*, max_iterations=3, run_controls=None, evaluation=None, **parameters
 
 def test_rebuilds_background_and_accepts_only_true_nonlinear_decrease():
     case, _, _ = nonlinear_case()
-    result = RWaveAdapter().run(case, config())
+    result = RayBornAlgorithm().run(case, config())
     assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     metrics = result.metrics
     assert metrics["nonlinear_background_updates"] >= 1, metrics
@@ -56,7 +56,6 @@ def test_rebuilds_background_and_accepts_only_true_nonlinear_decrease():
     assert metrics["data_residual_reduction"] > 0.1
     assert metrics["stopping"]["work"]["background_builds"] >= len(curve)
     assert metrics["background_relinearization"] is True
-    assert metrics["full_upstream_rwave_port"] is False
     assert "rmse" not in metrics
 
 
@@ -64,8 +63,8 @@ def test_nonlinear_holdout_is_not_used_for_updates_or_line_search():
     case, _, _ = nonlinear_case()
     changed = case.model_copy(deep=True)
     changed.measurement.freq_data[..., 1] *= 15j
-    original = RWaveAdapter().run(case, config(max_iterations=1))
-    altered = RWaveAdapter().run(changed, config(max_iterations=1))
+    original = RayBornAlgorithm().run(case, config(max_iterations=1))
+    altered = RayBornAlgorithm().run(changed, config(max_iterations=1))
     assert original.status == altered.status in {"completed", "budget_exhausted"}
     np.testing.assert_array_equal(original.sound_speed_mps, altered.sound_speed_mps)
     assert (
@@ -101,9 +100,8 @@ def test_source_is_required_and_complex_source_roundtrips(tmp_path):
         loaded.measurement.source_spectrum, case.measurement.source_spectrum
     )
     loaded.measurement.source_spectrum = None
-    result = RWaveAdapter().run(loaded, config())
-    assert result.status == "failed"
-    assert "calibrated source_spectrum" in result.failure_reason
+    with pytest.raises(ValueError, match="calibrated source_spectrum"):
+        RayBornAlgorithm().run(loaded, config())
 
 
 @pytest.mark.parametrize(
@@ -111,9 +109,9 @@ def test_source_is_required_and_complex_source_roundtrips(tmp_path):
 )
 def test_source_broadcast_matches_explicit_frequency_tx_calibration(source):
     case, _, _ = nonlinear_case()
-    expected = RWaveAdapter().run(case, config(max_iterations=1))
+    expected = RayBornAlgorithm().run(case, config(max_iterations=1))
     case.measurement.source_spectrum = np.asarray(source)
-    result = RWaveAdapter().run(case, config(max_iterations=1))
+    result = RayBornAlgorithm().run(case, config(max_iterations=1))
     assert result.status == expected.status in {"completed", "budget_exhausted"}
     np.testing.assert_array_equal(result.sound_speed_mps, expected.sound_speed_mps)
 
@@ -129,7 +127,7 @@ def test_relative_regularization_is_invariant_to_pressure_units():
         regularization_lambda=0.2,
         regularization="laplacian",
     )
-    a, b = (RWaveAdapter().run(c, cfg) for c in (case, other))
+    a, b = (RayBornAlgorithm().run(c, cfg) for c in (case, other))
     assert a.status == b.status in {"completed", "budget_exhausted"}
     np.testing.assert_allclose(a.sound_speed_mps, b.sound_speed_mps, rtol=1e-10)
     np.testing.assert_allclose(
@@ -142,13 +140,12 @@ def test_relative_regularization_is_invariant_to_pressure_units():
 def test_underresolved_complex_inverse_grid_is_rejected():
     case, _, _ = nonlinear_case()
     case.grid.spacing_m = (0.005, 0.005)
-    result = RWaveAdapter().run(case, config())
-    assert result.status == "failed"
-    assert "underresolved" in result.failure_reason
+    with pytest.raises(ValueError, match="underresolved"):
+        RayBornAlgorithm().run(case, config())
 
 
 def test_physical_laplacian_has_an_exact_transpose_on_anisotropic_grid():
-    from usctbench.solvers.least_squares import regularizer, normal_regularizer
+    from usctbench.operators.regularization import regularizer, normal_regularizer
 
     rng = np.random.default_rng(24)
     x, y = rng.normal(size=(2, 9, 11))
@@ -196,7 +193,7 @@ def test_phase_seed_and_pressure_updates_exclude_heldout_frequency():
             "objective_rtol": None,
         },
     )
-    a, b = [RWaveAdapter().run(c, cfg) for c in (case, changed)]
+    a, b = [RayBornAlgorithm().run(c, cfg) for c in (case, changed)]
     assert a.status == b.status in {"completed", "budget_exhausted"}, a.failure_reason
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
     assert a.metrics["initialization_qc"]["frequencies_hz"] == [100e3, 150e3, 200e3]
@@ -205,7 +202,7 @@ def test_phase_seed_and_pressure_updates_exclude_heldout_frequency():
 @pytest.mark.parametrize("budget", [0, 1, 2])
 def test_nonlinear_budget_returns_a_complete_checkpoint(budget):
     case, _, _ = nonlinear_case()
-    result = RWaveAdapter().run(
+    result = RayBornAlgorithm().run(
         case, config(run_controls={"max_forward_calls": budget})
     )
     assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
@@ -233,4 +230,4 @@ def test_invalid_initialization_settings_fail_explicitly(settings):
         # rejection now that variant-specific unused fields fail closed.
         candidate = AlgorithmConfig(parameters=settings)
     with pytest.raises(ValueError, match="initialization"):
-        RWaveAdapter().run(case, candidate)
+        RayBornAlgorithm().run(case, candidate)

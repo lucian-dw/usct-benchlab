@@ -10,15 +10,13 @@ import zipfile
 
 import numpy as np
 
-from usctbench.operators.straight_ray import StraightRayProjector
+from usctbench.data.synthetic import build_surrogate_tof_case
 from usctbench.data.synthetic import make_grid, make_ring_geometry
 from usctbench.core.io import write_case_hdf5
 from usctbench.core.provenance import MeasurementProvenance, stamp_measurement_metadata
 from usctbench.core.schema import (
     GeometrySpec,
     GridSpec,
-    GroundTruthSpec,
-    MeasurementSpec,
     USCTCase,
 )
 
@@ -305,6 +303,7 @@ def convert_nbp_slice2d_zip(
     out_dir: str | Path,
     *,
     cases_per_type: int = 1,
+    case_ids: list[str] | None = None,
     output_shape: tuple[int, int] = (64, 64),
     n_transducers: int = 32,
     reference_sound_speed_mps: float = 1500.0,
@@ -324,6 +323,16 @@ def convert_nbp_slice2d_zip(
         selected = _select_nbp_zip_members(
             archive.namelist(), cases_per_type=cases_per_type
         )
+        if case_ids is not None:
+            wanted = set(case_ids)
+            selected = [
+                name
+                for name in archive.namelist()
+                if Path(name).stem in wanted and name.endswith(".mat")
+            ]
+            missing = wanted - {Path(name).stem for name in selected}
+            if missing:
+                raise ValueError(f"NBPslice2D cases not found: {sorted(missing)}")
         for member in selected:
             data = archive.read(member)
             with h5py.File(io.BytesIO(data), "r") as handle:
@@ -374,21 +383,13 @@ def _speed_array_to_case(
         grid.shape[0] * grid.spacing_m[0], grid.shape[1] * grid.spacing_m[1]
     )
     geometry = make_ring_geometry(n_transducers=n_transducers, radius_m=radius_m)
-    projector = StraightRayProjector.from_grid_geometry(grid, geometry)
-    delta_slowness = (1.0 / sound_speed_mps) - (1.0 / reference_sound_speed_mps)
-    delta_tof_s = projector.forward(delta_slowness).reshape(projector.ray_shape)
-    valid_mask = ~np.eye(projector.ray_shape[0], projector.ray_shape[1], dtype=bool)
-    return USCTCase(
-        case_id=case_id,
-        grid=grid,
-        geometry=geometry,
-        measurement=MeasurementSpec(
-            domain="features",
-            delta_tof_s=delta_tof_s,
-            valid_mask=valid_mask,
-        ),
-        ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed_mps),
-        metadata=stamp_measurement_metadata(
+    return build_surrogate_tof_case(
+        grid,
+        geometry,
+        sound_speed_mps,
+        reference_sound_speed_mps,
+        case_id,
+        source=stamp_measurement_metadata(
             {
                 "source_dataset": "OpenBreastUS",
                 "case_type": "openbreastus_speedmap_surrogate",
@@ -433,11 +434,7 @@ def _kwave_arrays_to_case(
 ) -> USCTCase:
     grid = _grid_from_coordinates(sound_speed_mps.shape, xi=xi, yi=yi)
     geometry = _geometry_from_xy_positions(positions_xy, n_transducers=n_transducers)
-    projector = StraightRayProjector.from_grid_geometry(grid, geometry)
     c0 = reference_sound_speed_mps
-    delta_slowness = (1.0 / sound_speed_mps) - (1.0 / c0)
-    delta_tof_s = projector.forward(delta_slowness).reshape(projector.ray_shape)
-    valid_mask = ~np.eye(projector.ray_shape[0], projector.ray_shape[1], dtype=bool)
     metadata = stamp_measurement_metadata(
         {
             "source_dataset": "kWave_USCT_simulation",
@@ -474,22 +471,13 @@ def _kwave_arrays_to_case(
         forward_model="straight_ray_feature_surrogate_from_kwave_property_maps",
         feature_source="surrogate_delta_tof_from_ground_truth_sound_speed",
     )
-    return USCTCase(
-        case_id=_safe_case_id(source_label),
-        grid=grid,
-        geometry=geometry,
-        measurement=MeasurementSpec(
-            domain="features",
-            frequencies_hz=(
-                np.asarray([frequency_hz], dtype=float)
-                if frequency_hz and frequency_hz > 0
-                else None
-            ),
-            delta_tof_s=delta_tof_s,
-            valid_mask=valid_mask,
-        ),
-        ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed_mps),
-        metadata=metadata,
+    return build_surrogate_tof_case(
+        grid,
+        geometry,
+        sound_speed_mps,
+        reference_sound_speed_mps,
+        _safe_case_id(source_label),
+        source=metadata,
     )
 
 
@@ -532,24 +520,15 @@ def _nbp_handle_to_case_record(
         grid.shape[0] * grid.spacing_m[0], grid.shape[1] * grid.spacing_m[1]
     )
     geometry = make_ring_geometry(n_transducers=n_transducers, radius_m=radius_m)
-    projector = StraightRayProjector.from_grid_geometry(grid, geometry)
-
-    delta_slowness = (1.0 / sound_speed_mps) - (1.0 / reference_sound_speed_mps)
-    delta_tof_s = projector.forward(delta_slowness).reshape(projector.ray_shape)
-    valid_mask = ~np.eye(projector.ray_shape[0], projector.ray_shape[1], dtype=bool)
 
     source_ref = f"{source_path}!{source_member}" if source_member else source_path
-    case = USCTCase(
-        case_id=case_id,
-        grid=grid,
-        geometry=geometry,
-        measurement=MeasurementSpec(
-            domain="features",
-            delta_tof_s=delta_tof_s,
-            valid_mask=valid_mask,
-        ),
-        ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed_mps),
-        metadata=stamp_measurement_metadata(
+    case = build_surrogate_tof_case(
+        grid,
+        geometry,
+        sound_speed_mps,
+        reference_sound_speed_mps,
+        case_id,
+        source=stamp_measurement_metadata(
             {
                 "source_dataset": "NBPslices2D",
                 "case_type": "nbpslice2d_property_map_surrogate",

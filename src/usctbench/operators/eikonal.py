@@ -10,7 +10,6 @@ still reduce global convergence order. This is not r-Wave's shooting solver.
 
 from __future__ import annotations
 
-import heapq
 from dataclasses import dataclass
 
 import numpy as np
@@ -82,101 +81,19 @@ def fast_march(
     h = np.asarray(spacing, dtype=float)
     if h.shape != (2,) or np.any(h <= 0) or not np.all(np.isfinite(h)):
         raise ValueError("spacing must be finite and positive")
-    ny, nx = model.shape
-    flat = model.ravel()
-    size = flat.size
-    times = np.full(size, np.inf)
-    accepted = np.zeros(size, dtype=bool)
-    parents = np.full((size, 2), -1, dtype=int)
-    weights = np.zeros((size, 2))
-    local = np.zeros(size)
     seeds, _ = interpolation(model.shape, np.asarray(source).reshape(1, 2))
-    if compiled or spatial_order == 2:
-        from usctbench.operators._marching import marching_arrays
+    from usctbench.operators._marching import marching_arrays
 
-        march = marching_arrays
-        if not compiled:
-            march = getattr(march, "py_func", march)
-        arrays = march(
+    march = (
+        marching_arrays
+        if compiled
+        else getattr(marching_arrays, "py_func", marching_arrays)
+    )
+    return MarchingTape(
+        *march(
             model, h, np.asarray(source, dtype=float), np.unique(seeds), spatial_order
         )
-        return MarchingTape(*arrays)
-    order = []
-    for node in np.unique(seeds):
-        coordinate = np.array(divmod(int(node), nx))
-        distance = float(np.linalg.norm((coordinate - source) * h))
-        times[node] = distance * flat[node]
-        local[node] = distance
-        accepted[node] = True
-    order.extend(sorted(np.unique(seeds), key=lambda node: times[node]))
-    heap = []
-
-    def neighbors(node):
-        y, x = divmod(node, nx)
-        if y:
-            yield node - nx
-        if y + 1 < ny:
-            yield node + nx
-        if x:
-            yield node - 1
-        if x + 1 < nx:
-            yield node + 1
-
-    def update(node):
-        if accepted[node]:
-            return
-        y, x = divmod(node, nx)
-        candidates = []
-        for axis, pair in enumerate(
-            (
-                (node - nx if y else -1, node + nx if y + 1 < ny else -1),
-                (node - 1 if x else -1, node + 1 if x + 1 < nx else -1),
-            )
-        ):
-            available = [p for p in pair if p >= 0 and accepted[p]]
-            if available:
-                parent = min(available, key=lambda p: times[p])
-                candidates.append((times[parent], parent, h[axis]))
-        if not candidates:
-            return
-        candidates.sort()
-        a, parent, step = candidates[0]
-        value = a + step * flat[node]
-        chosen = [candidates[0]]
-        if len(candidates) == 2 and value > candidates[1][0]:
-            b, _, step_b = candidates[1]
-            wa, wb = 1 / step**2, 1 / step_b**2
-            # Shift by a before solving the quadratic to avoid cancellation.
-            diff = b - a
-            disc = (wa + wb) * flat[node] ** 2 - wa * wb * diff**2
-            value = a + (wb * diff + np.sqrt(max(0.0, disc))) / (wa + wb)
-            chosen = candidates
-        if value >= times[node]:
-            return
-        times[node] = value
-        parents[node] = -1
-        weights[node] = 0
-        denominator = sum((value - t) / step**2 for t, _, step in chosen)
-        local[node] = flat[node] / denominator
-        for index, (t, p, step) in enumerate(chosen):
-            parents[node, index] = p
-            weights[node, index] = (value - t) / step**2 / denominator
-        heapq.heappush(heap, (value, node))
-
-    for seed in order:
-        for node in neighbors(int(seed)):
-            update(node)
-    while heap:
-        value, node = heapq.heappop(heap)
-        if accepted[node] or value != times[node]:
-            continue
-        accepted[node] = True
-        order.append(node)
-        for neighbor in neighbors(node):
-            update(neighbor)
-    if len(order) != size:
-        raise RuntimeError("fast marching did not reach all computational nodes")
-    return MarchingTape(times, np.asarray(order), parents, weights, local)
+    )
 
 
 class EikonalJacobian:
@@ -228,6 +145,7 @@ class EikonalForward:
         ):
             raise ValueError("spatial_order must be 1 or 2")
         self.spatial_order = spatial_order
+        self.background_speed_mps = float(background_speed_mps)
         positions = np.vstack((geometry.tx_pos_m, geometry.rx_pos_m))
         if not np.all(np.isfinite(positions)):
             raise ValueError("transducer positions must be finite")
@@ -293,8 +211,12 @@ class EikonalForward:
                     self.geometry.tx_pos_m[:, None] - self.geometry.rx_pos_m[None, :],
                     axis=-1,
                 ).ravel()
-                self._reference = raw - distance * self.background_slowness
-            values = values - self._reference
+                self._reference = raw
+                self._water_tof = distance / self.background_speed_mps
+            # Subtract matching numerical fields before adding geometric ToF.
+            # Homogeneous water then cancels exactly, without a second large
+            # subtraction manufacturing a roundoff-only inverse problem.
+            values = (values - self._reference) + self._water_tof
         return Linearization(values, EikonalJacobian(self, tapes))
 
     def forward(self, slowness: np.ndarray) -> np.ndarray:

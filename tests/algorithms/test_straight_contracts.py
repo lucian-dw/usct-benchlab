@@ -4,19 +4,16 @@ import numpy as np
 import pytest
 
 from usctbench.algorithms._control import InversionControl
-from usctbench.algorithms.ray import (
+from usctbench.algorithms.straight import (
     StraightRayCGLSAlgorithm,
     StraightRaySIRTAlgorithm,
     StraightRaySARTAlgorithm,
-    run_with_failure_capture,
 )
 from usctbench.core.schema import (
     AlgorithmConfig,
     GridSpec,
     GeometrySpec,
     MeasurementSpec,
-    ReconstructionResult,
-    ResultStatus,
     USCTCase,
 )
 from usctbench.data.synthetic import make_sound_speed_case
@@ -30,30 +27,8 @@ from usctbench.solvers.row_action import row_action
 def test_conflicting_measurement_reference_fails_explicitly(algorithm):
     case = make_sound_speed_case(shape=(8, 8), n_transducers=8, inclusion_mps=1500)
     config = AlgorithmConfig(parameters={"reference_sound_speed_mps": 1600})
-    result = algorithm().run(case, config)
-    assert result.status == ResultStatus.FAILED
-    assert "measurement reference" in result.failure_reason
-    assert result.sound_speed_mps is None
-
-
-def test_line_search_failure_cannot_be_reported_as_success(synthetic_case):
-    image = np.full(synthetic_case.grid.shape, 1500.0)
-    result = run_with_failure_capture(
-        "test_solver",
-        synthetic_case,
-        lambda: ReconstructionResult(
-            algorithm="test_solver",
-            case_id=synthetic_case.case_id,
-            sound_speed_mps=image,
-            metrics={
-                "stop_reason": "line_search_failed",
-                "stopping": {"termination_category": "failure"},
-            },
-        ),
-    )
-    assert result.status == ResultStatus.FAILED
-    assert result.metrics["recovered_checkpoint_only"]
-    np.testing.assert_array_equal(result.sound_speed_mps, image)
+    with pytest.raises(ValueError, match="measurement reference"):
+        algorithm().run(case, config)
 
 
 @pytest.mark.parametrize("subsets,expected", [(1, 2 / 3), (2, 0.5)])

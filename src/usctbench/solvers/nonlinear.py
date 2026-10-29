@@ -7,7 +7,8 @@ from scipy.linalg import norm
 from scipy.ndimage import gaussian_filter
 
 from usctbench.core.stopping import BudgetExhausted
-from usctbench.solvers.least_squares import normal_step, normal_regularizer, regularizer
+from usctbench.solvers.linear import solve_linearized
+from usctbench.operators.regularization import normal_regularizer, regularizer
 
 
 def nonlinear_least_squares(
@@ -42,46 +43,7 @@ def nonlinear_least_squares(
     By default it is the initial model. Pixels outside ROI remain at the starting
     model, even when the penalty reference differs.
     """
-    for name, value, minimum in (
-        ("inner_iterations", inner_iterations, 1),
-        ("max_backtracks", max_backtracks, 0),
-    ):
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, np.integer))
-            or value < minimum
-        ):
-            raise ValueError(f"{name} must be an integer >= {minimum}")
-    for name, value in (
-        ("step_length", step_length),
-        ("max_update_mps", max_update_mps),
-    ):
-        if not np.isfinite(value) or value <= 0:
-            raise ValueError(f"{name} must be finite and positive")
-    if (
-        not np.isfinite(smooth_sigma)
-        or smooth_sigma < 0
-        or not np.isfinite(damping)
-        or damping < 0
-    ):
-        raise ValueError("smoothing and damping must be finite and nonnegative")
-    if not np.isfinite(gradient_rtol) or gradient_rtol < 0:
-        raise ValueError("gradient_rtol must be finite and nonnegative")
     inner_options = dict(inner_options or {})
-    allowed = {
-        "rtol",
-        "atol",
-        "btol",
-        "conlim",
-        "preconditioner",
-        "preconditioner_probes",
-        "preconditioner_seed",
-    }
-    if (
-        inner_solver not in {"normal_cg", "lsmr", "lsqr"}
-        or inner_options.keys() - allowed
-    ):
-        raise ValueError("invalid inner_solver or inner_options")
     state = np.asarray(initial, dtype=float).copy()
     initial_state = state.copy()
     reference = state.copy() if prior_reference is None else np.asarray(prior_reference)
@@ -170,11 +132,12 @@ def nonlinear_least_squares(
                     else "stationary_projected_gradient"
                 )
                 break
-            direction = normal_step(
+            direction, info = solve_linearized(
                 linearization.jacobian,
                 residual,
                 state - reference,
                 control,
+                weights=control.precision,
                 iterations=inner_iterations,
                 damping=damping,
                 regularization=regularization,
@@ -182,6 +145,7 @@ def nonlinear_least_squares(
                 method=inner_solver,
                 **inner_options,
             )
+            control.record_linear(info)
             raw_direction = direction.copy()
             raw_slope = float(np.vdot(gradient, direction).real)
             smoothed_slope = None
@@ -308,8 +272,8 @@ def nonlinear_least_squares(
             control.monitor.finish("max_iterations")
     except BudgetExhausted as exc:
         control.monitor.finish(exc.reason)
-    except FloatingPointError:
-        control.monitor.finish("numerical_failure")
+    except FloatingPointError as exc:
+        control.fail(exc)
     control.work.counts["background_builds"] = forward.background_builds
     control.work.counts["eikonal_source_solves"] = forward.eikonal_solves
     control.work.counts["green_source_solves"] = getattr(forward, "green_solves", 0)

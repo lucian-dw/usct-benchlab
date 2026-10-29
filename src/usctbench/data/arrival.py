@@ -80,11 +80,10 @@ def water_relative_delays(
                 source_onset_s + d / reference_speed_mps + pulse_duration_s,
             )
             if picker == "aic":
-                pick = _aic_onset
                 options = (aic_envelope_fraction, minimum_peak_snr, aic_window_s)
             else:
-                pick = _envelope_onset
                 options = (envelope_fraction, minimum_peak_snr)
+            pick = {"aic": _aic_onset, "envelope": _envelope_onset}[picker]
             object_pick = pick(p[:, pair[0], pair[1]], t, bounds, *options)
             water_pick = pick(w[:, pair[0], pair[1]], t, water_bounds, *options)
             if object_pick is not None and water_pick is not None:
@@ -97,48 +96,21 @@ def water_relative_delays(
                     delay[pair] = value
                     quality[pair] = min(object_pick[1], water_pick[1])
             continue
-        window = (t >= source_onset_s + d / hi - pulse_duration_s) & (
-            t <= source_onset_s + d / lo + 2 * pulse_duration_s
+        picked = _xcorr_delay(
+            p[:, pair[0], pair[1]],
+            w[:, pair[0], pair[1]],
+            t,
+            d,
+            dt,
+            lo,
+            hi,
+            reference_speed_mps,
+            pulse_duration_s,
+            source_onset_s,
+            minimum_correlation,
         )
-        # float32 pressure is preserved on disk; local correlation accumulation
-        # needs float64 to avoid a spurious water-vs-itself subsample lag.
-        x, y = p[(window,) + pair].astype(float), w[(window,) + pair].astype(float)
-        if x.size < 5 or not np.all(np.isfinite(x)) or not np.all(np.isfinite(y)):
-            continue
-        x, y = x - x.mean(), y - y.mean()
-        numerator = correlate(x, y, mode="full", method="fft")
-        xx = correlate(x * x, np.ones_like(y), method="fft")
-        yy = correlate(np.ones_like(x), y * y, method="fft")
-        denominator = np.sqrt(np.maximum(xx, 0) * np.maximum(yy, 0))
-        corr = np.divide(
-            numerator,
-            denominator,
-            out=np.zeros_like(numerator),
-            where=denominator > np.max(denominator) * 1e-8,
-        )
-        lags = correlation_lags(len(x), len(y)) * dt
-        minimum, maximum = d * (1 / hi - 1 / reference_speed_mps), d * (
-            1 / lo - 1 / reference_speed_mps
-        )
-        physical = (lags >= minimum) & (lags <= maximum)
-        if not np.any(physical):
-            continue
-        peak = int(np.argmax(np.where(physical, corr, -np.inf)))
-        if corr[peak] < minimum_correlation:
-            continue
-        shift = 0.0
-        if 0 < peak < len(corr) - 1:
-            curvature = corr[peak - 1] - 2 * corr[peak] + corr[peak + 1]
-            if curvature < 0:
-                shift = float(
-                    np.clip(
-                        0.5 * (corr[peak - 1] - corr[peak + 1]) / curvature, -0.5, 0.5
-                    )
-                )
-        value = lags[peak] + shift * dt
-        if minimum <= value <= maximum:
-            delay[pair] = value
-            quality[pair] = np.clip(corr[peak], 0, 1)
+        if picked is not None:
+            delay[pair], quality[pair] = picked
     valid = np.isfinite(delay)
     nonself = np.isfinite(distance) & (distance > 0)
     return (
@@ -168,13 +140,6 @@ def water_relative_delays(
             ),
             "envelope_fraction": envelope_fraction if picker == "envelope" else None,
             "minimum_peak_snr": minimum_peak_snr if picker == "envelope" else None,
-            "limitation": "finite-band pulse onset/group delay, not a certified causal first arrival",
-            "confidence_definition": (
-                "normalized pulse correlation"
-                if picker == "xcorr"
-                else "one minus pre-window envelope RMS / peak; signal quality, not arrival accuracy"
-            ),
-            "ground_truth_used": False,
         },
     )
 
@@ -234,10 +199,7 @@ def arrival_observation_metadata(qc):
             "pulse_duration_s": qc["pulse_duration_s"],
             "speed_bounds_mps": qc["speed_bounds_mps"],
             "weight_meaning": "squared_picker_confidence_not_inverse_noise_variance",
-            "geometric_first_arrival_certified": False,
-            "model_discrepancy_assessed": False,
             "reference_model": "model(object)-model(water), same numerical geometry",
-            "ground_truth_used_in_extraction": False,
         },
     }
 
@@ -288,3 +250,58 @@ def _aic_onset(trace, time, bounds, fraction, minimum_snr, window_s):
     # A split lies between the final noise sample and first signal sample.
     times = (time[indices[splits[near] - 1]] + time[indices[splits[near]]]) / 2
     return float(np.dot(weights, times)), onset[1]
+
+
+def _xcorr_delay(
+    p,
+    w,
+    t,
+    d,
+    dt,
+    lo,
+    hi,
+    reference_speed_mps,
+    pulse_duration_s,
+    source_onset_s,
+    minimum_correlation,
+):
+    window = (t >= source_onset_s + d / hi - pulse_duration_s) & (
+        t <= source_onset_s + d / lo + 2 * pulse_duration_s
+    )
+    # float32 pressure is preserved on disk; local correlation accumulation
+    # needs float64 to avoid a spurious water-vs-itself subsample lag.
+    x, y = p[window].astype(float), w[window].astype(float)
+    if x.size < 5 or not np.all(np.isfinite(x)) or not np.all(np.isfinite(y)):
+        return None
+    x, y = x - x.mean(), y - y.mean()
+    numerator = correlate(x, y, mode="full", method="fft")
+    xx = correlate(x * x, np.ones_like(y), method="fft")
+    yy = correlate(np.ones_like(x), y * y, method="fft")
+    denominator = np.sqrt(np.maximum(xx, 0) * np.maximum(yy, 0))
+    corr = np.divide(
+        numerator,
+        denominator,
+        out=np.zeros_like(numerator),
+        where=denominator > np.max(denominator) * 1e-8,
+    )
+    lags = correlation_lags(len(x), len(y)) * dt
+    minimum, maximum = d * (1 / hi - 1 / reference_speed_mps), d * (
+        1 / lo - 1 / reference_speed_mps
+    )
+    physical = (lags >= minimum) & (lags <= maximum)
+    if not np.any(physical):
+        return None
+    peak = int(np.argmax(np.where(physical, corr, -np.inf)))
+    if corr[peak] < minimum_correlation:
+        return None
+    shift = 0.0
+    if 0 < peak < len(corr) - 1:
+        curvature = corr[peak - 1] - 2 * corr[peak] + corr[peak + 1]
+        if curvature < 0:
+            shift = float(
+                np.clip(0.5 * (corr[peak - 1] - corr[peak + 1]) / curvature, -0.5, 0.5)
+            )
+    value = lags[peak] + shift * dt
+    if minimum <= value <= maximum:
+        return value, float(np.clip(corr[peak], 0, 1))
+    return None

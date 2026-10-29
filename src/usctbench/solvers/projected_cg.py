@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from usctbench.core.stopping import BudgetExhausted
-from usctbench.solvers.least_squares import regularizer, normal_regularizer
+from usctbench.operators.regularization import regularizer, normal_regularizer
 
 
 def projected_cg(
@@ -14,7 +14,8 @@ def projected_cg(
     *,
     initial,
     reference,
-    project,
+    lower,
+    upper,
     to_image,
     damping=0.0,
     regularization="identity",
@@ -99,11 +100,12 @@ def projected_cg(
             "adjoint", operator.adjoint, weights * residual(prediction)
         ) - damping * normal(x)
 
+    def project(value):
+        bounded = np.clip(value, lower, upper)
+        return bounded if roi is None else np.where(roi, bounded, start)
+
     def free_variables(vector):
-        # Probe one representable step: the callback owns the box/ROI bounds.
-        # A clipped outward component must not enter either CG step-size term.
-        probe = np.nextafter(x, np.where(vector >= 0, np.inf, -np.inf))
-        free = (vector == 0) | (project(probe) != x)
+        free = ((x > lower) | (vector >= 0)) & ((x < upper) | (vector <= 0))
         return free if roi is None else free & roi
 
     optimality = {}
@@ -289,6 +291,6 @@ def projected_cg(
             control.monitor.finish("max_iterations")
     except BudgetExhausted as exc:
         control.monitor.finish(exc.reason)
-    except FloatingPointError:
-        control.monitor.finish("numerical_failure")
+    except FloatingPointError as exc:
+        control.fail(exc)
     return output()

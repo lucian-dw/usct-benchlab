@@ -70,6 +70,39 @@ def circular_sound_speed(
     return image
 
 
+def build_surrogate_tof_case(
+    grid, geometry, sound_speed_mps, reference_sound_speed_mps, case_id, *, source
+):
+    """Generate model-matched Siddon observations from an explicit medium.
+
+    Images use [y,x], distances meters, sound speed m/s and delay seconds.
+    Truth is retained for evaluation, never read by a reconstruction algorithm.
+    """
+    speed = np.asarray(sound_speed_mps, dtype=float)
+    if speed.shape != grid.shape or not np.isfinite(speed).all() or np.any(speed <= 0):
+        raise ValueError("sound speed must be positive, finite and match the grid")
+    if not np.isfinite(reference_sound_speed_mps) or reference_sound_speed_mps <= 0:
+        raise ValueError("reference sound speed must be positive and finite")
+    projector = StraightRayProjector.from_grid_geometry(grid, geometry)
+    delta = projector.forward(1 / speed - 1 / reference_sound_speed_mps).reshape(
+        projector.ray_shape
+    )
+    valid = (
+        np.linalg.norm(geometry.tx_pos_m[:, None] - geometry.rx_pos_m[None], axis=-1)
+        > 0
+    )
+    return USCTCase(
+        case_id=case_id,
+        grid=grid,
+        geometry=geometry,
+        measurement=MeasurementSpec(
+            domain="features", delta_tof_s=delta, valid_mask=valid
+        ),
+        ground_truth=GroundTruthSpec(sound_speed_mps=speed),
+        metadata={**source, "reference_sound_speed_mps": reference_sound_speed_mps},
+    )
+
+
 def make_sound_speed_case(
     *,
     case_id: str = "synthetic_circular_sos",
@@ -91,21 +124,13 @@ def make_sound_speed_case(
         radius_m=inclusion_radius_m,
         center_m=inclusion_center_m,
     )
-    projector = StraightRayProjector.from_grid_geometry(grid, geometry)
-    delta_slowness = (1.0 / sound_speed) - (1.0 / background_mps)
-    delta_tof_s = projector.forward(delta_slowness).reshape(
-        (n_transducers, n_transducers)
-    )
-    valid_mask = ~np.eye(n_transducers, dtype=bool)
-    return USCTCase(
-        case_id=case_id,
-        grid=grid,
-        geometry=geometry,
-        measurement=MeasurementSpec(
-            domain="features", delta_tof_s=delta_tof_s, valid_mask=valid_mask
-        ),
-        ground_truth=GroundTruthSpec(sound_speed_mps=sound_speed),
-        metadata=stamp_measurement_metadata(
+    return build_surrogate_tof_case(
+        grid,
+        geometry,
+        sound_speed,
+        background_mps,
+        case_id,
+        source=stamp_measurement_metadata(
             {
                 "case_type": "synthetic_oracle",
                 "synthetic": True,
@@ -131,49 +156,37 @@ def make_sound_speed_case(
     )
 
 
-def make_synthetic_smoke_subset(
+def prepare_synthetic_demo(
     out_root: str | Path,
     *,
     shape: tuple[int, int] = (24, 24),
     n_transducers: int = 24,
+    background_mps: float = 1500.0,
+    inclusion_mps: float = 1450.0,
+    inclusion_radius_m: float = 0.008,
 ) -> list[dict[str, object]]:
-    """Write small deterministic sound-speed cases for local smoke benchmarks."""
-
+    """Write a deterministic circular phantom with model-matched ToF (no RNG)."""
     root = Path(out_root)
-    case_dir = root / "cases"
-    case_dir.mkdir(parents=True, exist_ok=True)
-    cases = [
-        make_sound_speed_case(
-            case_id="synthetic_homogeneous_sos",
-            shape=shape,
-            n_transducers=n_transducers,
-            inclusion_mps=1500.0,
-        ),
-        make_sound_speed_case(
-            case_id="synthetic_circular_sos",
-            shape=shape,
-            n_transducers=n_transducers,
-            inclusion_mps=1450.0,
-        ),
-    ]
-    records: list[dict[str, object]] = []
-    for case in cases:
-        path = case_dir / f"{case.case_id}.h5"
-        write_case_hdf5(case, path)
-        records.append(
-            {
-                "case_id": case.case_id,
-                "path": str(path),
-                "case_type": case.metadata.get("case_type", "synthetic_oracle"),
-                "benchmark_type": case.metadata.get(
-                    "benchmark_type", "synthetic_oracle"
-                ),
-                "shape": list(case.grid.shape),
-                "n_transducers": int(case.geometry.tx_pos_m.shape[0]),
-                "feature_provenance": case.metadata.get("feature_provenance", ""),
-            }
-        )
+    case = make_sound_speed_case(
+        shape=shape,
+        n_transducers=n_transducers,
+        background_mps=background_mps,
+        inclusion_mps=inclusion_mps,
+        inclusion_radius_m=inclusion_radius_m,
+    )
+    path = root / "cases" / f"{case.case_id}.h5"
+    write_case_hdf5(case, path)
+    records = [{"case_id": case.case_id, "path": str(path)}]
+    settings = {
+        "shape": list(shape),
+        "n_transducers": n_transducers,
+        "background_mps": background_mps,
+        "inclusion_mps": inclusion_mps,
+        "inclusion_radius_m": inclusion_radius_m,
+        "noise": "none",
+    }
     (root / "manifest.json").write_text(
-        json.dumps({"cases": records}, indent=2, sort_keys=True), encoding="utf-8"
+        json.dumps({"cases": records, "generation": settings}, indent=2),
+        encoding="utf-8",
     )
     return records
