@@ -51,3 +51,28 @@ P2 must migrate both sides together; do not remove BenchLab runtime identity
 checks independently while WUST still emits protocol v1. P3 then moves research
 assets to sibling `research_archive/`; P4 unifies configuration/controls; P5 keeps
 the specified existing numerical update ordering; P6 consolidates docs and tests.
+
+## P2: joint WUST protocol migration
+
+- Adapter sends one v2 reconstruction request with frequency input, initial map,
+  physical Hz schedule and effective update cap. WUST alone maps sorted
+  frequencies and sampling indices. Static discovery no longer launches a probe.
+- Removed source/build/dirty admission, input snapshots, array/file hashes and
+  whole-artifact write/readback. Data splits keep actual masks, indices and seeds.
+- WUST field definitions generate the seven schemas used by its serializers;
+  canonical artifacts no longer repeat derived grid coordinates. Optional model
+  history is disabled by default. Existing slowness updates are unchanged.
+- Shared non-square fixture powers the one cross-repository validation script.
+  GT independence stays in the light adapter test, not duplicate MATLAB runs.
+- Local full pytest: 710 passed, 1 skipped (25.06 s). Ruff passed; Black check
+  passed for 126 source/test/integration files; git diff --check passed.
+- A100 v2 CPU and GPU gates passed on 23x27, two TX/four RX, two updates from a
+  three-entry plan. Each used one fixture-generation and one reconstruction
+  MATLAB invocation. CPU reconstruction 11.48 s; GPU 15.30 s including startup.
+  Artifacts: /tmp/usct_refactor_v2_cpu and /tmp/usct_refactor_v2_gpu on A100.
+- A100 CPU/GPU FD, batching, resampling, ingestion, budget/failure tests passed;
+  log /tmp/usct_refactor_v2_math.log. WUST Python suite: 15 tests passed.
+
+Next: P3 archives the explicitly listed historical tools/assets outside both
+repositories and removes repeated CI/compatibility entrypoints. No new imaging
+campaign was run; these are small interface and numerical regression fixtures.

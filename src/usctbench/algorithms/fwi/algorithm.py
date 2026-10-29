@@ -1,10 +1,8 @@
-"""One production FWI path: USCTCase -> pinned WUST -> final sound speed."""
+"""One production FWI path: USCTCase -> WUST v2 -> final sound speed."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-import subprocess
 import tempfile
 import time
 
@@ -12,11 +10,10 @@ import numpy as np
 
 from usctbench.core.run_controls import BudgetCaps, RunControls
 from usctbench.core.schema import ReconstructionResult, ResultStatus
-from usctbench.metrics import compute_regional_image_metrics
 
-from .io import array_hash, file_hash, frequency_input, read_artifact, write_artifact
+from .io import frequency_input, read_artifact, write_artifact
 from .parameters import WUSTParameters
-from .runtime import Deadline, RuntimeFailure, WUSTClient, verify_provenance
+from .runtime import Deadline, RuntimeFailure, WUSTClient
 
 
 def validate_config(config, values=None):
@@ -106,46 +103,78 @@ def initialization(case, p):
     return initial, mask, policy
 
 
-def resolve_schedule(frequencies, requested):
-    frequencies = np.asarray(frequencies)
-    if (
-        frequencies.ndim != 1
-        or not len(frequencies)
-        or not np.isfinite(frequencies).all()
-        or np.any(frequencies <= 0)
-        or np.any(np.diff(frequencies) <= 0)
-    ):
-        raise ValueError(
-            "WUST canonical frequencies must be positive strictly increasing"
+def prepare_request(case, p, folder, max_updates):
+    initial, mask, mask_policy = initialization(case, p)
+    input_path = folder / "frequency.json"
+    initial_path = folder / "initial.json"
+    frequency_input(case, input_path)
+    write_artifact(
+        initial_path,
+        "wust.initial_model",
+        {"initialization": p.initialization, "mask_policy": mask_policy},
+        {"initial_mps": initial, "update_mask": mask},
+        {"initial_mps": "y,x", "update_mask": "y,x"},
+        {"initial_mps": "m/s", "update_mask": "1"},
+    )
+    numerical = {
+        key: getattr(p, key)
+        for key in (
+            "backend",
+            "max_update_mps",
+            "step_damping",
+            "source_batch_size",
+            "pml_strength",
+            "pml_m",
+            "filter_cutoff",
+            "filter_order",
         )
-    hz = frequencies.tolist() if requested is None else list(requested)
-    lookup = {value: i + 1 for i, value in enumerate(frequencies)}
-    if any(value not in lookup for value in hz):
-        raise ValueError(
-            "Schedule frequency must exactly match WUST canonical frequencies"
-        )
-    return hz, [lookup[value] for value in hz]
-
-
-def benchlab_identity():
-    root = Path(__file__).resolve().parents[4]
-
-    def git(*args):
-        try:
-            return subprocess.check_output(
-                ["git", "-C", str(root), *args],
-                text=True,
-                stderr=subprocess.DEVNULL,
-                timeout=2,
-            ).strip()
-        except (OSError, subprocess.SubprocessError):
-            return None
-
-    status = git("status", "--porcelain")
-    return {
-        "git_sha": git("rev-parse", "HEAD"),
-        "dirty": None if status is None else bool(status),
     }
+    numerical.update(
+        bounds_mps=list(p.sound_speed_bounds_mps),
+        stencil_bounds=list(p.stencil_bounds_mps or p.sound_speed_bounds_mps),
+        wavenumber=p.wavenumber_model,
+    )
+    if p.dispersion is not None:
+        numerical["dispersion"] = p.dispersion
+    return {
+        "schema": "wust.request",
+        "schema_version": 2,
+        "operation": "reconstruct",
+        "input_manifest": str(input_path),
+        "initial_manifest": str(initial_path),
+        "output_manifest": str(folder / "reconstruction.json"),
+        "config": numerical,
+        "frequency_schedule_hz": p.frequency_schedule_hz,
+        "max_updates": max_updates,
+        "save_history": False,
+    }
+
+
+def read_result(path, case, backend):
+    doc, arrays = read_artifact(path, "wust.reconstruction")
+    speed = arrays["c_mps"]
+    spec = doc["arrays"]["c_mps"]
+    if (
+        spec["axes"] != "y,x"
+        or spec["units"] != "m/s"
+        or speed.shape != case.grid.shape
+        or speed.dtype != np.float64
+        or not np.isfinite(speed).all()
+        or np.any(speed <= 0)
+    ):
+        raise ValueError("Invalid final WUST model; no resizing or clipping permitted")
+    meta = doc["metadata"]
+    if meta.get("environment", {}).get("backend") != backend:
+        raise RuntimeFailure(
+            "incompatible_runtime", "WUST backend differs; no fallback permitted"
+        )
+    if (
+        meta.get("completion", {}).get("reason")
+        not in ("zero_updates", "caller_truncated_schedule", "schedule_complete")
+        or meta["completion"].get("converged") is not False
+    ):
+        raise ValueError("Invalid WUST completion semantics")
+    return speed, meta
 
 
 class WUSTFWIAlgorithm:
@@ -170,178 +199,51 @@ class WUSTFWIAlgorithm:
             )
             controls = config.run_controls or RunControls()
             caps = BudgetCaps.model_validate(config.budget_caps or {})
-            provisional = controls.capped(caps, default_iterations=0)
-            deadline = Deadline(provisional.max_elapsed_s, started=started)
+            # Resolve budget amounts, not physical frequency indices. WUST alone
+            # maps the complete Hz schedule and truncates it after preparation.
+            default_iterations = (
+                len(p.frequency_schedule_hz)
+                if p.frequency_schedule_hz is not None
+                else (
+                    0
+                    if case.measurement.frequencies_hz is None
+                    else len(case.measurement.frequencies_hz)
+                )
+            )
+            resolved = controls.capped(caps, default_iterations=default_iterations)
+            deadline = Deadline(resolved.max_elapsed_s, started=started)
             base = p.scratch_root or config.parameters.get("_run_output_dir")
             if base is not None:
                 Path(base).mkdir(parents=True, exist_ok=True)
             folder = Path(tempfile.mkdtemp(prefix="wust-", dir=base)).resolve()
-            initial, mask, mask_policy = initialization(case, p)
-            input_path, initial_path = (
-                folder / "frequency.json",
-                folder / "initial.json",
-            )
-            input_doc = frequency_input(case, input_path)
-            write_artifact(
-                initial_path,
-                "wust.initial_model",
-                {"initialization": p.initialization, "mask_policy": mask_policy},
-                {"initial_mps": initial, "update_mask": mask},
-                {"initial_mps": "y,x", "update_mask": "y,x"},
-                {"initial_mps": "m/s", "update_mask": "1"},
-            )
+            request = prepare_request(case, p, folder, resolved.max_iterations)
             client = WUSTClient(p, deadline, folder)
-            admission = client.admit()
-            canonical_path = folder / "measurements.json"
-            client.invoke(
-                {
-                    "schema": "wust.request",
-                    "schema_version": 1,
-                    "operation": "ingest_frequency",
-                    "input_manifest": str(input_path),
-                    "output_manifest": str(canonical_path),
-                    "config": {},
-                }
-            )
-            canonical, arrays = read_artifact(canonical_path, "wust.measurements")
-            verify_provenance(canonical["metadata"].get("runtime_provenance", {}))
-            if (
-                canonical["arrays"]["frequencies_hz"]["axes"] != "frequency"
-                or canonical["arrays"]["frequencies_hz"]["units"] != "Hz"
-            ):
-                raise ValueError("Invalid canonical frequency axes/units")
-            requested, full = resolve_schedule(
-                arrays["frequencies_hz"], p.frequency_schedule_hz
-            )
-            resolved = controls.capped(caps, default_iterations=len(full))
-            schedule = full[: min(len(full), resolved.max_iterations)]
-            resolved = resolved.model_copy(update={"max_iterations": len(schedule)})
-            runtime_config = {
-                key: getattr(p, key)
-                for key in (
-                    "backend",
-                    "max_update_mps",
-                    "step_damping",
-                    "source_batch_size",
-                    "pml_strength",
-                    "pml_m",
-                    "filter_cutoff",
-                    "filter_order",
-                )
-            }
-            runtime_config.update(
-                bounds_mps=list(p.sound_speed_bounds_mps),
-                stencil_bounds=list(p.stencil_bounds_mps or p.sound_speed_bounds_mps),
-                wavenumber=p.wavenumber_model,
-            )
-            if p.dispersion is not None:
-                runtime_config["dispersion"] = p.dispersion
-            output_path = folder / "reconstruction.json"
-            client.invoke(
-                {
-                    "schema": "wust.request",
-                    "schema_version": 1,
-                    "operation": "reconstruct",
-                    "input_manifest": str(canonical_path),
-                    "initial_manifest": str(initial_path),
-                    "output_manifest": str(output_path),
-                    "config": runtime_config,
-                    "schedule": schedule,
-                    "planned_schedule_length": len(full),
-                }
-            )
-            output, result_arrays = read_artifact(output_path, "wust.reconstruction")
-            c = result_arrays["c_mps"]
-            meta = output["metadata"]
-            verify_provenance(meta.get("runtime_provenance", {}))
-            if (
-                output["arrays"]["c_mps"]["axes"] != "y,x"
-                or output["arrays"]["c_mps"]["units"] != "m/s"
-            ):
-                raise ValueError("Invalid final-model axes/units")
-            if (
-                c.shape != case.grid.shape
-                or c.dtype != np.float64
-                or not np.isfinite(c).all()
-                or np.any(c <= 0)
-            ):
-                raise ValueError(
-                    "Invalid authoritative WUST final model; no resizing allowed"
-                )
-            if (
-                meta.get("completed_updates") != len(schedule)
-                or meta.get("executed_schedule") != schedule
-            ):
-                raise ValueError("WUST completed schedule differs from request")
-            expected_reason = (
-                "zero_updates"
-                if not schedule
-                else (
-                    "caller_truncated_schedule"
-                    if len(schedule) < len(full)
-                    else "schedule_complete"
-                )
-            )
-            if (
-                meta.get("completion", {}).get("reason") != expected_reason
-                or meta["completion"].get("converged") is not False
-            ):
-                raise ValueError("Invalid WUST completion semantics")
-            if meta.get("environment", {}).get("backend") != p.backend:
-                raise RuntimeFailure(
-                    "incompatible_runtime",
-                    "WUST backend differs; no fallback permitted",
-                )
+            capability = client.admit()
+            client.invoke(request)
+            speed, meta = read_result(request["output_manifest"], case, p.backend)
+            reason = meta["completion"]["reason"]
+            complete = reason == "schedule_complete"
             metrics = {
                 "forward_model": "WUST_Helmholtz",
                 "final_data_residual": None,
-                "stop_reason": (
-                    "schedule_complete"
-                    if expected_reason == "schedule_complete"
-                    else "max_iterations"
-                ),
-                "termination_category": (
-                    "completion" if expected_reason == "schedule_complete" else "budget"
-                ),
+                "stop_reason": "schedule_complete" if complete else "max_iterations",
+                "termination_category": "completion" if complete else "budget",
                 "converged": False,
-                "completed_iterations": len(schedule),
+                "completed_iterations": meta["completed_updates"],
                 "wust": meta,
-                "runtime_admission": admission,
-                "requested_schedule_hz": requested,
-                "canonical_frequencies_hz": arrays["frequencies_hz"].tolist(),
-                "full_index_schedule": full,
-                "executed_index_schedule": schedule,
+                "runtime_version": capability.get("runtime_version"),
+                "requested_schedule_hz": p.frequency_schedule_hz,
+                "canonical_frequencies_hz": meta["canonical_frequencies_hz"],
+                "executed_frequencies_hz": meta["executed_frequencies_hz"],
                 "run_controls": controls.model_dump(),
                 "budget_caps": caps.model_dump(),
                 "resolved_run_policy": resolved.model_dump(),
-                "parameter_schema_version": "usct.wust.parameters.v1",
-                "benchlab": benchlab_identity(),
-                "input_hashes": {
-                    "frequency_manifest": file_hash(input_path),
-                    "canonical_manifest": file_hash(canonical_path),
-                    "initial_model": array_hash(initial),
-                    "update_mask": array_hash(mask),
-                    "grid_geometry": hashlib_geometry(case),
-                    "frequency_arrays": input_doc["arrays_sha256"],
-                },
-                "output_hashes": {
-                    "final_model": array_hash(c),
-                    "manifest": file_hash(output_path),
-                    "arrays": output["arrays_sha256"],
-                },
             }
-            metrics.update(
-                compute_regional_image_metrics(
-                    c,
-                    case.ground_truth.sound_speed_mps,
-                    **config.parameters.get("image_evaluation", {}),
-                )
-            )
             deadline.remaining()
             return ReconstructionResult(
                 algorithm=self.name,
                 case_id=case.case_id,
-                sound_speed_mps=c,
+                sound_speed_mps=speed,
                 metrics=metrics,
                 runtime_s=time.monotonic() - started,
                 artifacts={"wust_directory": str(folder)},
@@ -363,16 +265,3 @@ class WUSTFWIAlgorithm:
                 },
                 artifacts={} if folder is None else {"wust_directory": str(folder)},
             )
-
-
-def hashlib_geometry(case):
-    import hashlib
-
-    facts = {
-        "shape": case.grid.shape,
-        "spacing_m": case.grid.spacing_m,
-        "origin_m": case.grid.origin_m,
-        "tx": array_hash(case.geometry.tx_pos_m),
-        "rx": array_hash(case.geometry.rx_pos_m),
-    }
-    return hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()

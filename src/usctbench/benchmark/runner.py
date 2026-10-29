@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import glob
-import hashlib
 import json
 import math
 import numpy as np
@@ -37,17 +36,6 @@ from usctbench.viz import write_preview_png
 from usctbench.metrics import compute_regional_image_metrics
 
 _ENV_DEFAULT_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}")
-
-
-def _implementation_digest():
-    """Fingerprint actual package sources, including uncommitted development code."""
-    root = Path(__file__).resolve().parents[1]
-    digest = hashlib.sha256()
-    for path in sorted(root.rglob("*")):
-        if path.suffix in {".py", ".m"} and path.is_file():
-            digest.update(path.relative_to(root).as_posix().encode())
-            digest.update(b"\0" + path.read_bytes() + b"\0")
-    return digest.hexdigest()
 
 
 def load_algorithm_config(path: str | Path) -> AlgorithmConfig:
@@ -104,7 +92,6 @@ def run_algorithm_case(
     algorithm_for_report = algorithm_name
     config_for_report = str(config_path)
     memory_before_mib = _process_peak_rss_mib()
-    implementation_before = _implementation_digest()
     resolved_config = None
     case: USCTCase | None = None
     started = time.perf_counter()
@@ -141,12 +128,6 @@ def run_algorithm_case(
     result.runtime_s = time.perf_counter() - started
     result.metrics["stages"] = stages
     memory_after_mib = _process_peak_rss_mib()
-    implementation_after = _implementation_digest()
-    result.metrics["implementation"] = {
-        "source_sha256_at_start": implementation_before,
-        "source_changed_during_run": implementation_before != implementation_after,
-        "source_sha256_at_finish": implementation_after,
-    }
     result.metrics["resolved_config"] = resolved_config
     if case is not None:
         for key, value in _feature_qc_metrics(case).items():

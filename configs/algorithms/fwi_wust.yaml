@@ -12,4 +12,4 @@ parameters:
   frequency_schedule_hz: null
 metadata:
   purpose: explicit_demo_profile_not_calibrated_preset
-  note: Adjust physical bounds and PML for the supplied computational grid; GPU is required.
+  note: Adjust physical bounds and PML for the supplied grid; select CPU or GPU in deployment.

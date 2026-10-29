@@ -1,4 +1,4 @@
-"""Pinned WUST subprocess boundary; no numerical code or CPU fallback."""
+"""Versioned WUST subprocess boundary; no numerical code or CPU fallback."""
 
 from __future__ import annotations
 
@@ -10,25 +10,6 @@ import subprocess
 import sys
 import threading
 import time
-
-WUST_SHA = "79e347015be64cca88bacf591b4eed0952398800"
-WUST_VERSION = "0.2.0-dev.1"
-WUST_MANIFEST = "18fa31fd4cf5e44965bfc1250a4f73785d77f4af23ae40401a3e1afe73c94e4e"
-
-
-def verify_provenance(provenance):
-    expected = {
-        "git_sha": WUST_SHA,
-        "runtime_version": WUST_VERSION,
-        "dirty": False,
-        "source_manifest_verified": True,
-        "source_manifest_sha256": WUST_MANIFEST,
-    }
-    if any(provenance.get(key) != value for key, value in expected.items()):
-        raise RuntimeFailure(
-            "incompatible_runtime",
-            "WUST result/probe identity differs from approved pin",
-        )
 
 
 class RuntimeFailure(RuntimeError):
@@ -57,7 +38,7 @@ class WUSTClient:
         self.folder = Path(folder)
         root = parameters.runtime_root or os.environ.get("USCT_WUST_ROOT")
         if not root:
-            raise RuntimeFailure("incompatible_runtime", "Set approved USCT_WUST_ROOT")
+            raise RuntimeFailure("incompatible_runtime", "Set USCT_WUST_ROOT")
         self.root = Path(root).resolve(strict=True)
         self.launcher = self.root / "Runtime/python/wust_runtime.py"
         self.counter = 0
@@ -139,86 +120,18 @@ class WUSTClient:
 
     def admit(self):
         info = self.command(["describe", "--json"])
-        provenance = info.get("provenance", {})
-        expected = {
-            "wust.request",
-            "wust.frequency_input",
-            "wust.measurements",
-            "wust.reconstruction",
-        }
         if (
             info.get("schema") != "wust.capabilities"
-            or info.get("schema_version") != 1
-            or info.get("runtime_name") != "WUST"
-            or info.get("runtime_version") != WUST_VERSION
-            or any(info.get("schemas", {}).get(name) != 1 for name in expected)
-            or provenance.get("git_sha") != WUST_SHA
-            or provenance.get("dirty") is not False
-            or provenance.get("source_manifest_verified") is not True
-            or provenance.get("source_manifest_sha256") != WUST_MANIFEST
-            or info.get("sound_speed_reconstruction", {}).get("supported") is not True
-            or info.get("attenuation_reconstruction", {}).get("supported") is not False
-            or not {"ingest_frequency", "reconstruct"}
-            <= set(info.get("operations", []))
-            or info.get("profiles", {}).get("gpu") != "gpu_complex64"
-            or info.get("fourier_sign") != -1
-            or info.get("source_scale")
-            != {
-                "method": "per_tx_per_frequency_complex_least_squares",
-                "minimum_fitting_receivers": 2,
-                "requires_water_reference": False,
-                "requires_source_spectrum": False,
-            }
-            or info.get("budgets")
-            != {
-                "resolved_schedule": True,
-                "hard_timeout_s": True,
-                "forward_call_cap": False,
-                "adjoint_call_cap": False,
-                "update_rtol": False,
-                "online_convergence": False,
-            }
-            or info.get("iteration_unit") != "frequency_schedule_update"
+            or info.get("schema_version") != 2
+            or "reconstruct" not in info.get("operations", [])
+            or "wust.frequency_input"
+            not in info.get("input_schemas", {}).get("reconstruct", [])
+            or self.parameters.backend not in info.get("profiles", {})
         ):
             raise RuntimeFailure(
-                "incompatible_runtime", f"WUST must be clean approved SHA {WUST_SHA}"
+                "incompatible_runtime", "WUST v2 reconstruction capability required"
             )
-        probe = self.command(
-            [
-                "describe",
-                "--json",
-                "--probe",
-                "--matlab",
-                self.parameters.matlab_executable,
-                "--timeout-s",
-                str(self.deadline.remaining()),
-            ]
-        )
-        verify_provenance(probe.get("provenance", {}))
-        environment = probe.get("environment", {})
-        backend = self.parameters.backend
-        if environment.get(f"{backend}_available") is not True:
-            raise RuntimeFailure(
-                "incompatible_runtime",
-                f"Requested {backend} unavailable: {environment}",
-            )
-        if backend == "gpu":
-            mex = environment.get("mex", [])
-            if len(mex) != 2 or any(
-                not m.get("available")
-                or not m.get("sha256")
-                or Path(m["path"]).resolve().parent != self.root / "Runtime/solver"
-                for m in mex
-            ):
-                raise RuntimeFailure(
-                    "incompatible_runtime", "Approved runtime CUDA MEX required"
-                )
-        return {
-            "static": info,
-            "environment": environment,
-            "role": "production" if backend == "gpu" else "reference",
-            "approved_for_production": backend == "gpu",
-        }
+        return info
 
     def invoke(self, request):
         path = self.folder / f"{request['operation']}.request.json"

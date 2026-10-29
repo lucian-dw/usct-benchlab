@@ -9,13 +9,11 @@ import pytest
 
 from usctbench.algorithms.fwi import algorithm as module
 from usctbench.algorithms.fwi.io import (
-    array_hash,
     frequency_input,
     read_artifact,
     write_artifact,
 )
 from usctbench.algorithms.fwi.parameters import WUSTParameters
-from usctbench.algorithms.fwi.runtime import WUST_SHA, WUST_VERSION, WUST_MANIFEST
 from usctbench.core.algorithm_specs import make_agent_config, SPECS
 from usctbench.core.schema import (
     AlgorithmConfig,
@@ -80,16 +78,9 @@ def config(tmp_path):
 
 
 class FakeClient:
-    """Deterministic protocol stub. Canonicalization here is test-only."""
+    """Deterministic protocol stub. Fixed output; no copied geometry or Fourier normalization."""
 
     requests = []
-    provenance = {
-        "git_sha": WUST_SHA,
-        "runtime_version": WUST_VERSION,
-        "dirty": False,
-        "source_manifest_verified": True,
-        "source_manifest_sha256": WUST_MANIFEST,
-    }
 
     def __init__(self, p, deadline, folder):
         self.p, self.deadline, self.folder = p, deadline, folder
@@ -100,45 +91,19 @@ class FakeClient:
     def invoke(self, req):
         self.deadline.remaining()
         self.requests.append(copy.deepcopy(req))
-        if req["operation"] == "ingest_frequency":
-            doc, a = read_artifact(req["input_manifest"], "wust.frequency_input")
-            order = np.argsort(a["frequencies_hz"])
-            p = a["pressure"]
-            if doc["metadata"]["fourier_sign"] == 1:
-                p = p.conj()
-            p = p[order].transpose(1, 2, 0)
-            m = np.broadcast_to(a["mask"], a["pressure"].shape)[order].transpose(
-                1, 2, 0
-            )
-            p = np.where(m, p, 0)
-            return write_artifact(
-                req["output_manifest"],
-                "wust.measurements",
-                {"fourier_sign": -1, "runtime_provenance": self.provenance},
-                {"Y": p, "mask": m, "frequencies_hz": a["frequencies_hz"][order]},
-                {
-                    "Y": "tx,rx,frequency",
-                    "mask": "tx,rx,frequency",
-                    "frequencies_hz": "frequency",
-                },
-                {"Y": "unknown", "mask": "1", "frequencies_hz": "Hz"},
-            )
         _, a = read_artifact(req["initial_manifest"], "wust.initial_model")
-        n = len(req["schedule"])
+        n = min(req["max_updates"], 3)
         c = a["initial_mps"].copy() + a["update_mask"] * n
         reason = (
             "zero_updates"
             if not n
-            else (
-                "caller_truncated_schedule"
-                if n < req["planned_schedule_length"]
-                else "schedule_complete"
-            )
+            else ("caller_truncated_schedule" if n < 3 else "schedule_complete")
         )
         meta = {
-            "runtime_provenance": self.provenance,
             "completed_updates": n,
-            "executed_schedule": req["schedule"],
+            "executed_frequencies_hz": [100000.0, 100000.0, 120000.0][:n],
+            "canonical_frequencies_hz": [100000.0, 120000.0],
+            "planned_schedule_length": 3,
             "completion": {"reason": reason, "converged": False},
             "environment": {"backend": self.p.backend},
             "records": [{"loss_before_update": 1.0} for _ in range(n)],
@@ -176,11 +141,19 @@ def test_schedule_and_budget_mapping(wave_case, config, count, cap, expected, re
     result = module.WUSTFWIAlgorithm().run(wave_case, config)
     assert result.status == "success", result.failure_reason
     assert result.metrics["completed_iterations"] == expected
-    assert result.metrics["resolved_run_policy"]["max_iterations"] == expected
+    assert result.metrics["resolved_run_policy"]["max_iterations"] == min(
+        v for v in (count if count is not None else 3, cap) if v is not None
+    )
     assert result.metrics["stop_reason"] == reason
     assert result.metrics["converged"] is False
     assert result.metrics["final_data_residual"] is None
-    assert FakeClient.requests[-1]["schedule"] == [1, 1, 2][:expected]
+    assert len(FakeClient.requests) == 1
+    assert FakeClient.requests[0]["operation"] == "reconstruct"
+    assert FakeClient.requests[0]["frequency_schedule_hz"] == [
+        100000.0,
+        100000.0,
+        120000.0,
+    ]
 
 
 def test_input_geometry_sign_axes_masks_and_no_gt_leak(wave_case, config, tmp_path):
@@ -206,9 +179,8 @@ def test_input_geometry_sign_axes_masks_and_no_gt_leak(wave_case, config, tmp_pa
             Path(second.artifacts["wust_directory"]) / (name + ".json"),
             "wust.frequency_input" if name == "frequency" else "wust.initial_model",
         )
-        assert {k: array_hash(v) for k, v in a.items()} == {
-            k: array_hash(v) for k, v in b.items()
-        }
+        for key in a:
+            np.testing.assert_array_equal(a[key], b[key])
     np.testing.assert_array_equal(first.sound_speed_mps, second.sound_speed_mps)
 
 
@@ -229,8 +201,7 @@ def test_deadline_is_shared_and_failure_has_no_image(wave_case, config, monkeypa
 
     class SlowClient(FakeClient):
         def invoke(self, req):
-            if req["operation"] == "ingest_frequency":
-                clock[0] += 61
+            clock[0] += 61
             return super().invoke(req)
 
     monkeypatch.setattr(module, "WUSTClient", SlowClient)
@@ -273,8 +244,6 @@ def test_agent_and_runtime_admission_contract():
         ).parameters["initial_sound_speed_mps"]
         == 1490.0
     )
-    with pytest.raises(ValueError):
-        module.resolve_schedule([1.0, 2.0], [1.01])
 
 
 def test_unknown_convention_and_invalid_mask_fail(wave_case, tmp_path):
@@ -294,7 +263,7 @@ def test_tiny_fwi_loss_decreases(synthetic_case):
 
 @pytest.mark.parametrize(
     "corruption",
-    ["axes", "units", "shape", "pin", "backend", "schedule", "convergence"],
+    ["axes", "units", "shape", "backend", "convergence"],
 )
 def test_corrupt_runtime_result_never_becomes_success(
     wave_case, config, monkeypatch, corruption
@@ -309,12 +278,8 @@ def test_corrupt_runtime_result_never_becomes_success(
                         "units": "mm/s",
                         "shape": [27, 23],
                     }[corruption]
-                elif corruption == "pin":
-                    output["metadata"]["runtime_provenance"] = {"git_sha": "wrong"}
                 elif corruption == "backend":
                     output["metadata"]["environment"]["backend"] = "cpu"
-                elif corruption == "schedule":
-                    output["metadata"]["executed_schedule"] = [1]
                 else:
                     output["metadata"]["completion"]["converged"] = True
                 Path(req["output_manifest"]).write_text(json.dumps(output))
@@ -344,7 +309,7 @@ def test_explicit_map_empty_schedule_and_frequency_mask(wave_case, config):
 
 @pytest.mark.parametrize(
     "mutation",
-    ["missing_reference", "wrong_map_shape", "empty_mask", "unknown_schedule"],
+    ["missing_reference", "wrong_map_shape", "empty_mask"],
 )
 def test_invalid_scientific_input_fails(wave_case, config, mutation):
     if mutation == "missing_reference":
@@ -355,8 +320,6 @@ def test_invalid_scientific_input_fails(wave_case, config, mutation):
         config.parameters["update_mask"] = np.zeros(
             wave_case.grid.shape, dtype=bool
         ).tolist()
-    else:
-        config.parameters["frequency_schedule_hz"] = [100001.0]
     result = module.WUSTFWIAlgorithm().run(wave_case, config)
     assert result.status == "failed" and result.sound_speed_mps is None
 

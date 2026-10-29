@@ -15,7 +15,7 @@ def register_fwi_algorithms(*, replace: bool = False) -> None:
         "fwi_wust",
         WUSTFWIAlgorithm,
         specification=SPECS["fwi_wust"],
-        description="Production sound-speed FWI through pinned WUST CUDA runtime.",
+        description="Sound-speed FWI through the independent WUST v2 runtime.",
         tags=("fwi", "full_wave", "wust"),
         replace=replace,
     )

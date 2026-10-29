@@ -310,7 +310,7 @@ SPECS = {
     "fwi_wust": AlgorithmSpecification(
         "fwi_wust",
         "full_wave",
-        "2-D frequency-domain sound-speed FWI through the pinned WUST CUDA runtime; no attenuation reconstruction.",
+        "2-D frequency-domain sound-speed FWI through the WUST v2 runtime; no attenuation reconstruction.",
         (
             Variant(
                 "wust",
@@ -324,7 +324,7 @@ SPECS = {
                 ),
                 runtime_requirements=(
                     "MATLAB",
-                    "approved_pinned_WUST_CUDA_Block_LU",
+                    "WUST_v2_MATLAB_explicit_CPU_or_CUDA_Block_LU",
                 ),
                 limitations=(
                     "GPU is production; CPU is reference/debug only. No CPU fallback.",

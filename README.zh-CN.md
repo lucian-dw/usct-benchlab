@@ -164,10 +164,10 @@ ToF demo 套件中 Bent 属于跨模型 smoke，不是匹配 Eikonal 的数值�
 
 ## WUST FWI
 
-生产路线为 **`fwi_wust → 维护中的 WUST runtime → MATLAB/CUDA`**。使用 [lucian-dw/WaveformInversionUST](https://github.com/lucian-dw/WaveformInversionUST) 的批准版本 `79e347015be64cca88bacf591b4eed0952398800`（runtime `0.2.0-dev.1`，schema 1）。未经适配的上游 checkout 不能直接替代；WUST 保持独立，不反向依赖 BenchLab。
+生产路线为 **`fwi_wust → 维护中的 WUST runtime → MATLAB/CUDA`**。使用支持协议 2 的 [lucian-dw/WaveformInversionUST](https://github.com/lucian-dw/WaveformInversionUST)，一次 MATLAB 调用完成已有压力观测的准备和声速重建。WUST 保持独立，不反向依赖 BenchLab。
 
 ```bash
-export USCT_WUST_ROOT=/path/to/approved/WaveformInversionUST
+export USCT_WUST_ROOT=/path/to/WaveformInversionUST
 python "$USCT_WUST_ROOT/Runtime/python/wust_runtime.py" describe --json
 usct describe-algorithm fwi_wust --json
 usct run fwi_wust --case /path/to/frequency_case.h5 \

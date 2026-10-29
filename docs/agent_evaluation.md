@@ -21,7 +21,7 @@ for other acquisitions; it is not a general-purpose anatomical segmenter.
 PSNR and SSIM use one range from the finite **full GT**, shared across methods
 and regions, or an explicit positive protocol range. They never use each
 reconstruction's contrast range. SSIM averages complete valid windows of up to
-7 x 7 pixels, with a documented global-SSIM fallback for very small/thin masks.
+7 x 7 pixels. Insufficient valid windows produce null SSIM with an explicit status.
 Thus exterior pixels cannot alter tissue scores. Nonfinite reconstruction
 values in the water are still a numerical failure, not hidden by the mask.
 
@@ -54,7 +54,7 @@ training as well. Reverse-only channels are marked unused; receiver, frequency,
 and joint validation masks are disjoint. Empty training sets, duplicate/out-of-
 range indices, invalid weights and misspelled options fail explicitly.
 
-The split records indices, seed, counts, and a SHA-256 of the masks. A split used
+The split records indices, seed and counts and retains its read-only masks. A split used
 for model selection or early stopping is **validation**, not an untouched test
 set. Independent final testing requires a separately reserved acquisition/case.
 In particular, fitting a source spectrum or warm start on the entire measured

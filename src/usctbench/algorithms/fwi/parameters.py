@@ -70,7 +70,7 @@ class WUSTParameters(Parameters):
         None, "Expert mask, never inferred from GT; WUST validates PML clearance."
     )
     runtime_root: str | None = parameter(
-        None, "Approved WUST checkout; null uses USCT_WUST_ROOT.", exposure="internal"
+        None, "WUST protocol-2 checkout; null uses USCT_WUST_ROOT.", exposure="internal"
     )
     matlab_executable: str = parameter(
         "matlab", "Deployment-owned MATLAB executable.", exposure="internal"

@@ -2,27 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
 import h5py
 import numpy as np
-
-
-def file_hash(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def array_hash(array):
-    value = np.ascontiguousarray(array)
-    digest = hashlib.sha256(str((value.shape, value.dtype.str)).encode())
-    digest.update(value.tobytes())
-    return digest.hexdigest()
 
 
 def write_artifact(path, schema, metadata, arrays, axes, units):
@@ -53,10 +37,9 @@ def write_artifact(path, schema, metadata, arrays, axes, units):
             descriptors[key] = spec
     manifest = {
         "schema": schema,
-        "schema_version": 1,
+        "schema_version": 2,
         "metadata": metadata,
         "arrays_file": data.name,
-        "arrays_sha256": file_hash(data),
         "arrays": descriptors,
     }
     with path.open("x") as stream:
@@ -70,15 +53,15 @@ def read_artifact(path, schema):
     if (
         doc.get("schema") != schema
         or type(doc.get("schema_version")) is not int
-        or doc["schema_version"] != 1
+        or doc["schema_version"] != 2
     ):
         raise ValueError("Incompatible WUST result schema")
     filename = doc["arrays_file"]
     if Path(filename).name != filename:
         raise ValueError("WUST array artifact must be a sibling file")
     data = (path.parent / filename).resolve(strict=True)
-    if data.parent != path.parent.resolve() or file_hash(data) != doc["arrays_sha256"]:
-        raise ValueError("WUST artifact hash/location mismatch")
+    if data.parent != path.parent.resolve():
+        raise ValueError("WUST artifact location mismatch")
     arrays = {}
     with h5py.File(data, "r") as handle:
         for key, spec in doc["arrays"].items():

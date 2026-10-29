@@ -1,101 +1,83 @@
 # WUST full-wave inversion
 
-`fwi_wust -> pinned WUST runtime -> MATLAB -> CUDA Block-LU` is the only
-production FWI path. CPU is reference/debug only, never an automatic fallback.
-Ordinary installation and CI require neither MATLAB nor GPU. Reconstruction is
-2-D sound-speed-only; no diffusion runtime or attenuation reconstruction is included.
-
-`TinyFWIAlgorithm` remains directly importable from
-`usctbench.algorithms.fwi.tiny` for mathematical regression tests only. It is
-not registered as a CLI algorithm or exposed through Agent discovery.
+`fwi_wust` calls the independent maintained WUST runtime. One v2 reconstruction
+request starts one MATLAB process, prepares supplied observations, resolves the
+physical frequency schedule and runs sound-speed FWI. It never generates
+observations from ground truth. MATLAB/GPU are not normal Python CI dependencies.
 
 ## Deployment
 
-Use clean `lucian-dw/WaveformInversionUST` at exactly
-`79e347015be64cca88bacf591b4eed0952398800` (version `0.2.0-dev.1`, schema 1).
-SHA and verified source manifest are authoritative, not a moving branch.
-Build the maintained CUDA MEX on the deployment host. This development pin is
-not itself final release certification.
+Install `lucian-dw/WaveformInversionUST` with protocol **2**, NumPy and h5py in the
+Python environment, and MATLAB on the host. Build WUST's CUDA MEX for GPU use.
+Select CPU or GPU explicitly; there is no automatic backend fallback.
 
 ```bash
-export USCT_WUST_ROOT=/path/to/approved/WaveformInversionUST
+export USCT_WUST_ROOT=/path/to/WaveformInversionUST
 python "$USCT_WUST_ROOT/Runtime/python/wust_runtime.py" describe --json
-usct describe-algorithm fwi_wust --json
-usct run fwi_wust \
-  --case /path/to/frequency_case.h5 \
-  --config configs/algorithms/fwi_wust.yaml \
-  --out runs/single_fwi
+usct run fwi_wust --case /path/to/frequency_case.h5 \
+  --config configs/algorithms/fwi_wust.yaml --out runs/single_fwi
 ```
 
-The example demonstrates syntax, not calibrated settings. Explicitly resolve
-sound-speed bounds and PML thickness for your grid. Expert YAML may configure
-`matlab_executable`, `cuda_visible_devices`, `runtime_root`, `scratch_root`,
-and reference-only `backend: cpu`. These controls are hidden from Agent admission.
+The example profile is not experimentally calibrated. Resolve bounds and PML for
+the actual grid. Deployment owns the runtime root, MATLAB executable, device and
+scratch directory; these are not autonomous Agent parameters. Version discovery
+is static. No source hash, build manifest, approved revision or dirty-tree gate
+is required.
 
-## Existing observations
+## Input and preparation
 
-Supply complex total pressure `freq_data[frequency,tx,rx]`, positive unique
-`frequencies_hz`, and an explicit binary `valid_mask[tx,rx]` or
-`valid_mask[frequency,tx,rx]`. Valid zeros remain data. Travel times,
-scattered-only fields, water ratios and phase-only measurements are not accepted.
+- `freq_data[frequency,tx,rx]`: complex **total** pressure.
+- `frequencies_hz`: positive unique frequencies, with an explicit binary
+  `valid_mask[tx,rx]` or `[frequency,tx,rx]`. Valid zero observations remain data.
+- Image grid `[y,x]`, metric spacing `[dy,dx]`, pixel-edge origin. BenchLab swaps
+  position columns from its `[y,x]` to WUST's `[x,y]` exactly once.
+- `pressure_contract`: `fourier_sign`, `real_pressure`,
+  `pressure_type: total_pressure`, `data_units`, `spectrum_normalization`.
 
-Case metadata must include `pressure_contract` with `fourier_sign` (-1 or +1),
-`real_pressure`, `pressure_type: total_pressure`, `data_units`, and
-`spectrum_normalization`, using WUST-supported declarations. The documented
-pressure-preserving k-Wave importer supplies an explicit positive-DTFT quadrature;
-a time-harmonic sign alone cannot establish the transform convention.
+WUST owns frequency sorting, mask application, Fourier conjugation, snapping and
+MATLAB indices. A +1 transform can be conjugated only for declared real RF.
+ToF, scattered pressure and pressure ratios are not total-pressure FWI inputs.
+WUST fits a complex source scale per TX and frequency; it does not require a
+Born source spectrum or water reference.
 
-BenchLab writes generic frequency input with image axes [y,x], spacing [dy,dx],
-pixel-edge origin, and exactly one physical-coordinate swap from public [y,x]
-to [x,y]. WUST ingestion owns sorting, pressure canonicalization, Fourier
-conversion, snapping and MATLAB indexing. GT never creates/modifies observations.
-WUST fits complex source scale per TX/frequency; neither water reference nor
-Born source spectrum is required.
+Initialization is a declared reference speed, explicit scalar or expert map.
+Maps must match grid and bounds without resizing or clipping. The default update
+mask excludes PML plus one maximum spacing from the edges; an expert may supply
+an explicit mask. WUST rejects a mask entering its PML/boundary. GT is absent
+from reconstruction and reserved for evaluation.
 
-## Initialization and update region
+## Schedule and stopping
 
-Agent initialization is `reference` (requires case
-`reference_sound_speed_mps`) or `scalar` with `initial_sound_speed_mps`.
-Experts can supply `initialization: map` and `initial_map_mps`.
-Maps must match exact grid/bounds without resizing or clipping. No arbitrary
-artifact resolver is advertised.
+`frequency_schedule_hz: null` means each sorted available frequency once.
+Repeated Hz entries mean repeated updates. An explicit empty plan or zero
+iteration budget makes no updates. MATLAB maps exact physical Hz values to
+indices, then truncates the full plan by the effective `max_updates` budget.
 
-The default scientific update mask excludes pixels within PML thickness plus
-one maximum grid spacing of each image edge. Experts may override `update_mask`.
-WUST independently validates numerical/PML constraints and never silently crops
-an invalid request. GT never defines the mask.
+One update optimizes full slowness `s=1/c`, measured in s/m, and records
+`norm(s_new-s_old)/norm(s_old)` over the update mask. This diagnostic does not
+activate a convergence threshold. Schedule completion is completion, not
+convergence. Truncation reports `max_iterations`. The mandatory elapsed-time
+deadline covers preparation, launch, solve and result reading; timeout kills the
+owned process group and reports failure, not a completed image. Forward/adjoint
+caps and non-null `update_rtol` are unsupported.
 
-## Schedules and completion
+## Outputs and validation
 
-`frequency_schedule_hz` uses exact matches against WUST's canonical frequencies.
-Null means one update per available frequency; repetitions repeat updates.
-Empty schedule or zero iteration budget yields validated initialization only.
+The authoritative `c_mps[y,x]` is float64. Each record's loss/residual is evaluated
+**before** its frequency update; unavailable final-model residual remains null.
+History is optional at the runtime level. Results record actual software version,
+backend, precision, schedule, consumed updates and logs, without array digests or
+whole-array write/readback passes.
 
-Executed updates are the minimum of schedule length, requested max_iterations,
-and budget cap max_iterations. One required monotonic elapsed-time budget covers
-serialization, discovery/probe, ingestion, reconstruction and parsing.
-Timeout terminates the runtime and returns failure with budget semantics, not
-a success image. Forward/adjoint-call caps, non-null update_rtol, legacy stopping,
-online numerical convergence and validation selection are unsupported.
+The one cross-repository acceptance command shares WUST's coherent fixture and
+checks a non-square grid, masks, Fourier sign, physical schedule and loss decrease:
 
-Optimization variable: slowness. Update variable: full slowness in s/m.
-Relative L2 change over the declared update mask is normalized by the previous
-slowness norm and is diagnostic only. One frequency-schedule item equals one
-complete update. Schedule completion is not convergence. Truncation and zero
-updates report max_iterations with budget semantics.
+```bash
+python scripts/validate_wust_integration.py \
+  --runtime "$USCT_WUST_ROOT" --matlab /path/to/matlab \
+  --backend cpu --out /absolute/new/acceptance-directory
+```
 
-## Results and validation
-
-Authoritative float64 c_mps[y,x] maps directly to the result. Per-update loss
-and residual are **before-update diagnostics**, not final-model residuals.
-Unavailable final residual remains null. GT is used only for post-run metrics.
-
-Results retain records, resolved config, schedules, budgets, exact source
-identity, MATLAB/GPU/CUDA/MEX facts, and input/output hashes. Interchange files
-and logs stay in the run's wust_directory, outside source-control assets.
-
-`scripts/validate_wust_integration.py` runs the real cross-repository gate on an
-independently generated coherent fixture. Normal tests use protocol stubs.
-Fresh-MEX provenance, GPU numerical checks, CPU/GPU comparisons and representative
-deployment-size reconstruction are release gates; CPU and tiny runs alone do
-not establish production certification.
+It runs fixture generation separately, then one reconstruction. Choose `--backend
+gpu` for the GPU gate. Small CPU/GPU acceptance proves this declared numerical
+path, not clinical validity or deployment-scale performance.

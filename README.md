@@ -164,10 +164,10 @@ The ToF demo suites also run Bent as a cross-model smoke, not matched-Eikonal va
 
 ## WUST FWI
 
-Production path: **`fwi_wust → maintained WUST runtime → MATLAB/CUDA`**. Use [lucian-dw/WaveformInversionUST](https://github.com/lucian-dw/WaveformInversionUST) at approved SHA `79e347015be64cca88bacf591b4eed0952398800` (runtime `0.2.0-dev.1`, schema 1). Pristine upstream is not interchangeable. WUST remains independent and does not import BenchLab.
+Production path: **`fwi_wust → maintained WUST runtime → MATLAB/CUDA`**. Use [lucian-dw/WaveformInversionUST](https://github.com/lucian-dw/WaveformInversionUST) with protocol 2. One MATLAB invocation prepares supplied pressure and reconstructs sound speed. WUST remains independent and does not import BenchLab.
 
 ```bash
-export USCT_WUST_ROOT=/path/to/approved/WaveformInversionUST
+export USCT_WUST_ROOT=/path/to/WaveformInversionUST
 python "$USCT_WUST_ROOT/Runtime/python/wust_runtime.py" describe --json
 usct describe-algorithm fwi_wust --json
 usct run fwi_wust --case /path/to/frequency_case.h5 \
@@ -278,7 +278,7 @@ Inspect stopping/failure records as well as images. WUST interchange files and l
 - Missing algorithm: check discovery; old FWI and Tiny ids are not public algorithms.
 - No matching cases: check the quoted `USCT_*_CASE_GLOB` and converted files.
 - Rejected pressure input: inspect domain, calibration, axes, mask and Fourier convention; do not relabel ToF as pressure.
-- FWI unavailable: verify the pinned runtime, MATLAB/CUDA/MEX; no silent CPU fallback.
+- FWI unavailable: verify protocol-2 runtime availability and the requested MATLAB/CUDA/MEX backend; no silent CPU fallback.
 - NaN/Inf or line-search failure: inspect units and numerical diagnostics before changing settings.
 - Missing plots: install `.[viz]`.
 

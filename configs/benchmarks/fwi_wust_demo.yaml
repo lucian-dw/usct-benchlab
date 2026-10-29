@@ -6,5 +6,3 @@ algorithms:
   - name: fwi_wust
     config: configs/algorithms/fwi_wust.yaml
 min_cases: 1
-min_records: 1
-expected_statuses: [success]

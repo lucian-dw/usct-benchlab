@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 
 import numpy as np
@@ -217,9 +216,7 @@ def make_data_split(
     }
     if not np.any(masks["train"]):
         raise ValueError("holdout leaves no training observations")
-    digest = hashlib.sha256(str(obs.shape).encode())
     for value in masks.values():
-        digest.update(np.packbits(value).tobytes())
         value.setflags(write=False)
     weight.setflags(write=False)
     metadata = {
@@ -227,7 +224,6 @@ def make_data_split(
         "receiver_indices": receivers.tolist(),
         "frequency_indices": frequencies.tolist(),
         "reciprocal_tx_excluded": excluded_tx.tolist(),
-        "mask_sha256": digest.hexdigest(),
         "counts": {name: int(mask.sum()) for name, mask in masks.items()},
         "invalid_or_zero_weight_count": int(obs.size - active.sum()),
         "holdout_role": "validation_not_final_test",

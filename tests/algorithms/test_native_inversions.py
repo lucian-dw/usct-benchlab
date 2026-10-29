@@ -132,10 +132,7 @@ def test_heldout_values_do_not_change_training_trajectory(physics, algorithm):
     assert a.status == b.status == "success"
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
     np.testing.assert_allclose(a.metrics["residual_curve"], b.metrics["residual_curve"])
-    assert (
-        a.metrics["evaluation_split"]["mask_sha256"]
-        == b.metrics["evaluation_split"]["mask_sha256"]
-    )
+    assert a.metrics["evaluation_split"] == b.metrics["evaluation_split"]
 
 
 @pytest.mark.parametrize(
