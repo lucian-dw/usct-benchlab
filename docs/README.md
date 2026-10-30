@@ -7,5 +7,4 @@
 - [Agent API](agent_algorithm_api.md) and [parameters](parameter_contract.md).
 - [Evaluation](evaluation.md) and [result lifecycle](result_lifecycle.md).
 - [WUST FWI](fwi.md): independent runtime deployment and invocation.
-- [Development](development.md), [numerical test index](physics_validation.md).
-- [References](references.bib) and [research archive](research_index.md).
+- [References](references.bib).

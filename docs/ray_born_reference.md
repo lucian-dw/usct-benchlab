@@ -35,5 +35,4 @@ upstream r-Wave ray-shooting choices.
 Implementation: [ray_born.py](../src/usctbench/operators/ray_born.py),
 [volume_integral.py](../src/usctbench/operators/volume_integral.py).
 Tests use a point-scatterer reference, an independent dense multiple-scattering
-system, an adjoint relation and a second-order remainder. Historical background
-studies are indexed in [research archive](research_index.md).
+system, an adjoint relation and a second-order remainder.

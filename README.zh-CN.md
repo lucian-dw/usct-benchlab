@@ -87,7 +87,7 @@ ToF 或复数声压。保存的 FWI 参考具有不同的采集历史、频率�
 | [evaluation/](src/usctbench/evaluation/)、[metrics.py](src/usctbench/metrics.py) | 观测划分、残差与图像指标 | `evaluation/data.py`、[metrics.py](src/usctbench/metrics.py) |
 | [benchmark/](src/usctbench/benchmark/) | 执行编排、产物保存与批量报告 | `runner.py`、`artifacts.py`、`report.py` |
 | [configs/](configs/)、[examples/](examples/)、[scripts/](scripts/) | 算法参考配置、评测套件与运行示例 | `configs/algorithms/`、`configs/benchmarks/` |
-| [docs/](docs/)、[tests/](tests/) | 技术说明与数值/API 验证 | [文档索引](docs/README.md)、[测试索引](docs/physics_validation.md) |
+| [docs/](docs/)、[tests/](tests/) | 技术说明与数值/API 验证 | [文档索引](docs/README.md)、[测试](tests/) |
 
 `core/`、`operators/` 等模块路径相对于 `src/usctbench/`；`configs/` 等顶层路径相对于仓库根目录。
 
@@ -291,19 +291,7 @@ usct run fwi_wust \
 
 WUST GPU 后端使用 Parallel Computing Toolbox 和已编译的 CUDA MEX 求解器。原生 Full-Green Born 通过 `deployment={"green_device": 0}` 选择 CuPy 设备。这两个设置分别控制各自算法的执行路径。完整部署说明见 [FWI 接入指南](docs/fwi.md)。
 
-## 添加新算法
-
-沿现有分层将新方法接入从观测到声速结果的完整流程：
-
-1. **写明数学定义。** 给出观测、未知量、单位、目标、约束、导数，以及恢复声速的映射。
-2. **声明参数。** 在 `algorithms/parameters.py` 或算法专属包中添加参数模型。
-3. **实现算子与更新。** 将物理映射放入 `operators/`，复用数学问题匹配的求解器，并在 `algorithms/` 中实现 `Algorithm.run(case, prepared)`。
-4. **注册方法。** 在 `core/algorithm_specs.py` 添加算法说明，在 `core/registry.py` 添加 `AlgorithmEntry`，并在 `configs/algorithms/` 提供参考 YAML。
-5. **验证行为。** 添加对应的独立数值参考和一个小型公开入口用例，记录运行命令与结果。
-
-上述 Python 模块路径相对于 `src/usctbench/`，`configs/algorithms/` 位于仓库根目录。[AGENTS.md](AGENTS.md) 与[开发指南](docs/development.md)规定项目共享的编写与验证方式。
-
-## 开发与文档
+## 文档与测试
 
 ```bash
 python -m pip install -e ".[dev,viz]"
@@ -312,7 +300,7 @@ ruff check src tests scripts
 pytest -q
 ```
 
-CPU 测试覆盖数值参考、伴随、导数、有界更新、数据转换和公开接口。MATLAB、GPU 与原生仿真的运行命令集中在[验证指南](docs/validation.md)。
+CPU 测试覆盖数值参考、伴随、导数、有界更新、数据转换和公开接口。MATLAB、GPU 与原生仿真的命令见 WUST [部署指南](https://github.com/lucian-dw/WaveformInversionUST/blob/main/Runtime/README.md)。
 
 | 阅读目的 | 文档 |
 | --- | --- |
@@ -320,7 +308,7 @@ CPU 测试覆盖数值参考、伴随、导数、有界更新、数据转换和�
 | 理解目标函数、离散与正则化 | [数学表述](docs/math_formulation.md)、[算法指南](docs/algorithms.md) |
 | 准备数据与源信息 | [数据集](docs/datasets.md)、[数据转换](docs/data_conversion.md) |
 | 配置 Agent 参数与预算 | [Agent API](docs/agent_algorithm_api.md)、[参数约定](docs/parameter_contract.md) |
-| 查看数值验证 | [物理验证索引](docs/physics_validation.md)、[验证命令](docs/validation.md) |
+| 查看数值验证 | [测试](tests/)、[FWI 部署](docs/fwi.md) |
 | 浏览全部技术文档 | [文档索引](docs/README.md) |
 
 ## 许可证与参考资料

@@ -53,13 +53,11 @@ execution and a host-supplied runtime with an elapsed-time limit.
 Run controls resolve request and host caps by intersection. No universal
 update_rtol is injected. See [evaluation](evaluation.md).
 
-Names removed during this refactor are listed once in [migration notes](../CHANGELOG.md);
-old YAML aliases are not permanent runtime APIs.
+Only the documented current names are supported; unknown parameters fail explicitly.
 
 Public `run` prepares the request once. A direct algorithm call must pass
 `prepare_config(name, request, case=case)`; it does not implicitly re-prepare.
-Already typed scientific parameters are reused, not parsed again. Configuration
-helpers that only forwarded registry lookup are removed: use
+Already typed scientific parameters are reused, not parsed again. Use
 `get_algorithm_entry(name).parameter_model(parameters)` and
 `get_algorithm_entry(name).default_iterations(parameters, case)` when inspecting
 the static entry directly.

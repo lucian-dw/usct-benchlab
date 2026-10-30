@@ -91,4 +91,4 @@ Perfect PSNR uses null plus a perfect-reconstruction status, keeping valid JSON.
 Missing GT returns unavailable image scores while data-domain evaluation remains
 possible. GT region masks affect reporting only.
 
-See [result lifecycle](result_lifecycle.md) and [numerical tests](physics_validation.md).
+See [result lifecycle](result_lifecycle.md) for saved outcome semantics.

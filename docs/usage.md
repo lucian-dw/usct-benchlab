@@ -22,7 +22,6 @@ workspace/
   WaveformInversionUST/
   data/
   runs/
-  research_archive/
 ~~~
 
 No Python API depends on a personal workspace path. CLI deployment flags may use

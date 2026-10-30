@@ -47,3 +47,18 @@ logs/
 .DS_Store
 .vscode/
 .idea/
+
+# Private development instructions and process records
+AGENTS.md
+CHANGELOG.md
+Changelog.md
+codex_goal_prompt.md
+.codex/
+.agents/
+/docs/development.md
+/docs/validation.md
+/docs/physics_validation.md
+/docs/research_index.md
+/docs/internal/
+/docs/review/
+/docs/validation/

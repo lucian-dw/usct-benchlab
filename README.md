@@ -90,7 +90,7 @@ A reconstruction follows four steps: prepare a case and configuration, assemble 
 | [evaluation/](src/usctbench/evaluation/), [metrics.py](src/usctbench/metrics.py) | Observation splits, residuals and image scores | `evaluation/data.py`, [metrics.py](src/usctbench/metrics.py) |
 | [benchmark/](src/usctbench/benchmark/) | Run orchestration, saved artifacts and suite reports | `runner.py`, `artifacts.py`, `report.py` |
 | [configs/](configs/), [examples/](examples/), [scripts/](scripts/) | Algorithm presets, suite definitions and runnable workflows | `configs/algorithms/`, `configs/benchmarks/` |
-| [docs/](docs/), [tests/](tests/) | Technical references and numerical/API checks | [Documentation index](docs/README.md), [test index](docs/physics_validation.md) |
+| [docs/](docs/), [tests/](tests/) | Technical references and numerical/API checks | [Documentation index](docs/README.md), [tests](tests/) |
 
 Module paths such as `core/` and `operators/` are relative to `src/usctbench/`. Top-level paths such as `configs/` are relative to the repository root.
 
@@ -294,19 +294,7 @@ Choose sound-speed bounds, PML width and a frequency schedule for the supplied g
 
 The WUST GPU backend uses Parallel Computing Toolbox and compiled CUDA MEX solvers. Native Full-Green Born selects a CuPy device through `deployment={"green_device": 0}`. These two settings select the execution path for their respective algorithms. See the [FWI integration guide](docs/fwi.md).
 
-## Adding an algorithm
-
-Use the existing layers to connect a new method from observations to a saved sound-speed image:
-
-1. **Define the mathematics.** Specify observations, unknowns, units, objective, constraints, derivative and the mapping back to sound speed.
-2. **Declare parameters.** Add the parameter model in `algorithms/parameters.py` or the algorithm's dedicated package.
-3. **Implement the operator and update.** Place physical maps in `operators/`, reuse matching solvers, and implement `Algorithm.run(case, prepared)` in `algorithms/`.
-4. **Register the method.** Add its specification in `core/algorithm_specs.py`, its `AlgorithmEntry` in `core/registry.py` and a reference YAML in `configs/algorithms/`.
-5. **Verify its behavior.** Add the relevant independent numerical reference and one small public-entry case, then document the command and result.
-
-Python module paths above are relative to `src/usctbench/`; `configs/algorithms/` is at the repository root. [AGENTS.md](AGENTS.md) and the [development guide](docs/development.md) define the shared coding and verification conventions.
-
-## Development and documentation
+## Documentation and tests
 
 ```bash
 python -m pip install -e ".[dev,viz]"
@@ -315,7 +303,7 @@ ruff check src tests scripts
 pytest -q
 ```
 
-CPU tests cover numerical references, adjoints, derivatives, constrained updates, data conversion and public interfaces. MATLAB, GPU and native simulation commands are collected in [validation](docs/validation.md).
+CPU tests cover numerical references, adjoints, derivatives, constrained updates, data conversion and public interfaces. MATLAB, GPU and native simulation commands are in the WUST [deployment guide](https://github.com/lucian-dw/WaveformInversionUST/blob/main/Runtime/README.md).
 
 | To learn about | Read |
 | --- | --- |
@@ -323,7 +311,7 @@ CPU tests cover numerical references, adjoints, derivatives, constrained updates
 | Objectives, discretizations and regularization | [Mathematics](docs/math_formulation.md), [algorithms](docs/algorithms.md) |
 | Data formats and source preparation | [Datasets](docs/datasets.md), [data conversion](docs/data_conversion.md) |
 | Agent configuration and budgets | [Agent API](docs/agent_algorithm_api.md), [parameter contract](docs/parameter_contract.md) |
-| Numerical checks | [Physics validation index](docs/physics_validation.md), [validation commands](docs/validation.md) |
+| Numerical checks | [Tests](tests/), [FWI deployment](docs/fwi.md) |
 | All technical documentation | [Documentation index](docs/README.md) |
 
 ## License and references

@@ -46,9 +46,7 @@ pressure residual magnitudes as one score.
 - FWI used 21 frequencies from 300 to 800 kHz, with three updates per frequency.
   This historical schedule is not a recommended band for every acquisition.
 
-[Saved metrics](assets/reconstruction/metrics.csv) ·
-[Historical source and evaluation record](assets/reconstruction/manifest.json).
-The manifest is retained study metadata, not a runtime admission mechanism.
+[Saved metrics](assets/reconstruction/metrics.csv).
 Raw observations and result arrays remain outside Git.
 
 ## Current plotting / 当前绘图入口
@@ -58,5 +56,5 @@ For new saved suites, use `scripts/render_examples.py --experiments ...
 experiment_id, algorithm and variant in its CSV. This general plotting command
 does not recreate the historical data or original study-specific evaluation.
 
-Current numerical and public-runtime evidence is in [validation](validation.md);
-the historical pictures are not substituted for those checks.
+These historical pictures illustrate saved reconstructions; they are not a
+substitute for the current numerical tests or a claim of clinical validation.

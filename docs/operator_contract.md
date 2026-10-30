@@ -62,4 +62,4 @@ Prepared numerical objects are reused internally. Public inputs validate shape,
 units, coordinates and conventions. Internal import paths point to canonical
 operators, not historical forward/adjoint wrappers.
 
-[Mathematics](math_formulation.md) · [test index](physics_validation.md)
+[Mathematics](math_formulation.md) · [algorithms](algorithms.md)
