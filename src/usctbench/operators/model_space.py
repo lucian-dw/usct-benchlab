@@ -80,6 +80,7 @@ class ReducedLinearOperator:
 
     def __init__(self, operator, basis, *, matrix=None):
         self.operator, self.basis = operator, basis
+        self.data_dtype = operator.data_dtype
         self.grid, self.n_pixels = basis.grid, int(np.prod(basis.shape))
         self.n_rays, self.ray_shape = operator.n_rays, operator.ray_shape
         self.sparse = matrix is not None

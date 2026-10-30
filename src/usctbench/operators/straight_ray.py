@@ -21,6 +21,7 @@ class StraightRayProjector:
     tx_pos_m: np.ndarray
     rx_pos_m: np.ndarray
     matrix: csr_array
+    data_dtype = np.dtype(np.float64)
 
     @property
     def storage_bytes(self):

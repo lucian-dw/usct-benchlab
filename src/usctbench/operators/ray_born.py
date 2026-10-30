@@ -151,6 +151,8 @@ class RayBornOperator:
     budget. Source-receiver self channels must be excluded by acquisition masks.
     """
 
+    data_dtype = np.dtype(np.complex128)
+
     def __init__(
         self,
         grid: GridSpec,

@@ -286,3 +286,14 @@ large-data rerun or clinical validation is included in this delivery.
   algorithm regressions. An initial command named nonexistent test files and
   collected nothing; the corrected directory-based command above was executed.
 - Next: F06 explicit operator data dtype and native linear-solver diagnostics.
+
+## Final taskbook F06
+
+- Straight/Eikonal/Born CPU/GPU Jacobians declare data_dtype; reduced operators
+  propagate it. Complex Jacobian with real residual now keeps imaginary rows.
+- Removed post-solve J/J* recomputation; inner diagnostics use native iterative
+  estimates. The later F08 unit centralizes their scale and scope semantics.
+- Focused linear/nonlinear, Bent, relinearized Born and reduced-model tests:
+  86 passed (2.60 s). An initial run found nine test doubles missing the newly
+  required dtype; their interfaces were migrated without removing assertions.
+- Next: F07 WUST update validation, then F08 ordinary scalar normalization.

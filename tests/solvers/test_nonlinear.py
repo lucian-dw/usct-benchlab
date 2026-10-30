@@ -22,6 +22,7 @@ from usctbench.operators.base import Linearization
 class _DenseForward:
     def __init__(self, matrix, reference):
         self.matrix, self.reference = matrix, reference
+        self.data_dtype = matrix.dtype
         self.states = []
         self.background_builds = self.eikonal_solves = 0
 
@@ -321,6 +322,7 @@ def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution(
                 jacobian.forward(model - initial).reshape(shape),
                 SimpleNamespace(
                     forward=jacobian.forward,
+                    data_dtype=jacobian.data_dtype,
                     adjoint=lambda y: jacobian.adjoint(y.ravel()),
                 ),
             )

@@ -18,6 +18,7 @@ class LinearOperator(Protocol):
     """
 
     grid: GridSpec
+    data_dtype: np.dtype
 
     def forward(self, image: np.ndarray) -> np.ndarray: ...
 

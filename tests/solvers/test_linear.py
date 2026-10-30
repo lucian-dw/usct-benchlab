@@ -14,6 +14,7 @@ from usctbench.operators.regularization import regularizer
 class DenseJacobian:
     def __init__(self, matrix, shape):
         self.matrix, self.shape = matrix, shape
+        self.data_dtype = matrix.dtype
 
     def forward(self, x):
         return self.matrix @ x.ravel()
@@ -190,3 +191,30 @@ def test_iteration_limit_is_not_convergence():
     assert info.iterations == 1
     assert not info.converged
     assert info.stop_reason == "iteration_limit"
+
+
+@pytest.mark.parametrize("method", ["normal_cg", "lsmr", "lsqr"])
+@pytest.mark.parametrize("reduced", [False, True])
+def test_complex_jacobian_real_observation_has_real_half_solution(method, reduced):
+    from usctbench.operators.model_space import ReducedLinearOperator
+
+    jacobian = DenseJacobian(np.array([[1 + 1j]]), (1, 1))
+    if reduced:
+        jacobian.n_rays, jacobian.ray_shape = 1, (1,)
+        basis = SimpleNamespace(
+            grid=None, shape=(1, 1), forward=lambda x: x, adjoint=lambda x: x
+        )
+        jacobian = ReducedLinearOperator(jacobian, basis)
+        assert jacobian.data_dtype == np.dtype(complex)
+    control = controls(np.ones(1))
+    result, info = solve_linearized(
+        jacobian,
+        np.ones(1),
+        np.zeros((1, 1)),
+        control,
+        weights=np.ones(1),
+        iterations=4,
+        method=method,
+    )
+    np.testing.assert_allclose(result, 0.5, rtol=1e-14)
+    assert info.converged

@@ -15,6 +15,12 @@
 
 ## Canonical numerical modules
 
+Linear operators declare `data_dtype` independently of a particular observation.
+Complex-valued Jacobians use both real and imaginary rows in real-model least
+squares even when the supplied residual happens to be real. Reduced operators
+preserve this declaration. Inner solvers report native residual estimates,
+without spending extra forward/adjoint work to recertify after termination.
+
 - **operators/straight_ray.py**: one CSR Siddon matrix. Forward $Ax$ and adjoint
   $A^\top y$ share identical ordering and lengths.
 - **operators/eikonal.py**: fast marching and its local linearization. A stored

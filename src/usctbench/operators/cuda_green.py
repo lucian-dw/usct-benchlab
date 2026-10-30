@@ -60,6 +60,8 @@ def solve_fields(solver, incident, device):
 class CudaBornJacobian:
     """GPU matrix products with bounded field cache; model/data API stays NumPy."""
 
+    data_dtype = np.dtype(np.complex128)
+
     def __init__(self, operator, device):
         import cupy as cp
 

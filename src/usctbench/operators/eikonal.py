@@ -99,6 +99,8 @@ def fast_march(
 class EikonalJacobian:
     """Frozen-active-set derivative with respect to slowness, not sound speed."""
 
+    data_dtype = np.dtype(np.float64)
+
     def __init__(self, model, tapes):
         self.model = model
         self.grid = model.grid

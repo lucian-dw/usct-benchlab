@@ -125,7 +125,6 @@ def _normal_step(
             active, q + damping * normal_regularizer(image, regularization), 0.0
         )
 
-    initial_rhs = rhs.copy()
     completed = 0
     for _ in range(iterations):
         if rr <= max(np.finfo(float).tiny, initial_rr * rtol**2):
@@ -146,15 +145,9 @@ def _normal_step(
         control.work.counts["inner_iterations"] = (
             control.work.counts.get("inner_iterations", 0) + 1
         )
-    # Recompute rather than reporting only the recursively updated CG residual.
-    # An iteration cap is not a certificate that the GN subproblem was solved.
-    true_residual = initial_rhs - normal_product(solution) if completed else initial_rhs
-    true_norm = float(norm(true_residual.ravel()))
-    if not np.isfinite(true_norm):
-        raise FloatingPointError("nonfinite recomputed normal-system residual")
     recursive_norm = float(norm(rhs.ravel()))
     denominator = initial_norm if initial_norm > 0 else 1.0
-    relative = true_norm / denominator
+    relative = recursive_norm / denominator
     # Keep the unscaled CG recurrence, but never certify a squared-norm underflow.
     squared_residual_underflow = (initial_rr == 0 and initial_norm > 0) or (
         rr == 0 and recursive_norm > 0
@@ -171,7 +164,7 @@ def _normal_step(
         iterations=completed,
         stop_reason=stop_reason,
         relative_residual=relative,
-        residual_norm=true_norm,
+        residual_norm=recursive_norm,
         converged=converged,
     )
 
@@ -209,7 +202,9 @@ def _augmented_step(
     residual = np.asarray(residual).reshape(precision.shape)
     selected = precision > 0
     sqrt_w = np.sqrt(precision[selected])
-    complex_data = np.iscomplexobj(residual) or np.iscomplexobj(residual)
+    complex_data = np.issubdtype(
+        jacobian.data_dtype, np.complexfloating
+    ) or np.iscomplexobj(residual)
     ndata, nmodel = sqrt_w.size, int(active.sum())
     data_rows = ndata * (2 if complex_data else 1)
     sqrt_damping = np.sqrt(damping)
@@ -322,10 +317,10 @@ def _augmented_step(
     options = dict(atol=atol, btol=btol, conlim=conlim)
     if method == "lsmr":
         result = lsmr(scaled, scaled_target, maxiter=iterations, **options)
-        z, code, completed, _, _, _, acond, _ = result
+        z, code, completed, normr, normar, _, acond, _ = result
     else:
         result = lsqr(scaled, scaled_target, iter_lim=iterations, **options)
-        z, code, completed, _, _, _, acond, _ = result[:8]
+        z, code, completed, normr, _, _, acond, normar = result[:8]
     control.work.counts["inner_iterations"] = control.work.counts.get(
         "inner_iterations", 0
     ) + int(completed)
@@ -333,9 +328,9 @@ def _augmented_step(
     with np.errstate(over="raise", invalid="raise"):
         free = checked(np.ldexp(normalized_free, rhs_exponent - operator_exponent))
 
-    true_residual = normalized.matvec(normalized_free) - scaled_target
-    normal_norm = norm(normalized.rmatvec(true_residual))
-    relative = float(normal_norm / initial_norm)
+    # Native estimates avoid unrequested post-solve J/J* calls. With nonuniform
+    # column scaling the normal residual belongs to the transformed system.
+    relative = float(normar / norm(scale * initial_gradient))
     converged = bool(code in {0, 1, 2, 4, 5} and relative <= rtol)
     reasons = {
         0: "zero_solution",
@@ -353,7 +348,7 @@ def _augmented_step(
         int(completed),
         reason,
         relative,
-        float(np.ldexp(norm(true_residual), rhs_exponent)),
+        float(np.ldexp(normr, rhs_exponent)),
         converged,
         int(code),
         float(acond),

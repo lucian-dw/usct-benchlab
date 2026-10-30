@@ -74,6 +74,7 @@ class _DenseForward:
         parent = self
 
         class Jacobian:
+            data_dtype = np.dtype(np.float64)
             grid = parent.grid
             ray_shape = parent.ray_shape
             n_rays = parent.n_rays
