@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from usctbench.core.config import prepared_run
 
 import numpy as np
 
@@ -141,7 +140,6 @@ class RayBornAlgorithm:
 
     name = "rwave_adapter"
 
-    @prepared_run
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
         p = config.parameters
         green_settings = {

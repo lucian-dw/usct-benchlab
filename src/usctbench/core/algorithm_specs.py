@@ -15,9 +15,8 @@ import json
 from usctbench.core.config import (
     default_iterations,
     parameter_model,
-    prepare_config,
 )
-from usctbench.core.run_controls import BUDGET_FIELDS, RunControls
+from usctbench.core.run_controls import RunControls
 from usctbench.core.schema import AlgorithmConfig
 
 
@@ -326,9 +325,10 @@ SPECS = {
 
 def budget_schema(variant):
     schema = RunControls.model_json_schema()
-    allowed = (
-        BUDGET_FIELDS if variant.id != "wust" else ("max_iterations", "max_elapsed_s")
-    )
+    from usctbench.core.registry import list_algorithms
+
+    entry = next(entry for entry in list_algorithms() if variant in entry.variants)
+    allowed = entry.supported_budgets
     schema["properties"] = {
         k: v for k, v in schema["properties"].items() if k in allowed
     }
@@ -341,10 +341,7 @@ def make_agent_config(
     *,
     variant=None,
     run_controls=None,
-    host_limits=None,
     trusted_parameters=None,
-    deployment=None,
-    case=None,
 ):
     """Only declared Agent knobs plus independent host-supplied context."""
     selected = SPECS[algorithm_id].variant(variant)
@@ -365,13 +362,7 @@ def make_agent_config(
         raise ValueError("unsupported Agent run control")
     model = parameter_model(algorithm_id, values)
     typed = model.model_validate_json(json.dumps(values, allow_nan=False), strict=True)
-    return prepare_config(
-        algorithm_id,
-        AlgorithmConfig(name=algorithm_id, parameters=typed, run_controls=controls),
-        case=case,
-        host_limits=host_limits,
-        deployment=deployment,
-    )
+    return AlgorithmConfig(name=algorithm_id, parameters=typed, run_controls=controls)
 
 
 def case_capabilities(
@@ -379,21 +370,11 @@ def case_capabilities(
     case,
     *,
     variant=None,
-    config=None,
     runtime_available=None,
 ):
     """Case facts are separate from static specifications and clinical validity."""
     selected = SPECS[algorithm_id].variant(variant)
-    resolved = prepare_config(
-        algorithm_id,
-        config or AlgorithmConfig(name=algorithm_id, parameters=selected.selectors),
-        case=case,
-    )
-    for key, value in selected.selectors.items():
-        if getattr(resolved.parameters, key) != value:
-            raise ValueError("case-bound config does not match requested variant")
     frequencies = case.measurement.frequencies_hz
-    policy = resolved.run_controls.model_dump()
     return {
         "schema_version": "usct.case_capabilities.v1",
         "algorithm_id": algorithm_id,
@@ -409,7 +390,5 @@ def case_capabilities(
         "runtime_availability_source": (
             "not_checked" if runtime_available is None else "deployment_reported"
         ),
-        "resolved_budgets": {key: policy[key] for key in BUDGET_FIELDS},
-        "resolved_run_policy": policy,
         "validation_is_independent_test": False,
     }

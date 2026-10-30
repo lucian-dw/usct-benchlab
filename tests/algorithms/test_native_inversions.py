@@ -1,5 +1,7 @@
 """End-to-end numerical inversion and hold-out isolation, not clinical validation."""
 
+from usctbench.core.config import prepare_config
+
 import numpy as np
 import pytest
 
@@ -55,7 +57,7 @@ def test_native_inversions_reduce_residual_and_need_no_truth(physics, algorithm)
         run_controls={"max_iterations": 5, "update_rtol": None, "objective_rtol": None},
         evaluation={"receiver_indices": [1]},
     )
-    result = algorithm().run(case, config)
+    result = algorithm().run(case, prepare_config(algorithm().name, config, case=case))
     assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["data_residual_reduction"] > 0.5
     assert result.metrics["evaluation"]["receiver"]["num_samples"] > 0
@@ -99,7 +101,9 @@ def test_heldout_values_do_not_change_training_trajectory(physics, algorithm):
         },
         evaluation={"receiver_indices": [1]},
     )
-    a, b = algorithm().run(case, config), algorithm().run(altered, config)
+    a, b = algorithm().run(
+        case, prepare_config(algorithm().name, config, case=case)
+    ), algorithm().run(altered, prepare_config(algorithm().name, config, case=altered))
     assert a.status == b.status in {"completed", "budget_exhausted"}
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
     np.testing.assert_allclose(a.metrics["residual_curve"], b.metrics["residual_curve"])
@@ -110,10 +114,14 @@ def test_frequency_holdout_does_not_train_or_leak_reciprocal_receiver():
     case = small_case("born")
     result = RayBornAlgorithm().run(
         case,
-        AlgorithmConfig(
-            parameters={"variant": "wkb_fixed"},
-            run_controls={"max_iterations": 4},
-            evaluation={"frequency_indices": [2], "receiver_indices": [1]},
+        prepare_config(
+            RayBornAlgorithm().name,
+            AlgorithmConfig(
+                parameters={"variant": "wkb_fixed"},
+                run_controls={"max_iterations": 4},
+                evaluation={"frequency_indices": [2], "receiver_indices": [1]},
+            ),
+            case=case,
         ),
     )
     assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
@@ -142,7 +150,12 @@ def test_bent_cgls_initialization_does_not_use_heldout_data():
         },
         evaluation={"receiver_indices": [1]},
     )
-    a, b = [BentRayAlgorithm().run(c, config) for c in (case, altered)]
+    a, b = [
+        BentRayAlgorithm().run(
+            c, prepare_config(BentRayAlgorithm().name, config, case=c)
+        )
+        for c in (case, altered)
+    ]
     assert a.status == b.status in {"completed", "budget_exhausted"}, a.failure_reason
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
     assert a.metrics["initialization_training_only"] is True

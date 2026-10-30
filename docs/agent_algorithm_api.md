@@ -15,18 +15,17 @@ config = make_agent_config(
     "straight_cgls",
     parameters={"sound_speed_bounds_mps": [1400.0, 1600.0]},
     run_controls={"max_iterations": 10},
-    host_limits={"max_iterations": 8, "max_elapsed_s": 60},
-    case=case,
 )
-facts = case_capabilities("straight_cgls", case, config=config)
-result = run("straight_cgls", case, config, "runs/agent_example")
+facts = case_capabilities("straight_cgls", case)
+result = run("straight_cgls", case, config, "runs/agent_example",
+             host_limits={"max_iterations": 8, "max_elapsed_s": 60})
 ~~~
 
 **describe** is static: model family, variant, observation requirements, allowed
 parameter schema/defaults, iteration unit, limitations and runtime requirements.
 It does not start MATLAB or probe hardware.
 
-**case_capabilities** adds frequencies, calibration presence and resolved policy.
+**case_capabilities** reports frequencies and calibration presence, never run policy.
 Presence is not validation of calibration units. Runtime availability is unknown
 unless supplied by the host.
 
@@ -36,7 +35,9 @@ by relaying an unvalidated Agent object. Host limits cap requests, and deploymen
 selects backend/runtime/scratch ownership.
 
 **run** owns preparation, GT exclusion, numerical execution, saving and optional
-evaluation/preview. Bare Algorithm.run is the numerical interface and can raise
+evaluation/preview. Direct callers first use `prepare_config(name, request, case=case,
+host_limits=limits, deployment=context)`, then `get_algorithm(name).run(case, prepared)`.
+Bare Algorithm.run consumes that prepared config and can raise
 original numerical exceptions; the public runner records failure stage/message.
 
 **evaluate(run_directory)** summarizes saved records without rerunning physics.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from usctbench.core.config import prepared_run
 
 import numpy as np
 
@@ -94,7 +93,6 @@ class BentRayAlgorithm:
 
     name = "bent_ray_gn"
 
-    @prepared_run
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
         p = config.parameters
         c0 = reference_sound_speed(case, config)

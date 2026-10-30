@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Manual BenchLab/WUST acceptance: one fixture generation, one reconstruction."""
 
+from usctbench.core.config import prepare_config
+
 import argparse
 import json
 from pathlib import Path
@@ -97,7 +99,9 @@ def main():
         },
     )
     (args.out / "config.json").write_text(config.model_dump_json(indent=2))
-    result = WUSTFWIAlgorithm().run(case, config)
+    result = WUSTFWIAlgorithm().run(
+        case, prepare_config(WUSTFWIAlgorithm().name, config, case=case)
+    )
     write_result_hdf5(result, args.out / "result.h5")
     (args.out / "metrics.json").write_text(json.dumps(result.metrics, indent=2))
     if result.status not in {"completed", "budget_exhausted"}:

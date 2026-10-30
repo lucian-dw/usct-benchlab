@@ -1,5 +1,7 @@
 """Nonlinear model acceptance, not just a frozen-Jacobian residual test."""
 
+from usctbench.core.config import prepare_config
+
 import numpy as np
 import pytest
 
@@ -45,7 +47,9 @@ def config(*, max_iterations=3, run_controls=None, evaluation=None, **parameters
 
 def test_rebuilds_background_and_accepts_only_true_nonlinear_decrease():
     case, _, _ = nonlinear_case()
-    result = RayBornAlgorithm().run(case, config())
+    result = RayBornAlgorithm().run(
+        case, prepare_config(RayBornAlgorithm().name, config(), case=case)
+    )
     assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     metrics = result.metrics
     assert metrics["nonlinear_background_updates"] >= 1, metrics
@@ -61,8 +65,14 @@ def test_nonlinear_holdout_is_not_used_for_updates_or_line_search():
     case, _, _ = nonlinear_case()
     changed = case.model_copy(deep=True)
     changed.measurement.freq_data[..., 1] *= 15j
-    original = RayBornAlgorithm().run(case, config(max_iterations=1))
-    altered = RayBornAlgorithm().run(changed, config(max_iterations=1))
+    original = RayBornAlgorithm().run(
+        case,
+        prepare_config(RayBornAlgorithm().name, config(max_iterations=1), case=case),
+    )
+    altered = RayBornAlgorithm().run(
+        changed,
+        prepare_config(RayBornAlgorithm().name, config(max_iterations=1), case=changed),
+    )
     assert original.status == altered.status in {"completed", "budget_exhausted"}
     np.testing.assert_array_equal(original.sound_speed_mps, altered.sound_speed_mps)
     assert (
@@ -76,9 +86,15 @@ def test_nonlinear_holdout_is_not_used_for_updates_or_line_search():
 )
 def test_source_broadcast_matches_explicit_frequency_tx_calibration(source):
     case, _, _ = nonlinear_case()
-    expected = RayBornAlgorithm().run(case, config(max_iterations=1))
+    expected = RayBornAlgorithm().run(
+        case,
+        prepare_config(RayBornAlgorithm().name, config(max_iterations=1), case=case),
+    )
     case.measurement.source_spectrum = np.asarray(source)
-    result = RayBornAlgorithm().run(case, config(max_iterations=1))
+    result = RayBornAlgorithm().run(
+        case,
+        prepare_config(RayBornAlgorithm().name, config(max_iterations=1), case=case),
+    )
     assert result.status == expected.status in {"completed", "budget_exhausted"}
     np.testing.assert_array_equal(result.sound_speed_mps, expected.sound_speed_mps)
 
@@ -87,7 +103,9 @@ def test_pressure_requires_source_calibration_or_independent_water():
     case, _, _ = nonlinear_case()
     case.measurement.source_spectrum = None
     with pytest.raises(ValueError, match="calibrated source_spectrum"):
-        RayBornAlgorithm().run(case, config())
+        RayBornAlgorithm().run(
+            case, prepare_config(RayBornAlgorithm().name, config(), case=case)
+        )
 
 
 def test_relative_regularization_is_invariant_to_pressure_units():
@@ -101,7 +119,10 @@ def test_relative_regularization_is_invariant_to_pressure_units():
         regularization_lambda=0.2,
         regularization="laplacian",
     )
-    a, b = (RayBornAlgorithm().run(c, cfg) for c in (case, other))
+    a, b = (
+        RayBornAlgorithm().run(c, prepare_config(RayBornAlgorithm().name, cfg, case=c))
+        for c in (case, other)
+    )
     assert a.status == b.status in {"completed", "budget_exhausted"}
     np.testing.assert_allclose(a.sound_speed_mps, b.sound_speed_mps, rtol=1e-10)
     np.testing.assert_allclose(
@@ -115,7 +136,9 @@ def test_underresolved_complex_inverse_grid_is_rejected():
     case, _, _ = nonlinear_case()
     case.grid.spacing_m = (0.005, 0.005)
     with pytest.raises(ValueError, match="underresolved"):
-        RayBornAlgorithm().run(case, config())
+        RayBornAlgorithm().run(
+            case, prepare_config(RayBornAlgorithm().name, config(), case=case)
+        )
 
 
 def test_phase_seed_and_pressure_updates_exclude_heldout_frequency():
@@ -151,7 +174,10 @@ def test_phase_seed_and_pressure_updates_exclude_heldout_frequency():
             "objective_rtol": None,
         },
     )
-    a, b = [RayBornAlgorithm().run(c, cfg) for c in (case, changed)]
+    a, b = [
+        RayBornAlgorithm().run(c, prepare_config(RayBornAlgorithm().name, cfg, case=c))
+        for c in (case, changed)
+    ]
     assert a.status == b.status in {"completed", "budget_exhausted"}, a.failure_reason
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
     assert a.metrics["initialization_qc"]["frequencies_hz"] == [100e3, 150e3, 200e3]
@@ -176,4 +202,6 @@ def test_invalid_initialization_settings_fail_explicitly(settings):
         # rejection now that variant-specific unused fields fail closed.
         candidate = AlgorithmConfig(parameters=settings)
     with pytest.raises(ValueError, match="initialization"):
-        RayBornAlgorithm().run(case, candidate)
+        RayBornAlgorithm().run(
+            case, prepare_config(RayBornAlgorithm().name, candidate, case=case)
+        )

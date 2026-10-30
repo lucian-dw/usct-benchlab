@@ -1,4 +1,6 @@
 import numpy as np
+
+from usctbench.core.config import prepare_config
 import pytest
 
 from usctbench.algorithms.straight import (
@@ -57,7 +59,9 @@ def test_model_prior_uses_no_gt_or_validation_for_updates_and_obeys_budget(name)
         "straight_sart": StraightRaySARTAlgorithm,
         "bent_ray_gn": BentRayAlgorithm,
     }[name]()
-    a, b = algo.run(case, config), algo.run(altered, config)
+    a, b = algo.run(case, prepare_config(algo.name, config, case=case)), algo.run(
+        altered, prepare_config(algo.name, config, case=altered)
+    )
     assert a.status == b.status in {"completed", "budget_exhausted"}, (
         a.failure_reason,
         b.failure_reason,

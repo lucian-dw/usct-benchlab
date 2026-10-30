@@ -11,62 +11,15 @@ import yaml
 
 
 def parameter_model(name, parameters=None):
-    from usctbench.algorithms.parameters import (
-        CGLSParameters,
-        SIRTParameters,
-        SARTParameters,
-        BentParameters,
-        BornParameters,
-        FixedBornParameters,
-    )
-    from usctbench.algorithms.fwi.parameters import WUSTParameters
+    from usctbench.core.registry import get_algorithm_entry
 
-    models = {
-        "straight_cgls": CGLSParameters,
-        "straight_sirt": SIRTParameters,
-        "straight_sart": SARTParameters,
-        "bent_ray_gn": BentParameters,
-        "rwave_adapter": BornParameters,
-        "fwi_wust": WUSTParameters,
-    }
-    variant = (
-        parameters.get("variant", "wkb_nonlinear")
-        if isinstance(parameters, dict)
-        else getattr(parameters, "variant", "wkb_nonlinear")
-    )
-    if name == "rwave_adapter" and variant in ("wkb_fixed", "full_green_fixed"):
-        return FixedBornParameters
-    try:
-        return models[name]
-    except KeyError as exc:
-        raise ValueError(f"unknown algorithm {name!r}") from exc
+    return get_algorithm_entry(name).parameter_model(parameters)
 
 
 def default_iterations(name, parameters=None, case=None):
-    if name == "rwave_adapter":
-        return (
-            30
-            if parameter_model(name, parameters).__name__ == "FixedBornParameters"
-            else 4
-        )
-    if name == "fwi_wust":
-        schedule = (
-            parameters.get("frequency_schedule_hz")
-            if isinstance(parameters, dict)
-            else parameters.frequency_schedule_hz
-        )
-        if schedule is not None:
-            return len(schedule)
-        if case is None:
-            return None
-        frequencies = case.measurement.frequencies_hz
-        return 0 if frequencies is None else len(frequencies)
-    return {
-        "straight_cgls": 30,
-        "straight_sirt": 50,
-        "straight_sart": 10,
-        "bent_ray_gn": 4,
-    }[name]
+    from usctbench.core.registry import get_algorithm_entry
+
+    return get_algorithm_entry(name).default_iterations(parameters, case)
 
 
 def prepare_config(name, config, *, case=None, host_limits=None, deployment=None):
@@ -101,8 +54,9 @@ def prepare_config(name, config, *, case=None, host_limits=None, deployment=None
         controls = controls.capped(host_limits, default_iterations=count)
     elif host_limits is not None:
         raise ValueError("case required to resolve inherited WUST frequency budget")
-    if name == "fwi_wust":
-        controls.validate_for_wust()
+    from usctbench.core.registry import get_algorithm_entry
+
+    get_algorithm_entry(name).validate_controls(controls)
     context = config.deployment
     if deployment is not None:
         overrides = Deployment.model_validate(deployment).model_dump(exclude_unset=True)
@@ -115,17 +69,6 @@ def prepare_config(name, config, *, case=None, host_limits=None, deployment=None
             "deployment": context,
         }
     )
-
-
-def prepared_run(function):
-    """Public algorithm calls use the same preparation as YAML/runner execution."""
-    from functools import wraps
-
-    @wraps(function)
-    def run(self, case, config):
-        return function(self, case, prepare_config(self.name, config, case=case))
-
-    return run
 
 
 _ENV_DEFAULT_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}")

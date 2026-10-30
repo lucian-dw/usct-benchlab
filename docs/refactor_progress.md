@@ -350,3 +350,15 @@ large-data rerun or clinical validation is included in this delivery.
 - Validation: 75 focused Eikonal/Born/native inversion tests passed. GPU numerical
   comparison will use the existing A100 entry at final integration.
 - Next: F12-F13 WUST curvature, decomposition reuse and direct slowness derivative.
+
+## Final taskbook F16
+
+- Removed the implicit preparation decorator. The public runner prepares once;
+  direct numerical callers now explicitly pass `prepare_config(...)` results.
+- Agent admission returns typed scientific parameters and requested budgets;
+  case/deployment/host intersection belongs only to run preparation. Case
+  capabilities contain facts, not policy. AlgorithmEntry owns model selection,
+  variant defaults and budget support. List JSON is a short catalog.
+- Migrated direct callers, integration script, admission tests and Agent docs.
+  Focused algorithm/CLI/solver/calibration tests: 167 passed; Ruff passed.
+- Next: F17 dataset reader ownership and pressure-contract preparation.

@@ -1,4 +1,6 @@
 import numpy as np
+
+from usctbench.core.config import prepare_config
 import pytest
 
 from usctbench.data.calibration import fit_water_source
@@ -56,10 +58,15 @@ def test_water_scales_jacobian_not_just_background_and_needs_no_truth():
         },
         evaluation={"receiver_indices": [1], "frequency_indices": [2]},
     )
-    fitted = RayBornAlgorithm().run(case, cfg)
+    fitted = RayBornAlgorithm().run(
+        case, prepare_config(RayBornAlgorithm().name, cfg, case=case)
+    )
     configured_case = case.model_copy(deep=True)
     configured_case.measurement.source_spectrum = source
-    configured = RayBornAlgorithm().run(configured_case, cfg)
+    configured = RayBornAlgorithm().run(
+        configured_case,
+        prepare_config(RayBornAlgorithm().name, cfg, case=configured_case),
+    )
     assert fitted.failure_reason is None, fitted.failure_reason
     assert configured.failure_reason is None, configured.failure_reason
     np.testing.assert_allclose(
@@ -70,5 +77,7 @@ def test_water_scales_jacobian_not_just_background_and_needs_no_truth():
     changed = case.model_copy(deep=True)
     changed.measurement.freq_data[..., 1] *= 8
     changed.measurement.freq_data[2] *= 11
-    isolated = RayBornAlgorithm().run(changed, cfg)
+    isolated = RayBornAlgorithm().run(
+        changed, prepare_config(RayBornAlgorithm().name, cfg, case=changed)
+    )
     np.testing.assert_array_equal(fitted.sound_speed_mps, isolated.sound_speed_mps)

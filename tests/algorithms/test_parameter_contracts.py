@@ -41,7 +41,9 @@ def test_models_have_metadata_and_reject_unknown(name, tmp_path):
     for admit in (
         lambda: prepare_config(name, config),
         lambda: prepare_config(None, path),
-        lambda: get_algorithm(name).run(case, config),
+        lambda: get_algorithm(name).run(
+            case, prepare_config(get_algorithm(name).name, config, case=case)
+        ),
     ):
         with pytest.raises(ValueError):
             admit()
@@ -158,7 +160,7 @@ def test_typed_boundary_preserves_reconstruction(name):
         run_controls={"max_iterations": 2, "update_rtol": None, "objective_rtol": None},
     )
     algorithm = get_algorithm(name)
-    raw = algorithm.run(case, config)
+    raw = algorithm.run(case, prepare_config(algorithm.name, config, case=case))
     typed = algorithm.run(case, prepare_config(name, config))
     assert (
         raw.status == typed.status in {"completed", "budget_exhausted"}
@@ -178,4 +180,4 @@ def test_conflicting_measurement_reference_fails_explicitly():
     case = make_sound_speed_case(shape=(8, 8), n_transducers=8, inclusion_mps=1500)
     config = AlgorithmConfig(parameters={"reference_sound_speed_mps": 1600})
     with pytest.raises(ValueError, match="measurement reference"):
-        algorithm().run(case, config)
+        algorithm().run(case, prepare_config(algorithm().name, config, case=case))

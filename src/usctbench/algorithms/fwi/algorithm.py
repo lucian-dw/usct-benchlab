@@ -8,7 +8,6 @@ import time
 
 import numpy as np
 
-from usctbench.core.config import prepared_run
 from usctbench.core.schema import ReconstructionResult, ResultStatus
 
 from .io import frequency_input, read_artifact, write_artifact
@@ -141,7 +140,6 @@ def read_result(path, case, backend):
 class WUSTFWIAlgorithm:
     name = "fwi_wust"
 
-    @prepared_run
     def run(self, case, config):
         started = time.monotonic()
         folder = None

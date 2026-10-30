@@ -91,10 +91,9 @@ class WUSTParameters(Parameters):
             if self.dispersion is None or set(self.dispersion) != {
                 "time_step_s",
                 "reference_speed_mps",
-                "model_reference_speed_mps",
             }:
                 raise ValueError(
-                    "LDR9 requires original simulator dt and both reference speeds"
+                    "LDR9 requires original simulator dt and reference speed"
                 )
         elif self.dispersion is not None:
             raise ValueError("dispersion is only supported with kwave-ldr9")

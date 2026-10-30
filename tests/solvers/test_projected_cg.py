@@ -75,10 +75,14 @@ def parameters(robust):
 def run(case, params, *, run_controls=None, evaluation=None):
     result = StraightRayCGLSAlgorithm().run(
         case,
-        AlgorithmConfig(
-            parameters=params,
-            run_controls={"max_iterations": 30, **(run_controls or {})},
-            evaluation=evaluation or {},
+        prepare_config(
+            StraightRayCGLSAlgorithm().name,
+            AlgorithmConfig(
+                parameters=params,
+                run_controls={"max_iterations": 30, **(run_controls or {})},
+                evaluation=evaluation or {},
+            ),
+            case=case,
         ),
     )
     assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
@@ -466,7 +470,9 @@ def test_huber_preconditioning_uses_only_training_data_and_global_budget():
         irls_max_inner_steps=2,
         coverage_preconditioning=True,
     )
-    first = StraightRayCGLSAlgorithm().run(case, cfg)
+    first = StraightRayCGLSAlgorithm().run(
+        case, prepare_config(StraightRayCGLSAlgorithm().name, cfg, case=case)
+    )
     changed_data = case.measurement.delta_tof_s.copy()
     changed_data[:, 2] *= 30
     second = StraightRayCGLSAlgorithm().run(
@@ -477,7 +483,17 @@ def test_huber_preconditioning_uses_only_training_data_and_global_budget():
                 )
             }
         ),
-        cfg,
+        prepare_config(
+            StraightRayCGLSAlgorithm().name,
+            cfg,
+            case=case.model_copy(
+                update={
+                    "measurement": case.measurement.model_copy(
+                        update={"delta_tof_s": changed_data}
+                    )
+                }
+            ),
+        ),
     )
     assert first.failure_reason is None, first.failure_reason
     np.testing.assert_array_equal(first.sound_speed_mps, second.sound_speed_mps)
@@ -491,7 +507,7 @@ def test_bound_projected_metrics_correspond_to_returned_image():
     algorithm = StraightRayCGLSAlgorithm
     case = small_case()
     cfg = config(algorithm, sound_speed_bounds_mps=[1499, 1501])
-    result = algorithm().run(case, cfg)
+    result = algorithm().run(case, prepare_config(algorithm().name, cfg, case=case))
     assert result.failure_reason is None, result.failure_reason
     assert np.min(result.sound_speed_mps) >= 1499 - 1e-10
     assert np.max(result.sound_speed_mps) <= 1501 + 1e-10

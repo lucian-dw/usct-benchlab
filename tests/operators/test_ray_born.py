@@ -74,6 +74,7 @@ def test_volume_convolution_matches_anisotropic_dense_nonperiodic_reference():
     dense[nonzero] = 0.25j * hankel1(0, k * distance[nonzero])
     # Independent quadrature for the singular equal-area disk self cell.
     radius = np.sqrt(np.prod(grid.spacing_m) / np.pi)
+
     def integral(r):
         return 0.25j * hankel1(0, k * r) * 2 * r / radius**2
 

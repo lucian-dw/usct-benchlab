@@ -20,7 +20,17 @@ def _print(value):
 def _list(args):
     entries = list_algorithms()
     if args.json:
-        _print([entry.describe() for entry in entries])
+        _print(
+            [
+                {
+                    "algorithm_id": entry.name,
+                    "family": entry.specification.family,
+                    "description": entry.description,
+                    "variants": [v.id for v in entry.variants],
+                }
+                for entry in entries
+            ]
+        )
     else:
         for entry in entries:
             print(f"{entry.name}: {entry.description}")

@@ -1,5 +1,7 @@
 """Agent schemas are executable permissions, not just a filtered help page."""
 
+from usctbench.core.config import prepare_config
+
 import json
 
 import numpy as np
@@ -75,10 +77,15 @@ def test_agent_types_enums_cross_checks_and_budget_boundary():
     config = make_agent_config(
         "straight_cgls",
         run_controls={"max_iterations": 3},
-        host_limits={"max_iterations": 1},
     )
     case = make_sound_speed_case(shape=(8, 8), n_transducers=8)
-    result = get_algorithm("straight_cgls").run(case, config)
+    assert config.run_controls.max_iterations == 3
+    config = prepare_config(
+        "straight_cgls", config, case=case, host_limits={"max_iterations": 1}
+    )
+    result = get_algorithm("straight_cgls").run(
+        case, prepare_config(get_algorithm("straight_cgls").name, config, case=case)
+    )
     assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     assert result.metrics["iterations"] <= 1
     assert result.metrics["stopping"]["resolved_policy"]["update_rtol"] is None
@@ -145,13 +152,14 @@ def test_case_bound_facts_and_policy_are_separate():
     bound = case_capabilities(
         "straight_cgls",
         case,
-        config=config,
     )
     assert "available_frequencies_hz" not in static
     assert bound["available_frequencies_hz"] == [150000, 250000]
     assert bound["runtime_available"] is None
-    assert bound["resolved_budgets"]["max_iterations"] == 2
-    assert bound["resolved_run_policy"]["min_iterations"] == 1
+    assert "resolved_budgets" not in bound and "resolved_run_policy" not in bound
+    prepared = prepare_config("straight_cgls", config, case=case)
+    assert prepared.run_controls.max_iterations == 2
+    assert prepared.run_controls.min_iterations == 1
 
 
 def test_json_stdout_cli_and_case_capabilities(capsys, tmp_path):

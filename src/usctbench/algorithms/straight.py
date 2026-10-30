@@ -14,7 +14,6 @@ from usctbench.algorithms.ray import (
     speed_bounds,
     target_delta_tof,
 )
-from usctbench.core.config import prepared_run
 from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, USCTCase
 from usctbench.operators.straight_ray import StraightRayProjector
 from usctbench.operators.model_space import (
@@ -224,7 +223,6 @@ def reconstruct(case, config, algorithm):
 class StraightRayCGLSAlgorithm:
     name = "straight_cgls"
 
-    @prepared_run
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
         return reconstruct(case, config, self.name)
 
@@ -232,7 +230,6 @@ class StraightRayCGLSAlgorithm:
 class StraightRaySIRTAlgorithm:
     name = "straight_sirt"
 
-    @prepared_run
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
         return reconstruct(case, config, self.name)
 
@@ -240,6 +237,5 @@ class StraightRaySIRTAlgorithm:
 class StraightRaySARTAlgorithm:
     name = "straight_sart"
 
-    @prepared_run
     def run(self, case: USCTCase, config: AlgorithmConfig) -> ReconstructionResult:
         return reconstruct(case, config, self.name)
