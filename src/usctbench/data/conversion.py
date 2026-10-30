@@ -36,7 +36,7 @@ def convert_speed_mat_volume(
     *,
     indices: list[int] | None = None,
     index_metadata: dict[int, dict[str, Any]] | None = None,
-    dataset_name: str | None = None,
+    dataset_name: str,
     sample_axis: int = 2,
     image_axes: str = "yx",
     sound_speed_units: str = "m/s",
@@ -141,129 +141,6 @@ def convert_speed_mat_volume(
                 record.update(extra_metadata)
             records.append(record)
     return records
-
-
-def speed_mat_metadata(mat_path: str | Path) -> dict[str, Any] | None:
-    """Return lightweight metadata for a MATLAB v7.3 speed volume if possible."""
-
-    path = Path(mat_path)
-    try:
-        with _open_speed_volume(path) as speed_volume:
-            dataset = speed_volume["dataset"]
-            shape = tuple(int(value) for value in dataset.shape)
-            return {
-                "dataset": str(speed_volume["name"]),
-                "shape": list(shape),
-                "dtype": str(dataset.dtype),
-                "sample_axis": (
-                    int(_infer_speed_volume_sample_axis(shape))
-                    if len(shape) == 3
-                    else None
-                ),
-                "mat_format": str(speed_volume["format"]),
-            }
-    except Exception as exc:
-        return {"read_error": f"{type(exc).__name__}: {exc}"}
-
-
-def convert_kwave_channel_mat(
-    mat_path: str | Path,
-    out_dir: str | Path,
-    *,
-    case_id_prefix: str | None = None,
-    output_shape: tuple[int, int] = (64, 64),
-    n_transducers: int = 32,
-    reference_sound_speed_mps: float = 1500.0,
-) -> list[dict[str, Any]]:
-    """Convert a compact k-Wave channel MAT file to a standard USCTCase.
-
-    Supported files contain `C`, `full_dataset`, `time`, and
-    `transducerPositionsXY`. The standard case stores image-domain sound speed
-    ground truth and surrogate straight-ray delay features from `C`. The source
-    channel tensor is not copied into the benchmark case.
-    """
-
-    h5py = _h5py()
-    source = Path(mat_path).expanduser().resolve()
-    out_path = Path(out_dir).expanduser().resolve()
-    out_path.mkdir(parents=True, exist_ok=True)
-
-    with h5py.File(source, "r") as handle:
-        metadata = _kwave_channel_metadata_from_handle(handle)
-        if metadata is None:
-            raise ValueError(f"not a supported k-Wave channel MAT file: {source}")
-        sound_speed_raw = np.asarray(handle["C"][()], dtype=float)
-        sound_speed = _external_xy_image_to_internal_yx(sound_speed_raw)
-        positions_xy = np.asarray(handle["transducerPositionsXY"][()], dtype=float)
-        time_s = np.asarray(handle["time"][()], dtype=float).reshape(-1)
-        full_shape = tuple(int(v) for v in handle["full_dataset"].shape)
-        source_label = (
-            _decode_matlab_chars(handle.get("sim_metadata/sim_label")) or source.stem
-        )
-        source_npy_path = _decode_matlab_chars(
-            handle.get("sim_metadata/source_npy_path")
-        )
-        frequency_hz = _read_scalar(handle.get("sim_metadata/f_tx"))
-        xi = (
-            np.asarray(handle["xi_orig"][()], dtype=float).reshape(-1)
-            if "xi_orig" in handle
-            else None
-        )
-        yi = (
-            np.asarray(handle["yi_orig"][()], dtype=float).reshape(-1)
-            if "yi_orig" in handle
-            else None
-        )
-
-    sound_speed_small = _downsample_mean(sound_speed, output_shape)
-    case_id = case_id_prefix or _safe_case_id(source_label)
-    case = _kwave_arrays_to_case(
-        sound_speed_small,
-        positions_xy=positions_xy,
-        time_s=time_s,
-        source=source,
-        source_label=source_label,
-        source_shape=tuple(int(v) for v in sound_speed_raw.shape),
-        full_dataset_shape=full_shape,
-        source_npy_path=source_npy_path,
-        frequency_hz=frequency_hz,
-        xi=xi,
-        yi=yi,
-        n_transducers=n_transducers,
-        reference_sound_speed_mps=reference_sound_speed_mps,
-    )
-    case = case.model_copy(update={"case_id": case_id})
-    case_path = out_path / f"{case_id}.h5"
-    write_case_hdf5(case, case_path)
-    return [
-        {
-            "case_id": case_id,
-            "path": str(case_path),
-            "source_path": str(source),
-            "source_dataset": "kWave_channel_mat",
-            "shape": list(sound_speed_small.shape),
-            "source_shape": list(sound_speed_raw.shape),
-            "array_axis_convention_raw": "[x,y]",
-            "array_axis_convention_internal": "[row=y,col=x]",
-            "array_axis_conversion": "transpose_external_xy_to_internal_yx",
-            "conversion": case.metadata["conversion"],
-            "case_type": case.metadata["case_type"],
-            "benchmark_type": case.metadata["benchmark_type"],
-            "feature_provenance": case.metadata["feature_provenance"],
-            "measurement_limitations": case.metadata["measurement_limitations"],
-        }
-    ]
-
-
-def kwave_channel_mat_metadata(mat_path: str | Path) -> dict[str, Any] | None:
-    """Return metadata for a supported k-Wave channel MAT file if present."""
-
-    h5py = _h5py()
-    try:
-        with h5py.File(mat_path, "r") as handle:
-            return _kwave_channel_metadata_from_handle(handle)
-    except Exception:
-        return None
 
 
 def convert_nbp_slice2d_mat(
@@ -416,71 +293,6 @@ def _speed_array_to_case(
     )
 
 
-def _kwave_arrays_to_case(
-    sound_speed_mps: np.ndarray,
-    *,
-    positions_xy: np.ndarray,
-    time_s: np.ndarray,
-    source: Path,
-    source_label: str,
-    source_shape: tuple[int, int],
-    full_dataset_shape: tuple[int, ...],
-    source_npy_path: str | None,
-    frequency_hz: float | None,
-    xi: np.ndarray | None,
-    yi: np.ndarray | None,
-    n_transducers: int,
-    reference_sound_speed_mps: float,
-) -> USCTCase:
-    grid = _grid_from_coordinates(sound_speed_mps.shape, xi=xi, yi=yi)
-    geometry = _geometry_from_xy_positions(positions_xy, n_transducers=n_transducers)
-    c0 = reference_sound_speed_mps
-    metadata = stamp_measurement_metadata(
-        {
-            "source_dataset": "kWave_USCT_simulation",
-            "case_type": "kwave_property_map_surrogate",
-            "source_path": str(source),
-            "source_label": source_label,
-            "source_npy_path": source_npy_path,
-            "source_shape": list(source_shape),
-            "internal_shape": list(sound_speed_mps.shape),
-            "array_axis_convention_raw": "[x,y]",
-            "array_axis_convention_internal": "[row=y,col=x]",
-            "array_axis_conversion": "transpose_external_xy_to_internal_yx",
-            "full_dataset_shape": list(full_dataset_shape),
-            "conversion": "kwave_channel_mat_to_feature_case",
-            "feature_provenance": "surrogate_delta_tof_from_ground_truth_sound_speed",
-            "measurement_domain": "features",
-            "measurement_limitations": [
-                "source file is a k-Wave simulation MAT, not raw OpenBreastUS measured RF data",
-                "delta_tof_s was generated with a straight-ray projector from the simulated sound-speed map",
-                "source channel waveforms are present but are not copied into the standard smoke HDF5 case",
-            ],
-            "reference_sound_speed_mps": c0,
-            "spatial_metadata_source": "xi_orig_yi_orig",
-            "geometry_source": "transducerPositionsXY",
-            "time_range_s": (
-                [float(np.nanmin(time_s)), float(np.nanmax(time_s))]
-                if time_s.size
-                else None
-            ),
-            "frequency_hz": frequency_hz,
-        },
-        measurement_provenance=MeasurementProvenance.SPEEDMAP_TRAVEL_TIME_SURROGATE,
-        benchmark_type="speedmap_travel_time_surrogate",
-        forward_model="straight_ray_feature_surrogate_from_kwave_property_maps",
-        feature_source="surrogate_delta_tof_from_ground_truth_sound_speed",
-    )
-    return build_surrogate_tof_case(
-        grid,
-        geometry,
-        sound_speed_mps,
-        reference_sound_speed_mps,
-        _safe_case_id(source_label),
-        source=metadata,
-    )
-
-
 def _nbp_handle_to_case_record(
     handle: Any,
     *,
@@ -617,17 +429,6 @@ def _downsample_mean(image: np.ndarray, output_shape: tuple[int, int]) -> np.nda
     return ((1.0 - wy) * top + wy * bottom).astype(float, copy=False)
 
 
-def _external_xy_image_to_internal_yx(image: np.ndarray) -> np.ndarray:
-    """Convert external k-Wave/MATLAB image arrays from [x,y] to [row=y,col=x]."""
-
-    array = np.asarray(image, dtype=float).squeeze()
-    if array.ndim != 2:
-        raise ValueError(
-            f"external k-Wave image arrays must be 2-D [x,y], got {array.shape}"
-        )
-    return np.ascontiguousarray(array.T)
-
-
 def _fit_nbp_field_of_view(
     sound_speed_mps: np.ndarray,
     label: np.ndarray,
@@ -741,28 +542,6 @@ def _geometry_from_xy_positions(
     )
 
 
-def _kwave_channel_metadata_from_handle(handle: Any) -> dict[str, Any] | None:
-    required = ("C", "full_dataset", "transducerPositionsXY")
-    if not all(name in handle for name in required):
-        return None
-    c_shape = tuple(int(v) for v in handle["C"].shape)
-    full_shape = tuple(int(v) for v in handle["full_dataset"].shape)
-    pos_shape = tuple(int(v) for v in handle["transducerPositionsXY"].shape)
-    if len(c_shape) != 2:
-        return None
-    if len(full_shape) != 3 or len(pos_shape) != 2 or pos_shape[1] != 2:
-        return None
-    return {
-        "format": "kwave-channel-mat",
-        "sound_speed_dataset": "C",
-        "channel_dataset": "full_dataset",
-        "geometry_dataset": "transducerPositionsXY",
-        "sound_speed_shape": list(c_shape),
-        "channel_shape": list(full_shape),
-        "geometry_shape": list(pos_shape),
-    }
-
-
 def _nbp_metadata_from_handle(handle: Any) -> dict[str, Any] | None:
     required = ("sos", "den", "label", "type")
     if not all(name in handle for name in required):
@@ -835,26 +614,14 @@ def _safe_case_id(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("_") or "kwave_case"
 
 
-def _largest_3d_dataset_name(handle: Any) -> str:
-    candidates: list[tuple[int, str]] = []
-
-    def visitor(name: str, obj: Any) -> None:
-        if hasattr(obj, "shape") and len(obj.shape) == 3:
-            size = int(np.prod(obj.shape))
-            candidates.append((size, name))
-
-    handle.visititems(visitor)
-    if not candidates:
-        raise ValueError("no 3-D dataset found in MAT/HDF5 file")
-    return sorted(candidates, reverse=True)[0][1]
-
-
 @contextmanager
-def _open_speed_volume(path: Path, *, dataset_name: str | None = None):
+def _open_speed_volume(path: Path, *, dataset_name: str):
     h5py = _h5py()
+    if not isinstance(dataset_name, str) or not dataset_name.strip():
+        raise ValueError("dataset_name must explicitly select a sound-speed array")
     if h5py.is_hdf5(path):
         with h5py.File(path, "r") as handle:
-            name = dataset_name or _largest_3d_dataset_name(handle)
+            name = dataset_name
             yield {"name": name, "dataset": handle[name], "format": "matlab-v7.3-hdf5"}
             return
 
@@ -866,35 +633,11 @@ def _open_speed_volume(path: Path, *, dataset_name: str | None = None):
         ) from exc
 
     data = loadmat(path)
-    name = dataset_name or _largest_3d_array_name(data)
+    name = dataset_name
     if name not in data:
         keys = [key for key in data if not key.startswith("__")]
         raise KeyError(f"{name!r} not found in {path}. Available keys: {keys}")
     yield {"name": name, "dataset": np.asarray(data[name]), "format": "matlab-v5"}
-
-
-def _largest_3d_array_name(data: dict[str, Any]) -> str:
-    candidates = [
-        (int(np.prod(value.shape)), name)
-        for name, value in data.items()
-        if not name.startswith("__")
-        and hasattr(value, "shape")
-        and len(value.shape) == 3
-    ]
-    if not candidates:
-        keys = [key for key in data if not key.startswith("__")]
-        raise ValueError(f"no 3-D array found in MAT file; available keys: {keys}")
-    return sorted(candidates, reverse=True)[0][1]
-
-
-def _infer_speed_volume_sample_axis(shape: tuple[int, ...]) -> int:
-    if len(shape) != 3:
-        raise ValueError(f"speed dataset must be 3-D, got {shape}")
-    if shape[1] == shape[2] and shape[0] != shape[1]:
-        return 0
-    if shape[0] == shape[1] and shape[2] != shape[0]:
-        return 2
-    return int(np.argmax(shape))
 
 
 def _read_speed_volume_slice(dataset: Any, index: int, sample_axis: int) -> np.ndarray:

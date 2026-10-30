@@ -112,6 +112,35 @@ def test_no_truth_and_byte_guard(tmp_path):
         convert_kwave_pressure_mat(source, tmp_path / "no.h5", tx_indices=[1, 1])
 
 
+def test_pressure_without_label_coordinates_and_explicit_truth_grid(tmp_path):
+    from usctbench.core.schema import GridSpec
+
+    source = tmp_path / "channels.mat"
+    pressure = write_fixture(source)
+    with h5py.File(source, "a") as handle:
+        del handle["xi_orig"]
+        del handle["yi_orig"]
+    grid = GridSpec(shape=(2, 3), spacing_m=(0.004, 0.001), origin_m=(-0.004, -0.0015))
+    case = convert_kwave_pressure_mat(source, tmp_path / "unlabeled.h5", grid=grid)
+    np.testing.assert_array_equal(
+        case.measurement.time_data, pressure.transpose(2, 0, 1)
+    )
+    assert case.ground_truth.sound_speed_mps is None
+    assert (
+        case.metadata["ground_truth_attachment"] == "not_attached_missing_coordinates"
+    )
+    attached = convert_kwave_pressure_mat(
+        source, tmp_path / "labeled.h5", grid=grid, truth_grid=grid
+    )
+    np.testing.assert_array_equal(
+        attached.measurement.time_data, case.measurement.time_data
+    )
+    np.testing.assert_allclose(
+        attached.ground_truth.sound_speed_mps, 1510 + np.arange(6).reshape(2, 3)
+    )
+    assert attached.metadata["ground_truth_attachment"] == "attached_explicit_grid"
+
+
 def test_time_only_import_avoids_dtft_and_resamples_gt_at_physical_coordinates(
     tmp_path, monkeypatch
 ):

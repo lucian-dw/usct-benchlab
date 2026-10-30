@@ -55,14 +55,16 @@ def _prepare(args):
             or args.spacing_m is None
             or not args.files
             or args.sample_indices is None
+            or not args.dataset_name
         ):
             raise ValueError(
-                "OpenBreastUS requires --root, --files, --sample-indices and --spacing-m"
+                "OpenBreastUS requires --root, --files, --dataset-name, --sample-indices and --spacing-m"
             )
         openbreastus.prepare_openbreastus(
             args.root,
             args.out,
             files=args.files,
+            dataset_name=args.dataset_name,
             sample_indices=args.sample_indices,
             converted_shape=tuple(args.shape),
             spacing_m=tuple(args.spacing_m),
@@ -89,10 +91,14 @@ def _prepare(args):
 
 def _import_pressure(args):
     grid = GridSpec.model_validate(load_yaml(args.grid)) if args.grid else None
+    truth_grid = (
+        GridSpec.model_validate(load_yaml(args.truth_grid)) if args.truth_grid else None
+    )
     case = convert_kwave_pressure_mat(
         args.input,
         args.out,
         grid=grid,
+        truth_grid=truth_grid,
         frequencies_hz=args.frequencies_hz,
         tx_indices=args.tx_indices,
         rx_indices=args.rx_indices,
@@ -210,6 +216,9 @@ def build_parser():
     p.add_argument("--spacing-m", type=float, nargs=2, metavar=("DY", "DX"))
     p.add_argument("--sample-axis", type=int, choices=(0, 1, 2), default=2)
     p.add_argument(
+        "--dataset-name", help="Explicit sound-speed array name in each volume"
+    )
+    p.add_argument(
         "--files",
         nargs="+",
         help="Explicit OpenBreastUS volume paths relative to --root",
@@ -233,6 +242,10 @@ def build_parser():
         "--grid", help="GridSpec YAML; required if acquisition lacks grid coordinates"
     )
     p.add_argument("--frequencies-hz", type=float, nargs="+")
+    p.add_argument(
+        "--truth-grid",
+        help="Optional C-label GridSpec YAML when acquisition coordinates are absent",
+    )
     p.add_argument("--tx-indices", type=int, nargs="+")
     p.add_argument("--rx-indices", type=int, nargs="+")
     p.add_argument("--channel-axes", required=True, help="Stored axes, e.g. tx,rx,time")

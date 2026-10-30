@@ -159,6 +159,7 @@ def convert_kwave_pressure_mat(
     channel_axes=("tx", "rx", "time"),
     output_shape=None,
     grid: GridSpec | None = None,
+    truth_grid: GridSpec | None = None,
     reference_sound_speed_mps: float = 1500.0,
     water_dataset: str | None = None,
     provenance: str = MeasurementProvenance.SELF_SIMULATED_KWAVE_WAVEFIELD.value,
@@ -169,7 +170,9 @@ def convert_kwave_pressure_mat(
     `C` is an optional evaluation label, never input to measurement
     generation, reference-speed selection, geometry or ROI selection. HDF5
     `C` is already [y,x] for upstream MATLAB [x,y] images. An explicit grid is
-    required when xi_orig/yi_orig are unavailable. `water_dataset`, when set,
+    required when xi_orig/yi_orig are unavailable. Optional C is only attached
+    when its coordinates or an explicit truth_grid are available; missing label
+    coordinates do not invalidate pressure observations. `water_dataset`, when set,
     names a separately acquired reference tensor in the same file and axes.
     The byte limit applies per selected tensor (not total process memory).
     """
@@ -212,17 +215,28 @@ def convert_kwave_pressure_mat(
             grid if grid is not None else _coordinate_grid(handle, output_shape)
         )
         truth = {}
+        truth_status = "not_present"
+        has_coordinates = "yi_orig" in handle and "xi_orig" in handle
         for key, field in (("C", "sound_speed_mps"),):
             if key in handle:
+                if truth_grid is None and not has_coordinates:
+                    truth_status = "not_attached_missing_coordinates"
+                    continue
                 image = np.asarray(handle[key], dtype=float)
                 from scipy.interpolate import RegularGridInterpolator
 
-                source_grid = _coordinate_grid(handle, None)
+                source_grid = (
+                    truth_grid
+                    if truth_grid is not None
+                    else _coordinate_grid(handle, None)
+                )
                 if image.shape != source_grid.shape:
-                    raise ValueError("C shape must match yi_orig/xi_orig coordinates")
+                    raise ValueError("C shape must match its truth grid coordinates")
                 source_axes = tuple(
-                    np.asarray(handle[k], dtype=float).ravel()
-                    for k in ("yi_orig", "xi_orig")
+                    origin + (np.arange(n) + 0.5) * spacing
+                    for origin, spacing, n in zip(
+                        source_grid.origin_m, source_grid.spacing_m, source_grid.shape
+                    )
                 )
                 target_axes = tuple(
                     origin + (np.arange(n) + 0.5) * spacing
@@ -251,6 +265,11 @@ def convert_kwave_pressure_mat(
                     np.stack((yy, xx), axis=-1)
                 )
                 truth[field] = image
+                truth_status = (
+                    "attached_explicit_grid"
+                    if truth_grid is not None
+                    else "attached_acquisition_coordinates"
+                )
     # Always validate sampling, including imports that keep only time data.
     keep_frequency = frequencies_hz is not None
     _validate_sampling(pressure, time)
@@ -280,6 +299,7 @@ def convert_kwave_pressure_mat(
             "selected_rx_indices": rx.tolist(),
             "reference_sound_speed_mps": c0,
             "ground_truth_used_for_measurement": False,
+            "ground_truth_attachment": truth_status,
             "simulation_backend": "kwave",
             "water_reference_used": reference is not None,
             "measurement_limitations": [

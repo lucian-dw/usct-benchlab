@@ -23,7 +23,11 @@ field before numerical execution.
 ## Conventions
 
 Images, spacing and pixel-edge origins use [y,x]. Positions use [element,yx].
-RF uses [tx,rx,time], spectrum [frequency,tx,rx], and prepared sources [frequency,tx].
+RF uses [time,tx,rx], spectrum [frequency,tx,rx], and prepared sources [frequency,tx].
+Generic speed volumes require an explicit `dataset_name`. Pressure imports do
+not generate observations from C: labels are attached only with acquisition
+coordinates or an explicit `truth_grid`. Missing label coordinates leave a
+usable pressure case with a recorded GT attachment reason.
 Distances are meters, speeds m/s, times seconds and frequencies Hz. Imported
 pressure retains units and transform normalization in metadata.
 

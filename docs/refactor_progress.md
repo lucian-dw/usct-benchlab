@@ -245,3 +245,17 @@ data or checkouts. Neither environment issue was hidden by changing assertions.
 
 Next: maintainer review of the two local refactor branches. No push, PR, merge,
 large-data rerun or clinical validation is included in this delivery.
+
+## Final taskbook F02
+
+- Required explicit dataset_name through generic volume reader, preparation and
+  CLI. Removed largest-array selection and the old k-Wave-to-GT-surrogate path.
+- Pressure import keeps observations when optional C coordinates are missing;
+  explicit truth_grid enables label registration. Standard RF axes are now
+  consistently documented as time,tx,rx and the extra example transpose is gone.
+- Focused validation: `pytest -q tests/data/test_waveforms.py
+  tests/data/test_synthetic_and_conversion.py tests/cli`: 60 passed (2.97 s).
+  Includes multi-array selection, asymmetric writer axes, independent labels,
+  explicit coordinates, saved round-trip and CLI regressions. Ruff/Black passed
+  on changed Python files.
+- Next: F03 training-frequency support and F04 anisotropic Green discretization.

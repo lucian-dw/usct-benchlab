@@ -9,7 +9,7 @@
 | Element positions | [element, yx] in m |
 | Travel time | [tx,rx], seconds |
 | Pressure | [frequency,tx,rx], complex; units explicitly declared |
-| Time pressure | [tx,rx,time], with actual sample times |
+| Time pressure | [time,tx,rx], with actual sample times |
 | Source spectrum | prepared [frequency,tx], complex |
 | WUST boundary | positions changed once to [x,y]; images stay [y,x] |
 

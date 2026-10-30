@@ -49,13 +49,15 @@ dataset metadata:
 ~~~bash
 usct inspect /path/to/OpenBreastUS --dataset openbreastus
 usct data prepare --dataset openbreastus --root /path/to/OpenBreastUS \
-  --files breast_test_speed.mat --sample-indices 0 200 500 700 \
+  --files breast_test_speed.mat --dataset-name sos --sample-indices 0 200 500 700 \
   --sample-axis 2 --image-axes yx --sound-speed-units m/s \
   --spacing-m 0.0003 0.0003 --shape 256 256 --n-transducers 64 \
   --out data/openbreastus_demo
 ~~~
 
-The output manifest records source files and slice indices. No four-class labels
+Replace `sos` with the array name reported by inspection; no largest-array
+selection or default dataset name is used. The output manifest records source
+files, the selected array and slice indices. No four-class labels
 are guessed from index ranges. This path generates straight-ray ToF, not raw
 OpenBreastUS pressure.
 
@@ -84,6 +86,8 @@ usct data import-pressure --input /path/to/acquisition.mat \
 
 Coordinates/time must exist in the acquisition, or supply an explicit GridSpec
 YAML through --grid. Optional --water-dataset names independent water traces.
+Optional C labels require their coordinates or `--truth-grid`; without those,
+pressure is still imported and the absent-label reason is recorded.
 The importer retains RF, absolute time, source data and selected complex
 frequencies; it does not generate observations from the GT map.
 
@@ -103,7 +107,7 @@ distances = np.linalg.norm(
 )
 # These window settings must match the recorded source pulse, not GT.
 delay, valid, weights, qc = water_relative_delays(
-    m.time_data.transpose(2, 0, 1), m.water_reference_time.transpose(2, 0, 1),
+    m.time_data, m.water_reference_time,
     m.time_axis_s, distances, reference_speed_mps=1500,
     picker="xcorr", source_onset_s=0.0, pulse_duration_s=15e-6,
 )

@@ -8,7 +8,7 @@ import pytest
 
 from usctbench.core.io import read_case_hdf5
 from usctbench.data.conversion import _grid_from_coordinates
-from usctbench.data.conversion import convert_nbp_slice2d_mat, convert_kwave_channel_mat
+from usctbench.data.conversion import convert_nbp_slice2d_mat
 from usctbench.operators.straight_ray import StraightRayProjector
 from usctbench.data.nbpslice2d import (
     inspect_nbp_slice2d_zip,
@@ -46,6 +46,15 @@ def test_volume_axes_units_and_missing_coordinates_are_explicit(tmp_path):
     image = np.arange(24).reshape(4, 6) + 1480.0
     with h5py.File(source, "w") as handle:
         handle["sos"] = (image.T / 1000.0)[None, ...]
+        handle["unrelated_larger_array"] = np.ones((8, 10, 12))
+    with pytest.raises(TypeError, match="dataset_name"):
+        convert_speed_mat_volume(source, tmp_path / "missing_name")
+    with pytest.raises(ValueError, match="dataset_name"):
+        convert_speed_mat_volume(source, tmp_path / "empty_name", dataset_name="")
+    with pytest.raises(KeyError):
+        convert_speed_mat_volume(
+            source, tmp_path / "unknown_name", dataset_name="unknown"
+        )
     records = convert_speed_mat_volume(
         source,
         tmp_path / "converted",
@@ -110,7 +119,7 @@ def test_reader_does_not_intercept_caller_oserror(tmp_path):
         handle["speed"] = np.ones((3, 4, 5))
     error = OSError("consumer write failed")
     with pytest.raises(OSError) as caught:
-        with _open_speed_volume(path):
+        with _open_speed_volume(path, dataset_name="speed"):
             raise error
     assert caught.value is error
 
@@ -129,6 +138,7 @@ def test_openbreastus_conversion_preserves_unrelated_case_files(tmp_path):
         root,
         out,
         files=["speed.mat"],
+        dataset_name="speed",
         sample_indices=[1],
         spacing_m=(0.001, 0.002),
         converted_shape=(8, 9),
@@ -141,32 +151,17 @@ def test_openbreastus_conversion_preserves_unrelated_case_files(tmp_path):
     assert saved.read_bytes() == b"existing user result"
 
 
-@pytest.mark.parametrize("dataset", ["nbp", "kwave"])
-def test_raw_extra_material_maps_are_not_required_or_used(tmp_path, dataset):
+def test_raw_extra_material_maps_are_not_required_or_used(tmp_path):
     source = tmp_path / "A_case.mat"
     speed = np.arange(64, dtype=float).reshape(8, 8) + 1450
     with h5py.File(source, "w") as handle:
-        if dataset == "nbp":
-            handle["sos"] = speed / 1000
-            handle["den"] = np.ones((8, 8))
-            handle["label"] = np.ones((8, 8), dtype=np.uint8)
-            handle["type"] = [ord("A")]
-        else:
-            handle["C"] = speed.T
-            handle["xi_orig"] = (np.arange(8) + 0.5) * 0.001 - 0.004
-            handle["yi_orig"] = (np.arange(8) + 0.5) * 0.001 - 0.004
-            angle = np.linspace(0, 2 * np.pi, 8, endpoint=False)
-            handle["transducerPositionsXY"] = 0.02 * np.column_stack(
-                [np.cos(angle), np.sin(angle)]
-            )
-            handle["time"] = np.arange(5) * 1e-7
-            handle["full_dataset"] = np.zeros((8, 8, 5))
-    converter = (
-        convert_nbp_slice2d_mat if dataset == "nbp" else convert_kwave_channel_mat
-    )
+        handle["sos"] = speed / 1000
+        handle["den"] = np.ones((8, 8))
+        handle["label"] = np.ones((8, 8), dtype=np.uint8)
+        handle["type"] = [ord("A")]
 
     def convert(folder):
-        record = converter(
+        record = convert_nbp_slice2d_mat(
             source, tmp_path / folder, output_shape=(8, 8), n_transducers=8
         )[0]
         return read_case_hdf5(record["path"])
@@ -174,7 +169,7 @@ def test_raw_extra_material_maps_are_not_required_or_used(tmp_path, dataset):
     without = convert("without")
     with h5py.File(source, "a") as handle:
         # Malformed, unit-unknown raw maps are deliberately irrelevant.
-        handle["att" if dataset == "nbp" else "atten"] = np.full((2, 3), np.nan)
+        handle["att"] = np.full((2, 3), np.nan)
         handle["y"] = [-999.0]
     with_extra = convert("with_extra")
     np.testing.assert_array_equal(
@@ -193,8 +188,7 @@ def test_raw_extra_material_maps_are_not_required_or_used(tmp_path, dataset):
     )
     np.testing.assert_array_equal(with_extra.measurement.delta_tof_s.ravel(), expected)
     assert not any("atten" in key for key in with_extra.metadata)
-    if dataset == "nbp":
-        assert with_extra.measurement.frequencies_hz is None
+    assert with_extra.measurement.frequencies_hz is None
 
 
 def test_nbpslice2d_zip_inspection_and_smoke_conversion(tmp_path):

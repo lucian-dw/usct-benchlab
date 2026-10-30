@@ -50,6 +50,7 @@ def prepare_openbreastus(
     files,
     sample_indices,
     spacing_m,
+    dataset_name,
     sample_axis=2,
     image_axes="yx",
     sound_speed_units="m/s",
@@ -81,6 +82,7 @@ def prepare_openbreastus(
             convert_speed_mat_volume(
                 source,
                 out / "cases",
+                dataset_name=dataset_name,
                 indices=sample_indices,
                 case_id_prefix=prefix,
                 output_shape=converted_shape,
@@ -97,6 +99,7 @@ def prepare_openbreastus(
         "cases": cases,
         "settings": {
             "files": list(files),
+            "dataset_name": dataset_name,
             "sample_indices": list(sample_indices),
             "shape": list(converted_shape),
             "spacing_m": list(spacing_m),
