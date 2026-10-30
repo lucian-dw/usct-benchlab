@@ -5,6 +5,9 @@ The authoritative definitions are the Pydantic classes in
 [algorithms/fwi/parameters.py](../src/usctbench/algorithms/fwi/parameters.py).
 Fields carry description, units, default, type/range and exposure. YAML and direct
 Python calls resolve through **core.config.prepare_config** to the same objects.
+`AlgorithmEntry` selects the parameter model and iteration default for each
+variant and owns supported budgets and numerical-stopping capability. One
+registry lookup resolves those facts during preparation.
 
 ## Request structure
 
@@ -17,7 +20,8 @@ Python calls resolve through **core.config.prepare_config** to the same objects.
 - **diagnostics**: host opt-in to detailed trial/direction/inner-solve traces;
   defaults to false. Accepted-iteration history and work counts remain available.
 
-Unknown names fail. There is one regularization name,
+Unknown names fail at every request level, including misspelled top-level fields.
+There is one regularization name,
 **regularization_lambda**; the quadratic objective coefficient is its square.
 Scientific ranges reflect admission constraints, not proven optimal search
 intervals. No weak/moderate/strong numerical presets exist.
@@ -35,6 +39,8 @@ intervals. No weak/moderate/strong numerical presets exist.
 The default Agent schema omits advanced/internal definitions and their defaults.
 A trusted host can supply expert parameters independently. A field's availability
 can depend on the selected Born variant.
+The public name is `born`; `wkb_fixed`, `full_green_fixed`, `wkb_nonlinear` and
+`full_green_nonlinear` select the physical model and fixed/nonlinear solver mode.
 
 ## Cross-field semantics
 
@@ -52,6 +58,11 @@ old YAML aliases are not permanent runtime APIs.
 
 Public `run` prepares the request once. A direct algorithm call must pass
 `prepare_config(name, request, case=case)`; it does not implicitly re-prepare.
+Already typed scientific parameters are reused, not parsed again. Configuration
+helpers that only forwarded registry lookup are removed: use
+`get_algorithm_entry(name).parameter_model(parameters)` and
+`get_algorithm_entry(name).default_iterations(parameters, case)` when inspecting
+the static entry directly.
 `make_agent_config` only admits scientific parameters and requested budgets.
 Case capabilities report observations, not resolved host policy.
 `deployment.green_device` is the optional zero-based CuPy device for Full-Green;

@@ -6,17 +6,11 @@ Static schemas contain no case data or deployment-specific paths.
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, field
-from functools import cached_property
 import json
 
+from pydantic import ConfigDict, create_model
 
-from usctbench.core.config import (
-    default_iterations,
-    parameter_model,
-)
-from usctbench.core.run_controls import RunControls
 from usctbench.core.schema import AlgorithmConfig
 
 
@@ -34,7 +28,6 @@ class Variant:
     deterministic: str = (
         "deterministic_for_fixed_input_config_and_numerical_environment"
     )
-    online_controls: bool = True
     agent_parameters: bool = True
 
 
@@ -54,132 +47,29 @@ class AlgorithmSpecification:
                 return variant
         raise ValueError(f"unknown variant {variant_id!r} for {self.algorithm_id}")
 
-    def describe(self, variant_id=None):
-        return deepcopy(self.descriptions[self.variant(variant_id).id])
-
-    @cached_property
-    def descriptions(self):
-        return {v.id: self._describe(v) for v in self.variants}
-
-    def _describe(self, v):
-        model = parameter_model(self.algorithm_id, v.selectors)
-        schema, defaults = agent_schema(model, v.selectors, enabled=v.agent_parameters)
-        description = {
-            "schema_version": "usct.algorithm.v1",
-            "algorithm_id": self.algorithm_id,
-            "family": self.family,
-            "variant": v.id,
-            "variants": [
-                {"id": item.id, "model": item.model} for item in self.variants
-            ],
-            "description": self.description,
-            "mathematical_model": v.model,
-            "required_observation_domains": list(v.observation_domains),
-            "required_observations": {
-                "all_of": list(v.required_observations),
-                "any_of": [list(group) for group in v.observation_alternatives],
-            },
-            "supported_geometries": list(self.supported_geometries),
-            "parameter_model": model.__name__,
-            "config_schema": schema,
-            "allowed_parameters": sorted(schema["properties"]),
-            "default_parameters": defaults,
-            "compute_budget": {
-                "separate_from_parameters": True,
-                "default_max_iterations": default_iterations(
-                    self.algorithm_id, v.selectors
-                ),
-                "online_controls_supported": v.online_controls,
-                "run_controls_schema": (
-                    budget_schema(v) if v.online_controls else None
-                ),
-                "host_limits_schema": (budget_schema(v) if v.online_controls else None),
-                "deadline_semantics": (
-                    "cooperative; launching process must enforce a hard deadline"
-                    if v.online_controls
-                    else "external supervisor required; online library controls unavailable"
-                ),
-            },
-            "runtime_requirements": list(v.runtime_requirements),
-            "runtime_availability": "not_checked_static_description",
-            "limitations": [
-                "Research-grade within tested models/ranges; not clinical validation.",
-                "Geometry acceptance does not establish imaging performance for every layout.",
-                *v.limitations,
-            ],
-            "iteration_unit": v.iteration_unit,
-            "deterministic_status": v.deterministic,
-        }
-        if self.algorithm_id == "fwi_wust":
-            for key in ("run_controls_schema", "host_limits_schema"):
-                properties = description["compute_budget"][key]["properties"]
-                for unsupported in ("max_forward_calls", "max_adjoint_calls"):
-                    properties.pop(unsupported, None)
-            description["compute_budget"][
-                "deadline_semantics"
-            ] = "hard global deadline including admission, ingestion, reconstruction and parsing"
-            description["compute_budget"][
-                "numerical_convergence_stopping_supported"
-            ] = False
-            controls = description["compute_budget"]["run_controls_schema"][
-                "properties"
-            ]
-            controls["max_iterations"][
-                "description"
-            ] = "Truncate the resolved frequency schedule; null runs the full schedule, zero returns validated initialization."
-            controls["max_elapsed_s"][
-                "description"
-            ] = "One hard global deadline in seconds; an explicit request or deployment timeout cap is required."
-        return description
-
 
 def agent_schema(model, selectors=None, *, enabled=True):
-    """Filter properties AND reachable definitions, defaults and permissions.
-
-    No internal field survives through a $defs side channel. Object-valued Agent
-    parameters require an explicit nested policy rather than allowing arbitrary
-    dictionaries or external runtime command maps.
-    """
-    schema = deepcopy(model.model_json_schema())
-    defaults = model.model_validate(selectors or {}).model_dump(mode="json")
-    properties = {
-        key: value
-        for key, value in schema["properties"].items()
-        if enabled and value.get("exposure") == "agent"
+    """Build the schema from exposed fields only, including only their definitions."""
+    fields = {
+        name: (info.annotation, info)
+        for name, info in model.model_fields.items()
+        if enabled and (info.json_schema_extra or {}).get("exposure") == "agent"
     }
-    definitions = schema.get("$defs", {})
-    reachable = {}
-
-    def inspect(node):
-        if isinstance(node, dict):
-            if node.get("type") == "object" or "properties" in node:
-                raise ValueError(
-                    "nested Agent object requires an explicit exposure policy"
-                )
-            if "$ref" in node:
-                name = node["$ref"].removeprefix("#/$defs/")
-                if name not in reachable:
-                    reachable[name] = definitions[name]
-                    inspect(definitions[name])
-            for child in node.values():
-                inspect(child)
-        elif isinstance(node, list):
-            for child in node:
-                inspect(child)
-
-    for key, value in properties.items():
-        inspect(value)
+    schema = create_model(
+        f"{model.__name__}Agent",
+        __config__=ConfigDict(extra="forbid"),
+        **fields,
+    ).model_json_schema()
+    for key, value in schema["properties"].items():
         value.update(getattr(model, "agent_schema_overrides", {}).get(key, {}))
-        value["default"] = defaults[key]
         if key in (selectors or {}):
             value["const"] = selectors[key]
-    result = {"type": "object", "additionalProperties": False, "properties": properties}
-    if reachable:
-        result["$defs"] = reachable
-    required = [key for key in schema.get("required", []) if key in properties]
-    if required:
-        result["required"] = required
-    return result, {key: defaults[key] for key in properties}
+            value["default"] = selectors[key]
+    return schema, {
+        key: value["default"]
+        for key, value in schema["properties"].items()
+        if "default" in value
+    }
 
 
 def _born_variant(identifier, mode, backend):
@@ -276,10 +166,10 @@ SPECS = {
             ),
         ),
     ),
-    "rwave_adapter": AlgorithmSpecification(
-        "rwave_adapter",
+    "born": AlgorithmSpecification(
+        "born",
         "ray_born",
-        "Native complex-pressure Born variants; legacy registered name retained.",
+        "Native complex-pressure fixed and nonlinear WKB or Full-Green Born variants.",
         tuple(
             _born_variant(identifier, mode, backend)
             for identifier, mode, backend in (
@@ -323,18 +213,6 @@ SPECS = {
 }
 
 
-def budget_schema(variant):
-    schema = RunControls.model_json_schema()
-    from usctbench.core.registry import list_algorithms
-
-    entry = next(entry for entry in list_algorithms() if variant in entry.variants)
-    allowed = entry.supported_budgets
-    schema["properties"] = {
-        k: v for k, v in schema["properties"].items() if k in allowed
-    }
-    return schema
-
-
 def make_agent_config(
     algorithm_id,
     parameters=None,
@@ -344,23 +222,28 @@ def make_agent_config(
     trusted_parameters=None,
 ):
     """Only declared Agent knobs plus independent host-supplied context."""
-    selected = SPECS[algorithm_id].variant(variant)
-    description = SPECS[algorithm_id].describe(selected.id)
+    from usctbench.core.registry import get_algorithm_entry
+
+    entry = get_algorithm_entry(algorithm_id)
+    selected = entry.specification.variant(variant)
+    description = entry.describe(selected.id)
     supplied = dict(parameters or {})
     forbidden = supplied.keys() - set(description["allowed_parameters"])
     if forbidden:
         raise ValueError(f"parameters not exposed to Agent: {sorted(forbidden)}")
-    if algorithm_id == "fwi_wust" and supplied.get("initialization") == "map":
-        raise ValueError("Map initialization is expert-only")
+    for key, value in supplied.items():
+        choices = description["config_schema"]["properties"][key].get("enum")
+        if choices is not None and value not in choices:
+            raise ValueError(f"parameter {key} must be one of {choices}")
     values = {**(trusted_parameters or {}), **supplied}
     for key, value in selected.selectors.items():
         if key in values and values[key] != value:
             raise ValueError(f"parameter {key} conflicts with selected variant")
         values[key] = value
     controls = dict(run_controls or {})
-    if controls.keys() - budget_schema(selected)["properties"].keys():
+    if controls.keys() - set(entry.supported_budgets):
         raise ValueError("unsupported Agent run control")
-    model = parameter_model(algorithm_id, values)
+    model = entry.parameter_model(values)
     typed = model.model_validate_json(json.dumps(values, allow_nan=False), strict=True)
     return AlgorithmConfig(name=algorithm_id, parameters=typed, run_controls=controls)
 

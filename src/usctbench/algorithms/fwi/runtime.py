@@ -121,7 +121,7 @@ class WUSTClient:
             ) from exc
 
     def admit(self):
-        info = self.command(["describe", "--json"])
+        info = self.command(["describe"])
         if (
             info.get("schema") != "wust.capabilities"
             or info.get("schema_version") != 2

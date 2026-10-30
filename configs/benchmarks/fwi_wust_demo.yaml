@@ -6,5 +6,6 @@ deployment:
   runtime_root: ${WUST_RUNTIME_ROOT}
   backend: ${WUST_BACKEND:-gpu}
 algorithms:
-  - name: fwi_wust
+  - id: fwi_wust_default
+    name: fwi_wust
     config: ../algorithms/fwi_wust.yaml

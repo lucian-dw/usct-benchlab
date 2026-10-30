@@ -12,8 +12,9 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+from scipy.interpolate import RegularGridInterpolator
 
-from usctbench.core.io import write_case_hdf5
+from usctbench.data.conversion import grid_from_coordinates
 from usctbench.data.pressure import dtft_pressure_contract
 from usctbench.core.provenance import MeasurementProvenance, stamp_measurement_metadata
 from usctbench.core.schema import (
@@ -80,30 +81,6 @@ def _selection(values, size, name):
     return raw.astype(int)
 
 
-def _coordinate_grid(handle, output_shape):
-    axes = []
-    for key in ("yi_orig", "xi_orig"):
-        coordinates = np.asarray(handle[key], dtype=float).ravel()
-        if coordinates.size < 2 or not np.all(np.isfinite(coordinates)):
-            raise ValueError(f"{key} must contain finite cell-center coordinates")
-        spacing = float(np.mean(np.diff(coordinates)))
-        if spacing <= 0 or not np.allclose(np.diff(coordinates), spacing):
-            raise ValueError(f"{key} must be uniformly increasing")
-        axes.append(
-            (coordinates[0] - spacing / 2, spacing * coordinates.size, coordinates.size)
-        )
-    shape = (
-        tuple(int(axis[2]) for axis in axes)
-        if output_shape is None
-        else tuple(output_shape)
-    )
-    return GridSpec(
-        shape=shape,
-        origin_m=tuple(axis[0] for axis in axes),
-        spacing_m=tuple(axis[1] / n for axis, n in zip(axes, shape, strict=True)),
-    )
-
-
 def _read_channels(dataset, axes, tx, rx, n_time, max_output_bytes):
     if tuple(sorted(axes)) != ("rx", "time", "tx") or dataset.ndim != 3:
         raise ValueError("channel_axes must be a permutation of ('tx', 'rx', 'time')")
@@ -150,9 +127,8 @@ def _read_channels(dataset, axes, tx, rx, n_time, max_output_bytes):
     return result
 
 
-def convert_kwave_pressure_mat(
+def read_kwave_pressure_mat(
     mat_path: str | Path,
-    out_path: str | Path,
     *,
     frequencies_hz=None,
     tx_indices=None,
@@ -166,7 +142,7 @@ def convert_kwave_pressure_mat(
     provenance: str = MeasurementProvenance.SELF_SIMULATED_KWAVE_WAVEFIELD.value,
     max_output_bytes: int = 1024**3,
 ) -> USCTCase:
-    """Import actual pressure without generating features from ground truth.
+    """Read actual pressure without generating features or writing a case file.
 
     `C` is an optional evaluation label, never input to measurement
     generation, reference-speed selection, geometry or ROI selection. HDF5
@@ -203,7 +179,7 @@ def convert_kwave_pressure_mat(
         ] != len(positions):
             raise ValueError("channel axes do not match transducer count")
         pressure = _read_channels(dataset, axes, tx, rx, len(time), max_output_bytes)
-        reference = (
+        water_time = (
             None
             if water_dataset is None
             else _read_channels(
@@ -212,24 +188,26 @@ def convert_kwave_pressure_mat(
         )
         if grid is not None and output_shape is not None:
             raise ValueError("supply grid or output_shape, not both")
+        xi = handle["xi_orig"][()] if "xi_orig" in handle else None
+        yi = handle["yi_orig"][()] if "yi_orig" in handle else None
         image_grid = (
-            grid if grid is not None else _coordinate_grid(handle, output_shape)
+            grid
+            if grid is not None
+            else grid_from_coordinates(output_shape, xi=xi, yi=yi)
         )
         truth = {}
         truth_status = "not_present"
-        has_coordinates = "yi_orig" in handle and "xi_orig" in handle
+        has_coordinates = xi is not None and yi is not None
         for key, field in (("C", "sound_speed_mps"),):
             if key in handle:
                 if truth_grid is None and not has_coordinates:
                     truth_status = "not_attached_missing_coordinates"
                     continue
                 image = np.asarray(handle[key], dtype=float)
-                from scipy.interpolate import RegularGridInterpolator
-
                 source_grid = (
                     truth_grid
                     if truth_grid is not None
-                    else _coordinate_grid(handle, None)
+                    else grid_from_coordinates(None, xi=xi, yi=yi)
                 )
                 if image.shape != source_grid.shape:
                     raise ValueError("C shape must match its truth grid coordinates")
@@ -277,9 +255,11 @@ def convert_kwave_pressure_mat(
     spectrum = (
         pressure_spectrum(pressure, time, frequencies_hz) if keep_frequency else None
     )
-    reference_time = reference
-    if reference is not None and keep_frequency:
-        reference = pressure_spectrum(reference, time, frequencies_hz)
+    water_spectrum = (
+        pressure_spectrum(water_time, time, frequencies_hz)
+        if water_time is not None and keep_frequency
+        else None
+    )
     geometry = GeometrySpec(tx_pos_m=positions[tx, ::-1], rx_pos_m=positions[rx, ::-1])
     valid = np.all(np.isfinite(pressure), axis=0)
     valid &= (
@@ -291,8 +271,6 @@ def convert_kwave_pressure_mat(
             "source_dataset": "WaveformInversionUST_channel_mat",
             "source_path": str(source),
             "conversion": "pressure_preserving_kwave_v73",
-            "frequency_convention": "exp(-i omega t)",
-            "spectrum_quadrature": "dt * sum(p(t) * exp(+i*2*pi*f*t))",
             "pressure_axes": ["time", "tx", "rx"],
             "frequency_axes": ["frequency", "tx", "rx"],
             "pressure_contract": dtft_pressure_contract(),
@@ -302,8 +280,18 @@ def convert_kwave_pressure_mat(
             "reference_sound_speed_mps": c0,
             "ground_truth_used_for_measurement": False,
             "ground_truth_attachment": truth_status,
+            "roi_source": (
+                "explicit_grid"
+                if grid is not None and grid.roi_mask is not None
+                else "none"
+            ),
+            "roi_use": (
+                "reconstruction_prior"
+                if image_grid.roi_mask is not None
+                else "unrestricted"
+            ),
             "simulation_backend": "kwave",
-            "water_reference_used": reference is not None,
+            "water_reference_used": water_time is not None,
             "measurement_limitations": [
                 "Source strength, detector response and pressure units require acquisition-specific calibration.",
                 "The pressure import itself applies no window, picker, gain normalization or 3D-to-2D correction; derived feature processing is recorded separately.",
@@ -315,7 +303,7 @@ def convert_kwave_pressure_mat(
         forward_model="external_pressure_acquisition",
         feature_source="full_dataset pressure samples (not property-map projections)",
     )
-    case = USCTCase(
+    return USCTCase(
         case_id=source.stem,
         grid=image_grid,
         geometry=geometry,
@@ -325,12 +313,10 @@ def convert_kwave_pressure_mat(
             time_axis_s=time,
             freq_data=spectrum if keep_frequency else None,
             frequencies_hz=np.asarray(frequencies_hz) if keep_frequency else None,
-            water_reference=reference,
-            water_reference_time=reference_time,
+            water_reference=water_spectrum,
+            water_reference_time=water_time,
             valid_mask=valid,
         ),
         ground_truth=GroundTruthSpec(**truth),
         metadata=metadata,
     )
-    write_case_hdf5(case, out_path)
-    return case

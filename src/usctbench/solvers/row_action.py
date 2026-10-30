@@ -11,6 +11,7 @@ def row_action(
     operator,
     control,
     *,
+    row_sums,
     initial,
     reference,
     project,
@@ -23,6 +24,7 @@ def row_action(
     SART subsets use disjoint training rays. Normalization excludes held-out
     channels. An interrupted partial sweep returns the last *complete* sweep.
     Physical projection precedes residual evaluation and checkpoint selection.
+    row_sums are prepared ray lengths, including any partition-of-unity basis.
 
     SIRT's fixed-point objective has precision w_i / sum_j A_ij, not w_i.
     For subset SART this global objective is only a monitor: inconsistent-data
@@ -37,7 +39,7 @@ def row_action(
         return selected, metrics
 
     try:
-        row_sum = operator.row_norms(power=1).reshape(control.observed.shape)
+        row_sum = np.asarray(row_sums).reshape(control.observed.shape)
         if not np.isfinite(row_sum).all() or np.any(row_sum < 0):
             raise ValueError(
                 "row-action solver requires finite nonnegative ray lengths"

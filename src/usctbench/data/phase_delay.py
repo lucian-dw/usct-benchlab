@@ -34,7 +34,7 @@ def phase_slope_delays(
         or not np.isfinite(max_phase_rms)
         or max_phase_rms <= 0
         or not np.isfinite(min_amplitude_ratio)
-        or min_amplitude_ratio <= 0
+        or min_amplitude_ratio < 0
     ):
         raise ValueError("invalid frequencies, speed bounds or phase fit tolerance")
     indices = np.flatnonzero(np.any(train, axis=(1, 2)))
@@ -47,7 +47,7 @@ def phase_slope_delays(
     p, water, train = p[indices], water[indices], train[indices]
     active = np.all(train & np.isfinite(p) & np.isfinite(water), axis=0)
     water_amplitude = np.abs(water)
-    active &= np.all(water_amplitude > np.finfo(float).tiny, axis=0)
+    active &= np.all(water_amplitude > 0, axis=0)
     active &= np.all(np.abs(p) > min_amplitude_ratio * water_amplitude, axis=0)
     distance = np.broadcast_to(np.asarray(distances, float), p.shape[1:])
     lower = distance * (1 / bounds[1] - 1 / c0)
@@ -66,7 +66,7 @@ def phase_slope_delays(
     confidence = np.zeros(p.shape[1:])
     rms = np.full(p.shape[1:], np.nan)
     if np.any(active):
-        phase = np.unwrap(np.angle(p[:, active] * water[:, active].conj()), axis=0)
+        phase = np.unwrap(np.angle(p[:, active]) - np.angle(water[:, active]), axis=0)
         slope = np.sum(x[:, None] * phase, axis=0) / np.sum(x * x)
         residual = phase - phase.mean(axis=0) - x[:, None] * slope
         delay[active] = slope

@@ -11,7 +11,7 @@ Use describe-algorithm for the current schema; YAML files are overrides.
 | straight_sirt | Differential ToF / $\delta s$ | Simultaneous row/column-normalized corrections | Sparse forward/transpose; row-normalized objective differs from ordinary LS |
 | straight_sart | Differential ToF / $\delta s$ | Ordered subset corrections; one iteration is one complete sweep | Inconsistent data can produce subset cycles |
 | bent_ray_gn | First-arrival ToF / $s$ | Native fast marching, discrete Jacobian, regularized GN and projected line search | Rebuild travel times each accepted/trial model; first arrivals omit scattering |
-| rwave_adapter | Complex pressure / $m=1/c^2$ | Fixed Born linear solve or relinearized nonlinear objective | WKB Green approximation or volume-integral Green solves; explicit calibration required |
+| born | Complex pressure / $m=1/c^2$ | Fixed Born linear solve or relinearized nonlinear objective | WKB Green approximation or volume-integral Green solves; explicit calibration required |
 | fwi_wust | Complex total pressure / $s$ | Source-projected Helmholtz objective; one frequency entry is one model update | External MATLAB CPU or CUDA MEX; currently budget/deadline stopping only |
 
 ## Born variants

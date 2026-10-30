@@ -5,9 +5,10 @@ from usctbench.core.config import prepare_config
 import numpy as np
 import pytest
 
-from usctbench.algorithms.rwave import RayBornAlgorithm
+from usctbench.algorithms.born import BornAlgorithm
 from usctbench.core.schema import AlgorithmConfig, GroundTruthSpec, MeasurementSpec
 from usctbench.data.synthetic import make_sound_speed_case
+from usctbench.data.pressure import dtft_pressure_contract
 from usctbench.operators.ray_born import RayBornForward
 
 
@@ -29,6 +30,7 @@ def nonlinear_case():
         valid_mask=linearization.jacobian.valid_pair_mask,
     )
     case.ground_truth = GroundTruthSpec()
+    case.metadata["pressure_contract"] = dtft_pressure_contract()
     return case, forward, linearization
 
 
@@ -48,8 +50,8 @@ def config(*, max_iterations=3, run_controls=None, evaluation=None, **parameters
 
 def test_rebuilds_background_and_accepts_only_true_nonlinear_decrease():
     case, _, _ = nonlinear_case()
-    result = RayBornAlgorithm().run(
-        case, prepare_config(RayBornAlgorithm().name, config(), case=case)
+    result = BornAlgorithm().run(
+        case, prepare_config(BornAlgorithm().name, config(), case=case)
     )
     assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
     metrics = result.metrics
@@ -58,7 +60,7 @@ def test_rebuilds_background_and_accepts_only_true_nonlinear_decrease():
     assert np.all(np.diff(curve) < 0), curve
     assert metrics["data_residual_reduction"] > 0.1
     assert metrics["stopping"]["work"]["background_builds"] >= len(curve)
-    assert metrics["background_relinearization"] is True
+    assert metrics["variant"] == "wkb_nonlinear"
     assert "rmse" not in metrics
 
 
@@ -66,13 +68,13 @@ def test_nonlinear_holdout_is_not_used_for_updates_or_line_search():
     case, _, _ = nonlinear_case()
     changed = case.model_copy(deep=True)
     changed.measurement.freq_data[..., 1] *= 15j
-    original = RayBornAlgorithm().run(
+    original = BornAlgorithm().run(
         case,
-        prepare_config(RayBornAlgorithm().name, config(max_iterations=1), case=case),
+        prepare_config(BornAlgorithm().name, config(max_iterations=1), case=case),
     )
-    altered = RayBornAlgorithm().run(
+    altered = BornAlgorithm().run(
         changed,
-        prepare_config(RayBornAlgorithm().name, config(max_iterations=1), case=changed),
+        prepare_config(BornAlgorithm().name, config(max_iterations=1), case=changed),
     )
     assert original.status == altered.status in {"completed", "budget_exhausted"}
     np.testing.assert_array_equal(original.sound_speed_mps, altered.sound_speed_mps)
@@ -87,14 +89,14 @@ def test_nonlinear_holdout_is_not_used_for_updates_or_line_search():
 )
 def test_source_broadcast_matches_explicit_frequency_tx_calibration(source):
     case, _, _ = nonlinear_case()
-    expected = RayBornAlgorithm().run(
+    expected = BornAlgorithm().run(
         case,
-        prepare_config(RayBornAlgorithm().name, config(max_iterations=1), case=case),
+        prepare_config(BornAlgorithm().name, config(max_iterations=1), case=case),
     )
     case.measurement.source_spectrum = np.asarray(source)
-    result = RayBornAlgorithm().run(
+    result = BornAlgorithm().run(
         case,
-        prepare_config(RayBornAlgorithm().name, config(max_iterations=1), case=case),
+        prepare_config(BornAlgorithm().name, config(max_iterations=1), case=case),
     )
     assert result.status == expected.status in {"completed", "budget_exhausted"}
     np.testing.assert_array_equal(result.sound_speed_mps, expected.sound_speed_mps)
@@ -104,8 +106,8 @@ def test_pressure_requires_source_calibration_or_independent_water():
     case, _, _ = nonlinear_case()
     case.measurement.source_spectrum = None
     with pytest.raises(ValueError, match="calibrated source_spectrum"):
-        RayBornAlgorithm().run(
-            case, prepare_config(RayBornAlgorithm().name, config(), case=case)
+        BornAlgorithm().run(
+            case, prepare_config(BornAlgorithm().name, config(), case=case)
         )
 
 
@@ -121,7 +123,7 @@ def test_relative_regularization_is_invariant_to_pressure_units():
         regularization="laplacian",
     )
     a, b = (
-        RayBornAlgorithm().run(c, prepare_config(RayBornAlgorithm().name, cfg, case=c))
+        BornAlgorithm().run(c, prepare_config(BornAlgorithm().name, cfg, case=c))
         for c in (case, other)
     )
     assert a.status == b.status in {"completed", "budget_exhausted"}
@@ -137,8 +139,8 @@ def test_underresolved_complex_inverse_grid_is_rejected():
     case, _, _ = nonlinear_case()
     case.grid.spacing_m = (0.005, 0.005)
     with pytest.raises(ValueError, match="underresolved"):
-        RayBornAlgorithm().run(
-            case, prepare_config(RayBornAlgorithm().name, config(), case=case)
+        BornAlgorithm().run(
+            case, prepare_config(BornAlgorithm().name, config(), case=case)
         )
 
 
@@ -168,6 +170,8 @@ def test_phase_seed_and_pressure_updates_exclude_heldout_frequency():
         initialization_iterations=8,
         initialization_smooth_mm=0.3,
         variant="full_green_nonlinear",
+        background_sound_speed_mps=1505.0,
+        regularization_scaling="relative_jacobian_diagonal",
         evaluation={"frequency_indices": [3], "receiver_indices": [1]},
         run_controls={
             "restore_best_validation": False,
@@ -176,12 +180,41 @@ def test_phase_seed_and_pressure_updates_exclude_heldout_frequency():
         },
     )
     a, b = [
-        RayBornAlgorithm().run(c, prepare_config(RayBornAlgorithm().name, cfg, case=c))
+        BornAlgorithm().run(c, prepare_config(BornAlgorithm().name, cfg, case=c))
         for c in (case, changed)
     ]
     assert a.status == b.status in {"completed", "budget_exhausted"}, a.failure_reason
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
     assert a.metrics["initialization_qc"]["frequencies_hz"] == [100e3, 150e3, 200e3]
+    from usctbench.evaluation.data import make_data_split
+
+    split = make_data_split(
+        case.measurement.freq_data,
+        valid_mask=case.measurement.valid_mask,
+        frequency_indices=[3],
+        receiver_indices=[1],
+        tx_positions=case.geometry.tx_pos_m,
+        rx_positions=case.geometry.rx_pos_m,
+    )
+    configured = RayBornOperator(
+        case.grid,
+        case.geometry,
+        f,
+        background_sound_speed_mps=1505.0,
+        green_backend="volume_integral",
+        source_spectrum=water.source_spectrum,
+    )
+    diagonal = configured.normal_diagonal(split.train_weights)
+    np.testing.assert_allclose(
+        a.metrics["penalty_scale"], np.median(diagonal[diagonal > 0])
+    )
+    expected_contrast_norm = np.linalg.norm(
+        (case.measurement.freq_data - configured.background_data())[split.train]
+    )
+    np.testing.assert_allclose(
+        a.metrics["contrast_evaluation"]["train"]["weighted_observed_norm"],
+        expected_contrast_norm,
+    )
 
 
 @pytest.mark.parametrize(
@@ -203,6 +236,71 @@ def test_invalid_initialization_settings_fail_explicitly(settings):
         # rejection now that variant-specific unused fields fail closed.
         candidate = AlgorithmConfig(parameters=settings)
     with pytest.raises(ValueError, match="initialization"):
-        RayBornAlgorithm().run(
-            case, prepare_config(RayBornAlgorithm().name, candidate, case=case)
+        BornAlgorithm().run(
+            case, prepare_config(BornAlgorithm().name, candidate, case=case)
         )
+
+
+@pytest.mark.parametrize(
+    "variant,scaling,expected",
+    [
+        ("full_green_nonlinear", "absolute", 12),
+        ("full_green_nonlinear", "relative_jacobian_diagonal", 12),
+        ("wkb_nonlinear", "absolute", 8),
+    ],
+)
+def test_configured_initial_background_is_computed_once(
+    monkeypatch, variant, scaling, expected
+):
+    from usctbench.operators import volume_integral, eikonal
+
+    case = make_sound_speed_case(shape=(4, 5), n_transducers=4)
+    case.geometry.tx_pos_m *= 0.12
+    case.geometry.rx_pos_m *= 0.12
+    frequencies = np.array([100e3, 150e3, 200e3])
+    case.measurement = MeasurementSpec(
+        domain="frequency",
+        frequencies_hz=frequencies,
+        freq_data=np.ones((3, 4, 4), complex),
+        source_spectrum=np.ones((3, 4), complex),
+        valid_mask=~np.eye(4, dtype=bool),
+    )
+    case.metadata["pressure_contract"] = dtft_pressure_contract()
+    counter = []
+    if variant.startswith("full_green"):
+        real_solve = volume_integral.gmres
+
+        def counted(*args, **kwargs):
+            counter.append(1)
+            return real_solve(*args, **kwargs)
+
+        monkeypatch.setattr(volume_integral, "gmres", counted)
+        key = "green_solves"
+    else:
+        real_solve = eikonal.PreparedMarching.solve
+
+        def counted(*args, **kwargs):
+            counter.append(1)
+            return real_solve(*args, **kwargs)
+
+        monkeypatch.setattr(eikonal.PreparedMarching, "solve", counted)
+        key = "eikonal_solves"
+    cfg = prepare_config(
+        "born",
+        {
+            "parameters": {
+                "variant": variant,
+                "background_sound_speed_mps": 1505.0,
+                "max_cache_bytes": 0,
+                "regularization_scaling": scaling,
+            },
+            "run_controls": {"max_iterations": 0, "max_forward_calls": 2},
+        },
+        case=case,
+    )
+    result = BornAlgorithm().run(case, cfg)
+    assert len(counter) == expected
+    assert result.metrics["stopping"]["work"][key] == len(counter)
+    assert result.metrics["stopping"]["selected_iteration"] == 0
+    assert result.metrics["stopping"]["work"]["forward_calls"] == 2
+    np.testing.assert_allclose(result.sound_speed_mps, 1505.0, atol=1e-12)

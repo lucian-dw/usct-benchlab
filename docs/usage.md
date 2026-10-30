@@ -132,7 +132,7 @@ usct run straight_cgls --case data/tof_case.h5 --config configs/algorithms/cgls.
 usct run straight_sirt --case data/tof_case.h5 --config configs/algorithms/sirt.yaml --out runs/sirt
 usct run straight_sart --case data/tof_case.h5 --config configs/algorithms/sart.yaml --out runs/sart
 usct run bent_ray_gn --case data/first_arrival_case.h5 --config configs/algorithms/bent_ray.yaml --out runs/bent
-usct run rwave_adapter --case data/pressure_case.h5 --config configs/algorithms/rwave.yaml --out runs/born
+usct run born --case data/pressure_case.h5 --config configs/algorithms/born.yaml --out runs/born
 usct run fwi_wust --case data/pressure_case.h5 --config configs/algorithms/fwi_wust.yaml \
   --runtime-root /path/to/WaveformInversionUST --matlab-executable /path/to/matlab \
   --backend cpu --out runs/fwi

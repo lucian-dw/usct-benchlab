@@ -19,8 +19,11 @@ Zero observed norm, empty sets and unavailable predictions are distinct states;
 they do not become fabricated zero residuals. Nonfinite predictions on valid
 channels are failures. Valid zero observations participate normally.
 
-Receiver/frequency holdouts are excluded from updates, weights and source
-calibration. Reciprocal TX exclusion is explicit. A holdout used for checkpoint
+Specimen receiver/frequency holdouts are excluded from updates, weights and
+source fitting. Born may calibrate on an independently acquired water reference
+including frequencies held out from specimen fitting. It does not substitute
+specimen validation pressure when water calibration is missing.
+Reciprocal TX exclusion is explicit. A holdout used for checkpoint
 selection is **validation**, not an independent test. GT never controls stopping.
 
 ## Execution rules
@@ -48,6 +51,22 @@ $$
 over their declared physical-grid scope. WUST reports slowness change over its
 update mask but does **not** use update_rtol to terminate. The default threshold
 is unset. Objective/validation patience is likewise opt-in.
+
+| Algorithm / model | Variable used in the update norm | Scope |
+| --- | --- | --- |
+| Straight CGLS/SIRT/SART | $s_0+\delta s$ | Complete pixel grid; for a reduced model, $s_0+\theta$ on its coefficient grid |
+| Bent | $s$ or $s_0+B\theta$ | Complete physical grid, including fixed ROI exterior |
+| Fixed Born | $m_0+\delta m$, $m=1/c^2$ | Complete physical grid |
+| Nonlinear Born | $m$ | Complete physical grid |
+| WUST | $s$ | Explicit update mask; reporting only, not online stopping |
+
+`current_state` holds one accepted model, prediction, objective, iteration and
+linearization. A best-validation snapshot omits the linearization. `StopMonitor`
+owns scalar history and selection indices, not arrays. `solver_optimality` is
+read from the history row for `selected_iteration`; a later stationary point
+cannot certify an earlier restored checkpoint. Residual curves are derived from
+`iteration_history`, not duplicated in another array. Zero initial residual gives
+`data_residual_reduction: null` and `undefined_zero_initial_residual`.
 
 Native budgets are checked between expensive work units. A partial SART sweep
 is not published as a complete iteration. Records distinguish selected

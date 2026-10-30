@@ -93,9 +93,7 @@ class StopMonitor:
         self.validation_bad_count = 0
         self.best_validation = None
         self.significant_validation = None
-        self.best_state = None
         self.best_iteration = None
-        self.last_state = None
         self.stage_id = None
 
     def set_stage(self, stage_id):
@@ -107,7 +105,6 @@ class StopMonitor:
     def observe(
         self,
         iteration,
-        state,
         *,
         residual_norm,
         observed_norm,
@@ -127,7 +124,7 @@ class StopMonitor:
             raise ValueError("complete iteration indices must be strictly increasing")
         values = [residual_norm, observed_norm, objective]
         values += [v for v in (update_relative, validation_relative) if v is not None]
-        if not np.all(np.isfinite(values)) or not np.all(np.isfinite(state)):
+        if not np.all(np.isfinite(values)):
             return self.finish("numerical_failure")
         relative = residual_norm / observed_norm if observed_norm > 0 else None
         if self.history and self.policy.objective_rtol is not None:
@@ -146,7 +143,6 @@ class StopMonitor:
                 or validation_relative < self.best_validation
             ):
                 self.best_validation = float(validation_relative)
-                self.best_state = np.array(state, copy=True)
                 self.best_iteration = int(iteration)
             meaningful = self.significant_validation is None or validation_relative < (
                 self.significant_validation * (1 - self.policy.validation_rtol)
@@ -156,7 +152,6 @@ class StopMonitor:
                 self.validation_bad_count = 0
             else:
                 self.validation_bad_count += 1
-        self.last_state = np.array(state, copy=True)
         self.history.append(
             {
                 "iteration": int(iteration),
@@ -242,15 +237,14 @@ class StopMonitor:
             self.reason, self.triggers = reason, [reason]
         return self.reason
 
-    def selected_state(self):
-        if self.policy.restore_best_validation and self.best_state is not None:
-            return self.best_state.copy(), self.best_iteration
-        if self.last_state is None:
-            return None, None
-        return self.last_state.copy(), self.history[-1]["iteration"]
+    @property
+    def selected_iteration(self):
+        if self.policy.restore_best_validation and self.best_iteration is not None:
+            return self.best_iteration
+        return self.history[-1]["iteration"] if self.history else None
 
     def record(self):
-        _, selected = self.selected_state()
+        selected = self.selected_iteration
         selected_quality_target_met = any(
             row["quality_triggered_rules"]
             for row in self.history
@@ -277,7 +271,7 @@ class StopMonitor:
             "work": dict(self.work.counts),
             "resolved_policy": self.policy.model_dump(),
             "budget_scope": "operator_calls; time_checked_between_calls",
-            "has_complete_checkpoint": self.last_state is not None,
+            "has_complete_checkpoint": bool(self.history),
             "quality_target_met": selected_quality_target_met,
             "operator_seconds": dict(self.work.seconds),
             "termination_category": STOP_CATEGORIES[self.reason or "not_terminated"],

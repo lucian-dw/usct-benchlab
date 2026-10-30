@@ -9,8 +9,8 @@ import pytest
 import yaml
 
 from usctbench.algorithms.parameters import CGLSParameters, SIRTParameters
-from usctbench.core.config import parameter_model, prepare_config
-from usctbench.core.registry import get_algorithm
+from usctbench.core.config import prepare_config
+from usctbench.core.registry import get_algorithm, get_algorithm_entry
 from usctbench.core.schema import AlgorithmConfig
 from usctbench.data.synthetic import make_sound_speed_case
 
@@ -24,12 +24,12 @@ ROOT = Path(__file__).resolve().parents[2]
         "straight_sirt",
         "straight_sart",
         "bent_ray_gn",
-        "rwave_adapter",
+        "born",
         "fwi_wust",
     ],
 )
 def test_models_have_metadata_and_reject_unknown(name, tmp_path):
-    model = parameter_model(name)
+    model = get_algorithm_entry(name).parameter_model()
     for field in model.model_json_schema()["properties"].values():
         assert field["description"]
         assert field["exposure"] in {"agent", "advanced", "internal"}
@@ -54,9 +54,9 @@ def test_models_have_metadata_and_reject_unknown(name, tmp_path):
     ["wkb_fixed", "wkb_nonlinear", "full_green_fixed", "full_green_nonlinear"],
 )
 def test_born_limits_and_variant_specific_parameters(variant):
-    model = parameter_model("rwave_adapter", {"variant": variant})
+    model = get_algorithm_entry("born").parameter_model({"variant": variant})
     config = prepare_config(
-        "rwave_adapter",
+        "born",
         AlgorithmConfig(
             parameters={
                 "variant": variant,
@@ -67,7 +67,7 @@ def test_born_limits_and_variant_specific_parameters(variant):
         ),
     )
     assert isinstance(config.parameters, model)
-    assert prepare_config("rwave_adapter", config) == config
+    assert prepare_config("born", config) == config
     for field, value in (
         ("max_cache_bytes", -1),
         ("green_solver_rtol", 0),
@@ -76,7 +76,7 @@ def test_born_limits_and_variant_specific_parameters(variant):
     ):
         with pytest.raises(ValueError):
             prepare_config(
-                "rwave_adapter",
+                "born",
                 AlgorithmConfig(parameters={"variant": variant, field: value}),
             )
     if variant.endswith("fixed"):
@@ -150,6 +150,46 @@ def test_yaml_python_and_typed_object_share_validation(tmp_path):
     assert direct.run_controls.max_iterations == 2
 
 
+@pytest.mark.parametrize("field", ["paramters", "run_control", "deploymentt"])
+def test_top_level_config_typos_fail_at_public_boundary(tmp_path, field):
+    request = {"name": "straight_cgls", field: {}}
+    path = tmp_path / "invalid.yaml"
+    path.write_text(yaml.safe_dump(request))
+    for source in (request, path):
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            prepare_config("straight_cgls", source)
+
+
+def test_prepare_resolves_registry_and_scientific_payload_once(monkeypatch):
+    from unittest.mock import Mock
+    from usctbench.core import registry
+
+    lookup = Mock(wraps=registry.get_algorithm_entry)
+    parse = Mock(wraps=CGLSParameters.model_validate)
+    monkeypatch.setattr(registry, "get_algorithm_entry", lookup)
+    monkeypatch.setattr(CGLSParameters, "model_validate", parse)
+    prepared = prepare_config("straight_cgls", {"run_controls": {"max_iterations": 0}})
+    assert lookup.call_count == 1
+    assert parse.call_count == 1
+    case = make_sound_speed_case(shape=(8, 8), n_transducers=8)
+    result = StraightRayCGLSAlgorithm().run(case, prepared)
+    assert result.sound_speed_mps is not None
+    assert lookup.call_count == 1
+    assert parse.call_count == 1
+    again = prepare_config("straight_cgls", prepared)
+    assert again.parameters is prepared.parameters
+    assert parse.call_count == 1
+
+
+@pytest.mark.parametrize("variant", ["wkb_nonlinear", "full_green_nonlinear"])
+def test_born_zero_phase_amplitude_threshold_is_admitted(variant):
+    prepared = prepare_config(
+        "born",
+        {"parameters": {"variant": variant, "initialization_min_amplitude_ratio": 0}},
+    )
+    assert prepared.parameters.initialization_min_amplitude_ratio == 0
+
+
 @pytest.mark.parametrize(
     "name", ["straight_cgls", "straight_sirt", "straight_sart", "bent_ray_gn"]
 )
@@ -167,7 +207,8 @@ def test_typed_boundary_preserves_reconstruction(name):
     ), typed.failure_reason
     np.testing.assert_array_equal(raw.sound_speed_mps, typed.sound_speed_mps)
     np.testing.assert_array_equal(
-        raw.metrics["residual_curve"], typed.metrics["residual_curve"]
+        [row["residual_norm"] for row in raw.metrics["iteration_history"]],
+        [row["residual_norm"] for row in typed.metrics["iteration_history"]],
     )
     assert (
         raw.metrics["stopping"]["resolved_policy"]

@@ -18,7 +18,7 @@ from scipy.ndimage import map_coordinates
 
 from usctbench.core.io import read_case_hdf5, write_case_hdf5
 from usctbench.data.arrival import arrival_observation_metadata, water_relative_delays
-from usctbench.data.waveforms import convert_kwave_pressure_mat
+from usctbench.data.waveforms import read_kwave_pressure_mat
 
 
 def prepare(args):
@@ -166,9 +166,8 @@ def extract(args):
             "case-file must be an HDF5 filename within the output directory"
         )
     path = out / case_file
-    case = convert_kwave_pressure_mat(
+    case = read_kwave_pressure_mat(
         out / "pressure.mat",
-        path,
         frequencies_hz=np.array(args.frequencies),
         output_shape=(args.image_size, args.image_size),
         water_dataset="water_dataset",
@@ -227,8 +226,6 @@ def extract(args):
         and qc["used_pair_fraction"] >= 0.5
     )
     case.metadata["simulation_qc"] = dict(qc)
-    case.metadata["simulation_qc_passed"] = qc["passed"]
-    case.metadata["simulation_failed_qc"] = not qc["passed"]
     write_case_hdf5(case, path)
     qc_path = out / (
         "simulation_qc.json"

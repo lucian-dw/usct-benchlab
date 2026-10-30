@@ -24,17 +24,17 @@ Different methods retain different parts of these observations:
 | straight_sirt | Differential ToF, seconds | Simultaneous normalized ray updates; $\delta s$ | [sirt.yaml](configs/algorithms/sirt.yaml) |
 | straight_sart | Differential ToF, seconds | Ordered-subset normalized ray updates; $\delta s$ | [sart.yaml](configs/algorithms/sart.yaml) |
 | bent_ray_gn | First-arrival ToF or water-relative ToF | Native Eikonal/Gauss–Newton; $s=1/c$ | [bent_ray.yaml](configs/algorithms/bent_ray.yaml) |
-| rwave_adapter | Complex pressure plus source calibration or water reference | Native fixed/nonlinear WKB or Full-Green Born; $m=1/c^2$ | [rwave.yaml](configs/algorithms/rwave.yaml) |
+| born | Complex pressure plus source calibration or water reference | Native fixed/nonlinear WKB or Full-Green Born; $m=1/c^2$ | [born.yaml](configs/algorithms/born.yaml) |
 | fwi_wust | Complex total pressure with explicit conventions | External maintained WUST Helmholtz FWI; $s=1/c$ | [fwi_wust.yaml](configs/algorithms/fwi_wust.yaml) |
 
-The stable command **rwave_adapter** denotes this repository's Ray-Born methods,
+The command **born** selects this repository's Born methods,
 not a complete reproduction of upstream r-Wave. See [mathematics](docs/math_formulation.md)
 and [algorithms](docs/algorithms.md). YAML files are explicit example overrides,
 not calibrated presets or promises of a particular image quality.
 
 ## Install and run one case
 
-Python 3.10+:
+Python 3.12+:
 
 ~~~bash
 pip install -e ".[dev,viz]"
@@ -69,7 +69,7 @@ print(result.status, result.metrics.get("stop_reason"))
 
 ~~~bash
 usct list-algorithms --json
-usct describe-algorithm rwave_adapter --variant full_green_nonlinear --json
+usct describe-algorithm born --variant full_green_nonlinear
 usct bench --suite configs/benchmarks/synthetic_demo.yaml
 ~~~
 
@@ -100,6 +100,12 @@ A run writes **result.h5**, **run.json**, **index.json** on numerical success,
 output directory. Evaluation/plot failures retain the numerical arrays and their
 own failure status. Suite summaries are **benchmark_summary.csv** and
 **benchmark_report.md**.
+
+Each suite entry has an explicit unique `id`; outputs live under
+`runs/<suite>/<id>/<case_id>/`. Two configurations of one algorithm therefore
+produce separate artifacts and summary rows. Frequency-domain pressure, its
+source spectrum and its water reference share one explicit `pressure_contract`;
+time-domain water traces are stored separately.
 
 Residuals from ToF and pressure, or different acquisition sources, are not a
 single ranking. GT metrics report foreground and full-image regions separately.

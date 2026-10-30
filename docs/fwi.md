@@ -13,7 +13,7 @@ Select CPU or GPU explicitly; there is no automatic backend fallback.
 
 ```bash
 export WUST_RUNTIME_ROOT=/path/to/WaveformInversionUST
-python "$WUST_RUNTIME_ROOT/Runtime/python/wust_runtime.py" describe --json
+python "$WUST_RUNTIME_ROOT/Runtime/python/wust_runtime.py" describe
 usct run fwi_wust --case /path/to/frequency_case.h5 \
   --config configs/algorithms/fwi_wust.yaml --backend cpu --out runs/single_fwi
 ```

@@ -26,8 +26,6 @@ class GaussNewtonProblem:
     regularization: object
     roi: np.ndarray | None
     fallback_step_norm: float
-    prior_source: str
-    constraints: dict
 
 
 def project_each_trial(problem, state, proposal, step_length, max_backtracks):
@@ -50,6 +48,136 @@ def backtrack_feasible_displacement(
         yield (first if k == 0 else state + fraction * displacement), fraction
 
 
+def _propose_directions(
+    problem,
+    current,
+    control,
+    gradient,
+    feasible_gradient,
+    penalty,
+    *,
+    inner_iterations,
+    inner_solver,
+    inner_options,
+    damping,
+    smooth_sigma,
+):
+    """Solve the linearized problem, then propose smoothing and feasible descent."""
+    direction, info = solve_linearized(
+        current.linearization.jacobian,
+        control.weighted_residual(current.prediction),
+        current.model - problem.reference,
+        control,
+        weights=control.precision,
+        iterations=inner_iterations,
+        damping=damping,
+        regularization=penalty,
+        roi=problem.roi,
+        method=inner_solver,
+        **inner_options,
+    )
+    control.record_linear(info)
+    raw_direction = direction
+    smoothed_slope = None
+    if np.any(np.asarray(smooth_sigma) > 0):
+        smoothed = gaussian_filter(direction, smooth_sigma, mode="nearest")
+        if problem.roi is not None:
+            smoothed = np.where(problem.roi, smoothed, 0)
+        smoothed_slope = float(np.vdot(gradient, smoothed).real)
+        # Smoothing is only a proposal: even a convex Newton step can turn uphill.
+        if np.isfinite(smoothed_slope) and smoothed_slope < 0:
+            direction = smoothed
+    if problem.roi is not None:
+        direction = np.where(problem.roi, direction, 0)
+    if not np.isfinite(direction).all():
+        raise FloatingPointError("nonfinite GN update")
+    proposals = [("newton_proposal", direction)]
+    if not np.array_equal(direction, raw_direction):
+        proposals.append(("unsmoothed_newton", raw_direction))
+    direction_scale = float(norm(raw_direction.ravel()))
+    if not np.isfinite(direction_scale):
+        raise FloatingPointError("nonfinite Newton direction norm")
+    if direction_scale == 0:
+        direction_scale = problem.fallback_step_norm
+    gradient_step = -feasible_gradient * (
+        direction_scale / float(norm(feasible_gradient.ravel()))
+    )
+    proposals.append(("projected_gradient", gradient_step))
+    diagnostics = None
+    if control.config.diagnostics:
+        diagnostics = {
+            "iteration": current.iteration + 1,
+            "raw_directional_derivative": float(np.vdot(gradient, raw_direction).real),
+            "smoothed_directional_derivative": smoothed_slope,
+            "smoothing_rejected": smoothed_slope is not None and smoothed_slope >= 0,
+        }
+    return proposals, diagnostics
+
+
+def _armijo_trial(
+    problem,
+    current,
+    control,
+    gradient,
+    proposals,
+    objective,
+    *,
+    step_length,
+    max_backtracks,
+    attempts,
+):
+    """Evaluate only descent trials; return one complete accepted candidate."""
+    finite_trial_seen = nonfinite_trial_seen = False
+    for proposal_name, proposal in proposals:
+        for candidate, fraction in problem.trials(
+            problem, current.model, proposal, step_length, max_backtracks
+        ):
+            displacement = candidate - current.model
+            slope = float(np.vdot(gradient, displacement).real)
+            row = None
+            if attempts is not None:
+                row = {
+                    "iteration": current.iteration + 1,
+                    "proposal": proposal_name,
+                    "step_length": float(step_length),
+                    "backtracking_fraction": fraction,
+                    "displacement_norm": float(
+                        norm(displacement.ravel(), check_finite=False)
+                    ),
+                    "changed_pixel_count": int(np.count_nonzero(displacement)),
+                    "projected_directional_derivative": slope,
+                    "objective": None,
+                    "accepted": False,
+                }
+                attempts.append(row)
+            if not np.isfinite(slope) or slope >= 0:
+                if row is not None:
+                    row["rejection"] = "non_descent_projected_step"
+                continue
+            try:
+                trial = control.call("line_search", problem.linearize, candidate)
+                trial_cost = objective(candidate, trial.value)
+            except FloatingPointError:
+                trial = None
+                nonfinite_trial_seen = True
+                if row is not None:
+                    row["rejection"] = "nonfinite_trial_prediction_or_objective"
+                continue
+            finite_trial_seen = True
+            accepted = trial_cost <= current.objective + 1e-4 * slope
+            if row is not None:
+                row.update(objective=trial_cost, accepted=bool(accepted))
+            if accepted:
+                return candidate, trial, trial_cost
+            del trial
+    control.monitor.finish(
+        "numerical_failure"
+        if nonfinite_trial_seen and not finite_trial_seen
+        else "line_search_failed"
+    )
+    return None
+
+
 def gauss_newton(
     problem,
     control,
@@ -62,20 +190,24 @@ def gauss_newton(
     smooth_sigma=0.0,
     max_backtracks=10,
     gradient_rtol=1e-8,
+    initial_linearization=None,
 ):
     """Accept using the real objective and actual feasible displacement.
 
     The accepted Linearization is reused for the next direction. Validation data
     never enter gradients, curvature, priors, trial generation or acceptance.
+    initial_linearization, when supplied, is the value/Jacobian at problem.initial
+    and has already been charged by its caller.
     """
     inner_options = dict(inner_options or {})
-    state = np.asarray(problem.initial, dtype=float).copy()
-    initial_state = state.copy()
+    initial_state = np.asarray(problem.initial, dtype=float).copy()
     reference = problem.reference
     penalty = prepare_regularizer(problem.regularization)
     roi = problem.roi
-    attempts, direction_checks, gradient_checks = [], [], []
     diagnostics = control.config.diagnostics
+    attempts = [] if diagnostics else None
+    direction_checks = [] if diagnostics else None
+    gradient_checks = [] if diagnostics else None
     initial_gradient_norm = None
     derivative_kind = None
 
@@ -94,30 +226,33 @@ def gauss_newton(
         return value
 
     try:
-        linearization = control.call("forward", problem.linearize, state)
+        linearization = (
+            initial_linearization
+            if initial_linearization is not None
+            else control.call("forward", problem.linearize, initial_state)
+        )
         derivative_kind = linearization.derivative_kind
-        cost = objective(state, linearization.value)
+        cost = objective(initial_state, linearization.value)
         control.observe(
             0,
-            state,
+            initial_state,
             linearization.value,
             objective=cost,
             linearization=linearization,
         )
+        initial_linearization = None
+        del linearization
         for iteration in range(1, control.policy.max_iterations + 1):
             if control.monitor.reason is not None:
                 break
             current = control.current_state
-            state, linearization, cost = (
-                current.model,
-                current.linearization,
-                current.objective,
-            )
-            residual = control.weighted_residual(linearization.value)
+            residual = control.weighted_residual(current.prediction)
             gradient = -control.call(
-                "adjoint", linearization.jacobian.adjoint, residual
+                "adjoint", current.linearization.jacobian.adjoint, residual
             )
-            gradient += damping * penalty.adjoint(penalty.forward(state - reference))
+            gradient += damping * penalty.adjoint(
+                penalty.forward(current.model - reference)
+            )
             if roi is not None:
                 gradient = np.where(roi, gradient, 0)
             if not np.isfinite(gradient).all():
@@ -152,8 +287,8 @@ def gauss_newton(
                 )
                 break
             feasible_gradient = np.where(
-                ((state <= problem.lower) & (gradient > 0))
-                | ((state >= problem.upper) & (gradient < 0)),
+                ((current.model <= problem.lower) & (gradient > 0))
+                | ((current.model >= problem.upper) & (gradient < 0)),
                 0,
                 gradient,
             )
@@ -165,146 +300,55 @@ def gauss_newton(
                     else "stationary_projected_gradient"
                 )
                 break
-            direction, info = solve_linearized(
-                linearization.jacobian,
-                residual,
-                state - reference,
+            proposals, direction_diagnostics = _propose_directions(
+                problem,
+                current,
                 control,
-                weights=control.precision,
-                iterations=inner_iterations,
+                gradient,
+                feasible_gradient,
+                penalty,
+                inner_iterations=inner_iterations,
+                inner_solver=inner_solver,
+                inner_options=inner_options,
                 damping=damping,
-                regularization=penalty,
-                roi=roi,
-                method=inner_solver,
-                **inner_options,
+                smooth_sigma=smooth_sigma,
             )
-            control.record_linear(info)
-            raw_direction = direction.copy()
-            raw_slope = float(np.vdot(gradient, direction).real)
-            smoothed_slope = None
-            if np.any(np.asarray(smooth_sigma) > 0):
-                smoothed = gaussian_filter(direction, smooth_sigma, mode="nearest")
-                if roi is not None:
-                    smoothed = np.where(roi, smoothed, 0)
-                smoothed_slope = float(np.vdot(gradient, smoothed).real)
-                # Smoothing a Newton step can turn it uphill even for a convex
-                # quadratic. It is only a proposal, not an accepted optimizer.
-                if np.isfinite(smoothed_slope) and smoothed_slope < 0:
-                    direction = smoothed
-            if roi is not None:
-                direction = np.where(roi, direction, 0)
-            if not np.all(np.isfinite(direction)):
-                raise FloatingPointError("nonfinite GN update")
-            accepted = False
-            proposals = [("newton_proposal", direction)]
-            if not np.array_equal(direction, raw_direction):
-                proposals.append(("unsmoothed_newton", raw_direction))
-            # Projection/clipping can also destroy descent of a Newton step.
-            # A projected negative gradient provides an independently checked
-            # fallback, at the same model-step scale, without changing the loss.
-            with np.errstate(over="raise", invalid="raise"):
-                direction_scale = float(norm(raw_direction.ravel()))
-            if not np.isfinite(direction_scale):
-                raise FloatingPointError("nonfinite Newton direction norm")
-            if direction_scale == 0:
-                direction_scale = problem.fallback_step_norm
-            gradient_step = -feasible_gradient * (direction_scale / feasible_norm)
-            proposals.append(("projected_gradient", gradient_step))
             if diagnostics:
-                direction_checks.append(
-                    {
-                        "iteration": iteration,
-                        "raw_directional_derivative": raw_slope,
-                        "smoothed_directional_derivative": smoothed_slope,
-                        "smoothing_rejected": smoothed_slope is not None
-                        and smoothed_slope >= 0,
-                    }
-                )
-            finite_trial_seen = nonfinite_trial_seen = False
-            for proposal_name, proposal in proposals:
-                for backtrack, (candidate, fraction) in enumerate(
-                    problem.trials(
-                        problem, state, proposal, step_length, max_backtracks
-                    )
-                ):
-                    displacement = candidate - state
-                    slope = float(np.vdot(gradient, displacement).real)
-                    row = {
-                        "iteration": iteration,
-                        "proposal": proposal_name,
-                        "step_length": float(step_length),
-                        "backtracking_fraction": fraction,
-                        "displacement_norm": float(
-                            norm(displacement.ravel(), check_finite=False)
-                        ),
-                        "changed_pixel_count": int(np.count_nonzero(displacement)),
-                        "projected_directional_derivative": slope,
-                        "objective": None,
-                        "accepted": False,
-                    }
-                    if not np.isfinite(slope) or slope >= 0:
-                        row["rejection"] = "non_descent_projected_step"
-                        if diagnostics:
-                            attempts.append(row)
-                        continue
-                    try:
-                        trial = control.call(
-                            "line_search", problem.linearize, candidate
-                        )
-                        trial_cost = objective(candidate, trial.value)
-                    except FloatingPointError:
-                        nonfinite_trial_seen = True
-                        row["rejection"] = "nonfinite_trial_prediction_or_objective"
-                        if diagnostics:
-                            attempts.append(row)
-                        continue
-                    finite_trial_seen = True
-                    accepted = bool(
-                        np.isfinite(trial_cost) and trial_cost <= cost + 1e-4 * slope
-                    )
-                    row.update(
-                        objective=trial_cost if np.isfinite(trial_cost) else None,
-                        accepted=accepted,
-                    )
-                    if diagnostics:
-                        attempts.append(row)
-                    if accepted:
-                        break
-                if accepted:
-                    break
-            if not accepted:
-                control.monitor.finish(
-                    "numerical_failure"
-                    if nonfinite_trial_seen and not finite_trial_seen
-                    else "line_search_failed"
-                )
+                direction_checks.append(direction_diagnostics)
+            accepted = _armijo_trial(
+                problem,
+                current,
+                control,
+                gradient,
+                proposals,
+                objective,
+                step_length=step_length,
+                max_backtracks=max_backtracks,
+                attempts=attempts,
+            )
+            if accepted is None:
                 break
-            physical = problem.physical_model(state)
+            candidate, trial, trial_cost = accepted
+            physical = problem.physical_model(current.model)
             update = float(
                 norm((problem.physical_model(candidate) - physical).ravel())
                 / norm(physical.ravel())
             )
-            state, linearization, cost = candidate, trial, trial_cost
             control.observe(
                 iteration,
-                state,
+                candidate,
                 trial.value,
-                objective=cost,
+                objective=trial_cost,
                 update_relative=update,
                 linearization=trial,
             )
+            del current, physical, accepted, candidate, trial
         if control.monitor.reason is None:
             control.monitor.finish("max_iterations")
     except FloatingPointError as exc:
         control.fail(exc)
     selected, metrics = control.output(initial_state)
     metrics.update(
-        prior_reference_source=problem.prior_source,
-        gradient_rtol=gradient_rtol,
-        inner_solver=inner_solver,
-        inner_options=inner_options,
-        line_search_acceptance="projected_step_armijo_1e-4",
-        line_search_constraints=problem.constraints,
         derivative_kind=derivative_kind,
         nonlinear_background_updates=max(0, len(control.monitor.history) - 1),
     )

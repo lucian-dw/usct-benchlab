@@ -60,6 +60,8 @@ def fast_march(
     *,
     compiled=True,
     spatial_order=1,
+    budget_check=None,
+    work_counts=None,
 ):
     """Causal first- or mixed second-order marching with off-grid source seeding.
 
@@ -67,33 +69,67 @@ def fast_march(
     analytic derivatives are retained. Source seeding and the grid error converge
     under refinement; no straight-ray projector is used anywhere in this solve.
     """
-    if (
-        isinstance(spatial_order, (bool, np.bool_))
-        or not isinstance(spatial_order, (int, np.integer))
-        or spatial_order not in (1, 2)
-    ):
-        raise ValueError("spatial_order must be 1 or 2")
-    model = np.asarray(slowness, dtype=float)
-    if model.ndim != 2 or min(model.shape) < 2:
-        raise ValueError("fast marching requires a 2-D grid of at least 2 by 2")
-    if not np.all(np.isfinite(model)) or np.any(model <= 0):
-        raise ValueError("slowness must be finite and positive")
-    h = np.asarray(spacing, dtype=float)
-    if h.shape != (2,) or np.any(h <= 0) or not np.all(np.isfinite(h)):
-        raise ValueError("spacing must be finite and positive")
-    seeds, _ = interpolation(model.shape, np.asarray(source).reshape(1, 2))
-    from usctbench.operators._marching import marching_arrays
+    return PreparedMarching(
+        slowness,
+        spacing,
+        compiled=compiled,
+        spatial_order=spatial_order,
+        budget_check=budget_check,
+        work_counts=work_counts,
+    ).solve(source)
 
-    march = (
-        marching_arrays
-        if compiled
-        else getattr(marching_arrays, "py_func", marching_arrays)
-    )
-    return MarchingTape(
-        *march(
-            model, h, np.asarray(source, dtype=float), np.unique(seeds), spatial_order
+
+class PreparedMarching:
+    """One validated slowness/spacing pair shared by a source loop."""
+
+    def __init__(
+        self,
+        slowness,
+        spacing,
+        *,
+        compiled=True,
+        spatial_order=1,
+        budget_check=None,
+        work_counts=None,
+    ):
+        if (
+            isinstance(spatial_order, (bool, np.bool_))
+            or not isinstance(spatial_order, (int, np.integer))
+            or spatial_order not in (1, 2)
+        ):
+            raise ValueError("spatial_order must be 1 or 2")
+        model = np.asarray(slowness, dtype=float)
+        if model.ndim != 2 or min(model.shape) < 2:
+            raise ValueError("fast marching requires a 2-D grid of at least 2 by 2")
+        if not np.all(np.isfinite(model)) or np.any(model <= 0):
+            raise ValueError("slowness must be finite and positive")
+        h = np.asarray(spacing, dtype=float)
+        if h.shape != (2,) or np.any(h <= 0) or not np.all(np.isfinite(h)):
+            raise ValueError("spacing must be finite and positive")
+        from usctbench.operators._marching import marching_arrays
+
+        self.model, self.spacing, self.spatial_order = model, h, spatial_order
+        self.march = (
+            marching_arrays
+            if compiled
+            else getattr(marching_arrays, "py_func", marching_arrays)
         )
-    )
+        self.budget_check, self.work_counts = budget_check, work_counts
+
+    def solve(self, source):
+        source = np.asarray(source, dtype=float)
+        seeds, _ = interpolation(self.model.shape, source.reshape(1, 2))
+        if self.budget_check is not None:
+            self.budget_check()
+        if self.work_counts is not None:
+            self.work_counts["eikonal_solves"] = (
+                self.work_counts.get("eikonal_solves", 0) + 1
+            )
+        return MarchingTape(
+            *self.march(
+                self.model, self.spacing, source, np.unique(seeds), self.spatial_order
+            )
+        )
 
 
 class EikonalJacobian:
@@ -117,7 +153,32 @@ class EikonalJacobian:
         return np.asarray(result).ravel()
 
     def adjoint(self, data: np.ndarray) -> np.ndarray:
-        return eikonal_adjoint(self, data)
+        from usctbench.operators._marching import reverse_accumulate
+
+        model = self.model
+        values = np.asarray(data, dtype=float)
+        if values.size != model.n_rays:
+            raise ValueError("data size must match (n_tx, n_rx)")
+        if not np.all(np.isfinite(values)):
+            raise ValueError("adjoint data must be finite")
+        values = values.reshape(model.ray_shape)
+        result = np.zeros(model.shape)
+        for tape, receiver_values in zip(self.tapes, values):
+            sensitivity = np.zeros(tape.times.size)
+            np.add.at(
+                sensitivity,
+                model.receiver_indices.ravel(),
+                (receiver_values[:, None] * model.receiver_weights).ravel(),
+            )
+            gradient = reverse_accumulate(
+                tape.order,
+                tape.parents,
+                tape.weights,
+                tape.local_derivative,
+                sensitivity,
+            )
+            result += gradient.reshape(model.shape)
+        return result[model.crop].copy()
 
 
 class EikonalForward:
@@ -137,6 +198,8 @@ class EikonalForward:
         background_speed_mps: float = 1500.0,
         calibrate: bool = True,
         spatial_order: int = 1,
+        budget_check=None,
+        work_counts=None,
     ):
         if not np.isfinite(background_speed_mps) or background_speed_mps <= 0:
             raise ValueError("background_speed_mps must be finite and positive")
@@ -147,6 +210,7 @@ class EikonalForward:
         ):
             raise ValueError("spatial_order must be 1 or 2")
         self.spatial_order = spatial_order
+        self.budget_check, self.work_counts = budget_check, work_counts
         self.background_speed_mps = float(background_speed_mps)
         positions = np.vstack((geometry.tx_pos_m, geometry.rx_pos_m))
         if not np.all(np.isfinite(positions)):
@@ -172,7 +236,6 @@ class EikonalForward:
         self.ray_shape = (len(geometry.tx_pos_m), len(geometry.rx_pos_m))
         self.n_rays = int(np.prod(self.ray_shape))
         self._reference = None
-        self.forward_calls = 0
 
     def extend(self, image: np.ndarray, *, background: float) -> np.ndarray:
         image = np.asarray(image, dtype=float)
@@ -188,22 +251,18 @@ class EikonalForward:
             axis=1,
         )
 
-    def fields(self, slowness: np.ndarray) -> tuple[MarchingTape, ...]:
-        extended = self.extend(slowness, background=self.background_slowness)
-        return tuple(
-            fast_march(
-                extended, self.grid.spacing_m, p, spatial_order=self.spatial_order
-            )
-            for p in self.source_coordinates
-        )
-
     def _raw(self, slowness, *, retain_tapes=True):
         extended = self.extend(slowness, background=self.background_slowness)
+        prepared = PreparedMarching(
+            extended,
+            self.grid.spacing_m,
+            spatial_order=self.spatial_order,
+            budget_check=self.budget_check,
+            work_counts=self.work_counts,
+        )
         values, tapes = [], []
         for source in self.source_coordinates:
-            tape = fast_march(
-                extended, self.grid.spacing_m, source, spatial_order=self.spatial_order
-            )
+            tape = prepared.solve(source)
             values.append(self.sample_receivers(tape.times))
             if retain_tapes:
                 tapes.append(tape)
@@ -212,7 +271,6 @@ class EikonalForward:
         return values, tapes
 
     def linearize(self, slowness: np.ndarray) -> Linearization:
-        self.forward_calls += 1
         values, tapes = self._raw(slowness)
         values = self._calibrate(values)
         return Linearization(values, EikonalJacobian(self, tapes))
@@ -235,31 +293,5 @@ class EikonalForward:
         return values
 
     def forward(self, slowness: np.ndarray) -> np.ndarray:
-        self.forward_calls += 1
         values, _ = self._raw(slowness, retain_tapes=False)
         return self._calibrate(values)
-
-
-def eikonal_adjoint(jacobian, data: np.ndarray) -> np.ndarray:
-    from usctbench.operators._marching import reverse_accumulate
-
-    model = jacobian.model
-    values = np.asarray(data, dtype=float)
-    if values.size != model.n_rays:
-        raise ValueError("data size must match (n_tx, n_rx)")
-    if not np.all(np.isfinite(values)):
-        raise ValueError("adjoint data must be finite")
-    values = values.reshape(model.ray_shape)
-    result = np.zeros(model.shape)
-    for tape, receiver_values in zip(jacobian.tapes, values):
-        sensitivity = np.zeros(tape.times.size)
-        np.add.at(
-            sensitivity,
-            model.receiver_indices.ravel(),
-            (receiver_values[:, None] * model.receiver_weights).ravel(),
-        )
-        gradient = reverse_accumulate(
-            tape.order, tape.parents, tape.weights, tape.local_derivative, sensitivity
-        )
-        result += gradient.reshape(model.shape)
-    return result[model.crop].copy()

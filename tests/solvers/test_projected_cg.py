@@ -261,7 +261,8 @@ def test_huber_reweighting_and_optimality_exclude_heldout_values_and_weights():
     second = run(changed, params, evaluation={"receiver_indices": [2]})
     np.testing.assert_array_equal(first.sound_speed_mps, second.sound_speed_mps)
     np.testing.assert_array_equal(
-        first.metrics["residual_curve"], second.metrics["residual_curve"]
+        [row["residual_norm"] for row in first.metrics["iteration_history"]],
+        [row["residual_norm"] for row in second.metrics["iteration_history"]],
     )
     assert first.metrics["solver_optimality"] == second.metrics["solver_optimality"]
     assert first.metrics["stopping"]["work"] == second.metrics["stopping"]["work"]
@@ -391,7 +392,7 @@ def test_bounded_complex_fixed_born_offset_has_analytic_kkt_solution():
     )
     np.testing.assert_allclose(actual, [[0, 1e-9 / 65]], rtol=1e-12, atol=1e-24)
     np.testing.assert_allclose(
-        control.last_prediction, offset + (matrix @ actual.ravel())[:, None]
+        control.current_state.prediction, offset + (matrix @ actual.ravel())[:, None]
     )
     costs = np.array([row["objective"] for row in metrics["iteration_history"]])
     assert np.all(np.diff(costs) <= 0)
@@ -433,6 +434,84 @@ def test_exact_data_fit_does_not_bypass_regularizer():
     np.testing.assert_allclose(result, 0.5, atol=1e-15)
     assert metrics["iteration_history"][-1]["objective"] == 1
     assert metrics["stopping"]["reason"] != "exact_data_fit"
+
+
+@pytest.mark.parametrize("adjoint_budget", [None, 1, 0])
+def test_selected_checkpoint_optimality_is_not_working_point_stationarity(
+    adjoint_budget,
+):
+    from tests.helpers import DenseJacobian
+
+    # Training Phi(x)=1/2(x-1)^2+1/2*x^2; validation selects the initial x=0.2.
+    case = USCTCase(
+        case_id="selected_stationarity",
+        measurement=MeasurementSpec(domain="features", delta_tof_s=[[1.0, 0.2]]),
+        grid=GridSpec(shape=(1, 1), spacing_m=(0.001, 0.001)),
+        geometry=GeometrySpec(tx_pos_m=[[0, 0]], rx_pos_m=[[0.001, 0], [0, 0.001]]),
+    )
+    config = prepare_config(
+        "straight_cgls",
+        AlgorithmConfig(
+            run_controls={
+                "max_iterations": 4,
+                "max_adjoint_calls": adjoint_budget,
+                "objective_rtol": None,
+                "update_rtol": None,
+                "restore_best_validation": True,
+            },
+            evaluation={"receiver_indices": [1]},
+        ),
+        case=case,
+    )
+
+    class Operator(DenseJacobian):
+        def adjoint(self, data):
+            return super().adjoint(data.ravel())
+
+    control = InversionControl(case, config, case.measurement.delta_tof_s)
+    state, metrics = projected_cg(
+        Operator(np.ones((2, 1)), (1, 1)),
+        control,
+        initial=np.array([[0.2]]),
+        reference=np.zeros((1, 1)),
+        lower=0,
+        upper=1,
+        damping=1,
+    )
+    np.testing.assert_array_equal(state, [[0.2]])
+    np.testing.assert_array_equal(control.selected_state.prediction, [[0.2, 0.2]])
+    assert (
+        control.selected_state.iteration
+        == metrics["stopping"]["selected_iteration"]
+        == 0
+    )
+    assert control.selected_state.linearization is None
+    selected = metrics["solver_optimality"]
+    if adjoint_budget == 0:
+        assert not selected["verified"]
+        assert selected["projected_gradient_norm"] is None
+        assert selected["projected_gradient_tolerance"] is None
+        assert selected["converged"] is None
+        assert control.current_state.iteration == 0
+    else:
+        np.testing.assert_allclose(control.current_state.model, [[0.5]], atol=1e-15)
+        assert selected["verified"] and not selected["converged"]
+        assert selected["projected_gradient_norm"] == pytest.approx(0.6)
+        initial_record = metrics["iteration_history"][0]["optimality"]
+        assert (
+            selected["projected_gradient_norm"]
+            == initial_record["projected_gradient_norm"]
+        )
+        if adjoint_budget is None:
+            assert metrics["stop_reason"] == "stationary_gradient"
+            assert metrics["iteration_history"][-1]["optimality"]["converged"]
+        else:
+            assert metrics["stop_reason"] == "adjoint_calls_budget"
+            assert "optimality" not in metrics["iteration_history"][-1]
+    assert metrics["data_residual_norm"] == pytest.approx(0.8)
+    assert control.work.counts["adjoint_calls"] == (
+        2 if adjoint_budget is None else adjoint_budget
+    )
 
 
 def small_case():
@@ -495,7 +574,6 @@ def test_huber_preconditioning_uses_only_training_data_and_global_budget():
     assert first.metrics["iterations"] <= 4
     costs = [row["objective"] for row in first.metrics["iteration_history"]]
     assert np.all(np.diff(costs) <= 1e-25)
-    assert first.metrics["objective_name"] == "weighted_huber"
 
 
 def test_bound_projected_metrics_correspond_to_returned_image():

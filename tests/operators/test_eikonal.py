@@ -136,3 +136,48 @@ def test_second_order_tape_is_causal_and_keeps_negative_far_weights():
 def test_rejects_invalid_order(bad):
     with pytest.raises(ValueError, match="spatial_order"):
         fast_march(np.ones((4, 5)), (1, 1), np.array([1.2, 1.4]), spatial_order=bad)
+
+
+def test_source_loop_prepares_once_and_counts_actual_solves(monkeypatch):
+    from usctbench.operators.eikonal import PreparedMarching
+
+    grid = GridSpec(shape=(4, 5), spacing_m=(0.001, 0.001))
+    geom = GeometrySpec(
+        tx_pos_m=[[-0.001, 0.001], [0.002, -0.001]],
+        rx_pos_m=[[0.005, 0.003], [0.003, 0.006]],
+    )
+    preparations = []
+    real_init = PreparedMarching.__init__
+
+    def prepare(self, *args, **kwargs):
+        preparations.append(1)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(PreparedMarching, "__init__", prepare)
+    work = {}
+    model = EikonalForward(grid, geom, work_counts=work)
+    model.linearize(np.full(grid.shape, 1 / 1510))
+    assert len(preparations) == 2
+    assert work["eikonal_solves"] == 4
+    model.forward(np.full(grid.shape, 1 / 1520))
+    assert len(preparations) == 3
+    assert work["eikonal_solves"] == 6
+
+
+def test_source_boundary_cancellation_does_not_count_unstarted_fmm():
+    from usctbench.core.stopping import BudgetExhausted
+
+    work = {}
+
+    def check():
+        if work.get("eikonal_solves", 0) == 1:
+            raise BudgetExhausted("time_budget")
+
+    grid = GridSpec(shape=(4, 5), spacing_m=(0.001, 0.001))
+    geom = GeometrySpec(
+        tx_pos_m=[[-0.001, 0.001], [0.002, -0.001]], rx_pos_m=[[0.005, 0.003]]
+    )
+    model = EikonalForward(grid, geom, work_counts=work, budget_check=check)
+    with pytest.raises(BudgetExhausted, match="time_budget"):
+        model.forward(np.full(grid.shape, 1 / 1500))
+    assert work["eikonal_solves"] == 1

@@ -10,9 +10,9 @@ def prepare_regularizer(kind):
     """Resolve L/L* once; built-in cell penalties are symmetric."""
     if hasattr(kind, "forward") and hasattr(kind, "adjoint"):
         return kind
-    if kind in {"identity", "l2"}:
+    if kind == "identity":
         return SimpleNamespace(forward=np.asarray, adjoint=np.asarray)
-    if kind in {"laplacian", "roughness"}:
+    if kind == "laplacian":
         coefficients = (1.0, 1.0)
     elif isinstance(kind, tuple) and len(kind) == 2:
         coefficients = kind

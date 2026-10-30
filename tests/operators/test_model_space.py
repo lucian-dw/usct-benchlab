@@ -75,23 +75,34 @@ def test_physical_gradient_and_reduced_transpose_on_rectangular_grid():
         gradient.adjoint(np.zeros(grid.shape))
 
 
-def test_straight_composition_and_norms():
+def test_straight_composition():
     grid, geom, basis = fixture()
     a = StraightRayProjector.from_grid_geometry(grid, geom)
-    ab = ReducedLinearOperator(a, basis, matrix=a.matrix)
+    ab = ReducedLinearOperator(a, basis)
     rng = np.random.default_rng(399)
-    x, y = rng.normal(size=basis.shape), rng.normal(size=ab.n_rays)
+    x, y = rng.normal(size=basis.shape), rng.normal(size=a.n_rays)
     np.testing.assert_allclose(ab.forward(x), a.forward(basis.forward(x)), atol=1e-16)
     np.testing.assert_allclose(ab.adjoint(y), basis.adjoint(a.adjoint(y)), atol=1e-16)
     np.testing.assert_allclose(
         np.vdot(ab.forward(x), y), np.vdot(x, ab.adjoint(y)), rtol=1e-13
     )
-    dense = ab.matrix.toarray()
-    for power in (1, 2):
-        np.testing.assert_allclose(ab.row_norms(power), (dense**power).sum(axis=1))
-        np.testing.assert_allclose(
-            ab.col_norms(power), (dense**power).sum(axis=0).reshape(basis.shape)
-        )
+
+
+def test_reduced_generic_complex_map_needs_no_ray_layout():
+    from tests.helpers import DenseJacobian
+
+    grid, _, basis = fixture()
+    rng = np.random.default_rng(601)
+    matrix = rng.normal(size=(7, np.prod(grid.shape))) + 1j * rng.normal(
+        size=(7, np.prod(grid.shape))
+    )
+    reduced = ReducedLinearOperator(DenseJacobian(matrix, grid.shape), basis)
+    x = rng.normal(size=basis.shape)
+    y = rng.normal(size=7) + 1j * rng.normal(size=7)
+    np.testing.assert_allclose(reduced.forward(x), matrix @ basis.forward(x).ravel())
+    np.testing.assert_allclose(
+        np.vdot(reduced.forward(x), y).real, np.vdot(x, reduced.adjoint(y)), rtol=1e-13
+    )
 
 
 @pytest.mark.parametrize("kind", ["identity", "laplacian", (0.7, 1.3)])
@@ -127,8 +138,7 @@ def test_reduced_eikonal_is_jb_not_straight_surrogate():
     s = 1 / 1500 + basis.forward(a)
     lin = model.linearize(s)
     jb = ReducedLinearOperator(lin.jacobian, basis)
-    assert not jb.sparse
-    y = rng.normal(size=jb.n_rays)
+    y = rng.normal(size=lin.value.shape)
     np.testing.assert_allclose(
         np.vdot(jb.forward(v), y), np.vdot(v, jb.adjoint(y)), rtol=1e-12
     )

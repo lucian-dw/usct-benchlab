@@ -49,6 +49,36 @@ def test_phase_unwrap_rejects_aliased_delay_even_with_zero_fit_error():
     assert np.isnan(result).all() and not confidence.any()
 
 
+def test_zero_phase_amplitude_ratio_accepts_only_positive_signals():
+    frequencies = np.array([100e3, 150e3, 200e3])
+    water = np.ones((3, 1, 4), dtype=complex)
+    water[:, :, 1] = 0
+    water[:, :, 3] = 1e-300
+    observed = 0.01 * water * np.exp(2j * np.pi * frequencies[:, None, None] * 1e-6)
+    observed[:, :, 2] = 0
+    delay, confidence, _ = phase_slope_delays(
+        observed,
+        water,
+        frequencies,
+        np.full((1, 4), 0.05),
+        np.ones(observed.shape, dtype=bool),
+        min_amplitude_ratio=0,
+    )
+    np.testing.assert_allclose(delay[0, [0, 3]], 1e-6, atol=1e-18)
+    assert np.all(confidence[0, [0, 3]] > 0.99)
+    assert np.isnan(delay[0, [1, 2]]).all()
+    assert not confidence[0, [1, 2]].any()
+    with pytest.raises(ValueError, match="tolerance"):
+        phase_slope_delays(
+            observed,
+            water,
+            frequencies,
+            np.full((1, 4), 0.05),
+            np.ones(observed.shape, dtype=bool),
+            min_amplitude_ratio=-0.01,
+        )
+
+
 def test_bounded_water_lag_sign_nonzero_time_origin_and_missing_traces():
     time = np.arange(1200) * 1e-7 - 10e-6
     arrival = 0.06 / 1500 + 6e-6

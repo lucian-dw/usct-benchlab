@@ -7,13 +7,18 @@ outputs:
 host_limits:
   max_iterations: 10
 algorithms:
-  - name: straight_cgls
+  - id: cgls_default
+    name: straight_cgls
     config: ../algorithms/cgls.yaml
-  - name: straight_sirt
+  - id: sirt_default
+    name: straight_sirt
     config: ../algorithms/sirt.yaml
-  - name: straight_sart
+  - id: sart_default
+    name: straight_sart
     config: ../algorithms/sart.yaml
-  - name: bent_ray_gn
+  - id: bent_default
+    name: bent_ray_gn
     config: ../algorithms/bent_ray.yaml
-  - name: rwave_adapter
-    config: ../algorithms/rwave.yaml
+  - id: born_full_green
+    name: born
+    config: ../algorithms/born.yaml

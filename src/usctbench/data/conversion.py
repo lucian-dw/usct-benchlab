@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 import numpy as np
-from usctbench.core.schema import GeometrySpec, GridSpec
+from usctbench.core.schema import GridSpec
 
 
-def _downsample_mean(image: np.ndarray, output_shape: tuple[int, int]) -> np.ndarray:
-    """Resize a property map to the benchmark grid with linear interpolation.
-
-    The historical name is kept for API stability. For quality comparisons this
-    intentionally rescales the full fitted field of view instead of center
-    cropping, so 480x480 maps converted to 256x256 keep the whole phantom.
-    """
+def resample_bilinear(image: np.ndarray, output_shape: tuple[int, int]) -> np.ndarray:
+    """Bilinearly resample cell centers while preserving the full cell-edge FOV."""
 
     array = np.asarray(image, dtype=float)
     ny, nx = array.shape
@@ -32,7 +27,9 @@ def _downsample_mean(image: np.ndarray, output_shape: tuple[int, int]) -> np.nda
     return ((1.0 - wy) * top + wy * bottom).astype(float, copy=False)
 
 
-def _downsample_label(label: np.ndarray, output_shape: tuple[int, int]) -> np.ndarray:
+def resample_labels_nearest(
+    label: np.ndarray, output_shape: tuple[int, int]
+) -> np.ndarray:
     """Nearest-neighbor labels on the same cell-edge FOV as continuous maps."""
     label = np.asarray(label)
     y_src, x_src = _resampling_coordinates(label.shape, output_shape)
@@ -51,10 +48,11 @@ def _resampling_coordinates(source_shape, output_shape):
     )
 
 
-def _grid_from_coordinates(
-    shape: tuple[int, int], *, xi: np.ndarray | None, yi: np.ndarray | None
+def grid_from_coordinates(
+    shape: tuple[int, int] | None, *, xi: np.ndarray | None, yi: np.ndarray | None
 ) -> GridSpec:
-    if xi is not None and yi is not None and xi.size > 1 and yi.size > 1:
+    """Build pixel-edge geometry from uniformly sampled physical cell centers."""
+    if xi is not None and yi is not None and np.size(xi) > 1 and np.size(yi) > 1:
         axes = [np.asarray(a, dtype=float).reshape(-1) for a in (yi, xi)]
         steps = [float(np.mean(np.diff(a))) for a in axes]
         if any(
@@ -64,34 +62,13 @@ def _grid_from_coordinates(
             raise ValueError(
                 "source coordinates must be finite, uniform and increasing"
             )
+        shape = tuple(len(a) for a in axes) if shape is None else tuple(shape)
         return GridSpec(
             shape=shape,
             spacing_m=tuple(d * len(a) / n for a, d, n in zip(axes, steps, shape)),
             origin_m=tuple(a[0] - d / 2 for a, d in zip(axes, steps)),
-            roi_mask=np.ones(shape, dtype=bool),
         )
     raise ValueError("xi_orig and yi_orig cell-center coordinates are required")
-
-
-def _geometry_from_xy_positions(
-    positions_xy: np.ndarray, *, n_transducers: int
-) -> GeometrySpec:
-    positions_xy = np.asarray(positions_xy, dtype=float)
-    if positions_xy.ndim != 2 or positions_xy.shape[1] != 2:
-        raise ValueError("transducerPositionsXY must have shape (n, 2)")
-    if n_transducers <= 0 or n_transducers > positions_xy.shape[0]:
-        n_transducers = positions_xy.shape[0]
-    indices = (
-        np.linspace(0, positions_xy.shape[0] - 1, n_transducers).round().astype(int)
-    )
-    positions_yx = positions_xy[indices][:, [1, 0]]
-    radius_m = float(np.median(np.linalg.norm(positions_yx, axis=1)))
-    return GeometrySpec(
-        type="ring",
-        tx_pos_m=positions_yx,
-        rx_pos_m=positions_yx.copy(),
-        radius_m=radius_m,
-    )
 
 
 def _safe_case_id(value: str) -> str:

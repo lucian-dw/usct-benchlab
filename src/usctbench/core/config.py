@@ -10,22 +10,11 @@ from typing import Any
 import yaml
 
 
-def parameter_model(name, parameters=None):
-    from usctbench.core.registry import get_algorithm_entry
-
-    return get_algorithm_entry(name).parameter_model(parameters)
-
-
-def default_iterations(name, parameters=None, case=None):
-    from usctbench.core.registry import get_algorithm_entry
-
-    return get_algorithm_entry(name).default_iterations(parameters, case)
-
-
 def prepare_config(name, config, *, case=None, host_limits=None, deployment=None):
     """Parse each scientific payload once; intersect resolved request/host budgets."""
     from usctbench.core.schema import AlgorithmConfig
     from usctbench.core.execution import Deployment
+    from usctbench.core.registry import get_algorithm_entry
 
     if isinstance(config, (str, Path)):
         config = AlgorithmConfig.model_validate(expand_config_value(load_yaml(config)))
@@ -45,18 +34,17 @@ def prepare_config(name, config, *, case=None, host_limits=None, deployment=None
             key: value.tolist() if isinstance(value, np.ndarray) else value
             for key, value in values.items()
         }
-    model = parameter_model(name, values)
+    entry = get_algorithm_entry(name)
+    model = entry.parameter_model(values)
     parameters = values if isinstance(values, model) else model.model_validate(values)
     controls = config.run_controls
-    count = default_iterations(name, parameters, case)
-    # WUST's inherited frequency plan needs a case; YAML loading can stay static.
+    count = entry.default_iterations(parameters, case)
+    # Case-dependent defaults remain unresolved during static YAML inspection.
     if count is not None or controls.max_iterations is not None:
         controls = controls.capped(host_limits, default_iterations=count)
     elif host_limits is not None:
-        raise ValueError("case required to resolve inherited WUST frequency budget")
-    from usctbench.core.registry import get_algorithm_entry
-
-    get_algorithm_entry(name).validate_controls(controls)
+        raise ValueError(f"case required to resolve inherited {name} iteration budget")
+    entry.validate_controls(controls)
     context = config.deployment
     if deployment is not None:
         overrides = Deployment.model_validate(deployment).model_dump(exclude_unset=True)

@@ -19,6 +19,7 @@ from usctbench.core.schema import (
     ReconstructionResult,
     USCTCase,
 )
+from usctbench.data.pressure import dtft_pressure_contract
 
 
 class DummyAlgorithm:
@@ -30,17 +31,28 @@ class DummyAlgorithm:
         )
 
 
-def test_case_and_result_hdf5_roundtrip(written_case, tmp_path):
+@pytest.mark.parametrize(
+    "experiment_id,variant", [(None, None), ("reference_run", "wkb_fixed")]
+)
+def test_case_and_result_hdf5_roundtrip(written_case, tmp_path, experiment_id, variant):
     case = read_case_hdf5(written_case)
     assert case.case_id == "synthetic_circular_sos"
     assert case.measurement.delta_tof_s is not None
 
     result = DummyAlgorithm().run(case, AlgorithmConfig(parameters={}))
+    result.experiment_id = experiment_id
+    result.variant = variant
     result_path = write_result_hdf5(result, tmp_path / "result.h5")
+    with h5py.File(result_path, "r") as handle:
+        assert (handle.attrs.get("experiment_id"), handle.attrs.get("variant")) == (
+            experiment_id,
+            variant,
+        )
     loaded = read_result_hdf5(result_path)
 
     assert loaded.algorithm == "dummy"
     assert loaded.case_id == case.case_id
+    assert (loaded.experiment_id, loaded.variant) == (experiment_id, variant)
     assert loaded.metrics["ok"] is True
 
 
@@ -60,7 +72,7 @@ def test_complex_layout_units_and_valid_zero_roundtrip(tmp_path):
             source_spectrum=np.full((2, 3), 2 + 3j),
             valid_mask=valid,
         ),
-        metadata={"frequency_data_units": "Pa*s"},
+        metadata={"pressure_contract": dtft_pressure_contract("Pa*s")},
     )
     path = write_case_hdf5(case, tmp_path / "complex.h5")
     restored = read_case_hdf5(path)

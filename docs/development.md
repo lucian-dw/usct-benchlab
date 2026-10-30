@@ -1,6 +1,6 @@
 # Development
 
-1. Install Python 3.10+ and run pip install -e ".[dev,viz]".
+1. Install Python 3.12+ and run pip install -e ".[dev,viz]".
 2. Read [AGENTS.md](../AGENTS.md), the affected implementation, callers and tests.
 3. Change the complete path: input, numerical behavior, output, docs and relevant tests.
 4. Format and run the corresponding verification:

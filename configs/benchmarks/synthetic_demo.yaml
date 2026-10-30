@@ -5,10 +5,13 @@ outputs:
 host_limits:
   max_iterations: 10
 algorithms:
-  - name: straight_cgls
+  - id: cgls_default
+    name: straight_cgls
     config: ../algorithms/cgls.yaml
-  - name: straight_sirt
+  - id: sirt_default
+    name: straight_sirt
     config: ../algorithms/sirt.yaml
-  - name: straight_sart
+  - id: sart_default
+    name: straight_sart
     config: ../algorithms/sart.yaml
 # Matched straight-ray ToF; native Eikonal and Born have separate physical fixtures.

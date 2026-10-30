@@ -43,10 +43,11 @@ def main():
     else:
         path = args.fixture.resolve() / "coherent.json"
     fixture_seconds = time.monotonic() - started
-    doc, arrays = read_artifact(path, "wust.frequency_input")
+    doc, arrays = read_artifact(path, "wust.measurements")
     grid = doc["metadata"]["grid"]
-    pressure = arrays["pressure"].transpose(2, 0, 1)
-    mask = arrays["mask"].transpose(2, 0, 1)
+    order = np.arange(len(arrays["frequencies_hz"]))[::-1]
+    pressure = arrays["Y"][..., order].transpose(2, 0, 1)
+    mask = arrays["mask"][..., order].transpose(2, 0, 1)
     # Positive-sign Fourier data deliberately exercise WUST-owned conjugation.
     case = USCTCase(
         case_id="wust_cross_repository",
@@ -62,7 +63,7 @@ def main():
         ),
         measurement=MeasurementSpec(
             domain="frequency",
-            frequencies_hz=arrays["frequencies_hz"],
+            frequencies_hz=arrays["frequencies_hz"][order],
             freq_data=pressure.conj(),
             valid_mask=mask,
         ),

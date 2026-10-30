@@ -23,16 +23,16 @@ $$
 | straight_sirt | 水参考差分 ToF，秒 | 同时归一化射线更新，$\delta s$ | [sirt.yaml](configs/algorithms/sirt.yaml) |
 | straight_sart | 水参考差分 ToF，秒 | 有序子集归一化更新，$\delta s$ | [sart.yaml](configs/algorithms/sart.yaml) |
 | bent_ray_gn | 首波到达时间或水参考 ToF | 原生 Eikonal/Gauss–Newton，$s=1/c$ | [bent_ray.yaml](configs/algorithms/bent_ray.yaml) |
-| rwave_adapter | 复压力与源校准或独立水参考 | 原生 WKB / Full-Green Born，$m=1/c^2$ | [rwave.yaml](configs/algorithms/rwave.yaml) |
+| born | 复压力与源校准或独立水参考 | 原生 WKB / Full-Green Born，$m=1/c^2$ | [born.yaml](configs/algorithms/born.yaml) |
 | fwi_wust | 约定明确的复数总压力 | 独立维护的 WUST Helmholtz FWI，$s=1/c$ | [fwi_wust.yaml](configs/algorithms/fwi_wust.yaml) |
 
-**rwave_adapter** 是保留的注册名，表示本仓库的 Ray-Born 方法，不声称完整复现上游
+**born** 是本仓库 Born 方法的统一入口，不声称完整复现上游
 r-Wave。详见[数学形式化](docs/math_formulation.md)和[算法说明](docs/algorithms.md)。
 YAML 是显式示例配置，不是经过标定的强弱档位，也不保证特定图像质量。
 
 ## 安装与首次运行
 
-需要 Python 3.10+：
+需要 Python 3.12+：
 
 ~~~bash
 pip install -e ".[dev,viz]"
@@ -66,7 +66,7 @@ print(result.status, result.metrics.get("stop_reason"))
 
 ~~~bash
 usct list-algorithms --json
-usct describe-algorithm rwave_adapter --variant full_green_nonlinear --json
+usct describe-algorithm born --variant full_green_nonlinear
 usct bench --suite configs/benchmarks/synthetic_demo.yaml
 ~~~
 

@@ -24,6 +24,10 @@ result = run("straight_cgls", case, config, "runs/agent_example",
 **describe** is static: model family, variant, observation requirements, allowed
 parameter schema/defaults, iteration unit, limitations and runtime requirements.
 It does not start MATLAB or probe hardware.
+The selected registry entry owns parameter models, defaults, supported budgets
+and numerical-stopping capability. Use `describe(name, variant)` or
+`get_algorithm_entry(name).describe(variant)`; static physical specifications do
+not look back through the registry.
 
 **case_capabilities** reports frequencies and calibration presence, never run policy.
 Presence is not validation of calibration units. Runtime availability is unknown
@@ -50,11 +54,12 @@ run may have a useful complete checkpoint; an external timeout may have no image
 
 ~~~bash
 usct list-algorithms --json
-usct describe-algorithm bent_ray_gn --json
-usct describe-algorithm rwave_adapter --variant full_green_nonlinear --json
+usct describe-algorithm bent_ray_gn
+usct describe-algorithm born --variant full_green_nonlinear
 usct evaluate --run runs/agent_example
 ~~~
 
-JSON stdout is machine-readable; diagnostics belong on stderr. No changes to
-consumer repositories are required by this source refactor, but consumers must
-migrate removed aliases and v1 runtime messages as listed in [CHANGELOG](../CHANGELOG.md).
+Describe always writes JSON and has no format flag. List retains its optional
+`--json` flag. Diagnostics belong on stderr. Consumers must migrate the public
+Born name to `born`, use `configs/algorithms/born.yaml`, and remove the obsolete
+describe format flag. The low-level class is `algorithms.born.BornAlgorithm`.

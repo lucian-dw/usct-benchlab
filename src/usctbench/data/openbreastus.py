@@ -4,12 +4,12 @@ import json
 from pathlib import Path
 
 import h5py
-from scipy.io import whosmat
+from scipy.io import loadmat, whosmat
 
 from contextlib import contextmanager
 from typing import Any
 import numpy as np
-from .conversion import _downsample_mean
+from .conversion import resample_bilinear
 from usctbench.data.synthetic import (
     build_surrogate_tof_case,
     make_grid,
@@ -180,7 +180,7 @@ def convert_speed_mat_volume(
                 sound_speed = sound_speed.T
             if sound_speed_units == "km/s":
                 sound_speed = sound_speed * 1000.0
-            sound_speed = _downsample_mean(sound_speed, output_shape)
+            sound_speed = resample_bilinear(sound_speed, output_shape)
             case_id_suffix = extra_metadata.pop("case_id_suffix", None)
             prefix = case_id_prefix or source.stem
             case_id = (
@@ -281,6 +281,8 @@ def _speed_array_to_case(
                 ],
                 "reference_sound_speed_mps": reference_sound_speed_mps,
                 "spacing_m_assumption": list(spacing_m),
+                "roi_source": "full_grid",
+                "roi_use": "reconstruction_domain",
             },
             measurement_provenance=MeasurementProvenance.SPEEDMAP_TRAVEL_TIME_SURROGATE,
             benchmark_type="speedmap_travel_time_surrogate",
@@ -299,13 +301,6 @@ def _open_speed_volume(path: Path, *, dataset_name: str):
             name = dataset_name
             yield {"name": name, "dataset": handle[name], "format": "matlab-v7.3-hdf5"}
             return
-
-    try:
-        from scipy.io import loadmat
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            f"{path} is not HDF5; scipy is required to read MATLAB v5 MAT speed volumes"
-        ) from exc
 
     data = loadmat(path)
     name = dataset_name

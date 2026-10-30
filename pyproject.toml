@@ -7,7 +7,7 @@ name = "usct-benchlab"
 version = "0.1.0"
 description = "Lightweight benchmark package for ultrasound computed tomography reconstruction algorithms."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
   { name = "usct-benchlab contributors" }
@@ -46,11 +46,11 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 
 [tool.black]
-target-version = ["py310"]
+target-version = ["py312"]
 
 # Keep the historical correctness profile stable across Ruff default changes.
 [tool.ruff]
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]

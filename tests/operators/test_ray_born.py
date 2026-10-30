@@ -32,6 +32,7 @@ def test_volume_solver_checks_deadline_inside_source_solve():
     with pytest.raises(BudgetExhausted, match="time_budget"):
         solver.fields(op.green_fields(0))
     assert len(calls) == 3
+    assert solver.work_counts == {"green_solves": 1, "green_matvecs": 1}
 
 
 def test_conservative_transport_converges_for_radial_energy_flux():
@@ -117,7 +118,7 @@ def test_volume_born_derivative_matches_nonlinear_finite_difference():
     )
     assert adjoint_error(lin.jacobian, dm, complex_data) < 1e-12
     assert lin.derivative_kind == "discrete_volume_integral_born_derivative"
-    assert forward.green_solves > 0
+    assert forward.work_counts["green_solves"] > 0
     errors = []
     for epsilon in (0.1, 0.05, 0.025):
         numerical = (
@@ -259,3 +260,179 @@ def test_green_cache_budget_does_not_change_results():
     image = np.full(uncached.grid.shape, 1e-10)
     np.testing.assert_allclose(cached.forward(image), uncached.forward(image))
     assert sum(g.nbytes for g in cached._cache.values()) <= cached.max_cache_bytes
+
+
+@pytest.mark.parametrize("cache", [0, 100000])
+def test_combined_background_diagonal_and_later_jacobian_count_actual_work(
+    monkeypatch, cache
+):
+    from usctbench.operators import volume_integral
+    from usctbench.operators.ray_born import born_jacobian
+
+    base = setup_operator(True)
+    work = {"forward_calls": 7}
+    settings = dict(
+        background_sound_speed_mps=base.background,
+        acquisition=base.acquisition,
+        green_backend="volume_integral",
+        green_solver_rtol=1e-12,
+        max_cache_bytes=cache,
+    )
+    reference = RayBornOperator(
+        base.grid, base.geometry, base.frequencies_hz, **settings
+    )
+    weights = np.arange(base.n_rays).reshape(base.data_shape) / 10
+    expected = reference.background_data(), reference.normal_diagonal(weights)
+    actual_work = {"green_solves": 0, "green_matvecs": 0}
+    real_gmres, real_matvec = volume_integral.gmres, VolumeIntegralGreen._matvec
+
+    def gmres(*args, **kwargs):
+        actual_work["green_solves"] += 1
+        return real_gmres(*args, **kwargs)
+
+    def matvec(self, values):
+        actual_work["green_matvecs"] += 1
+        return real_matvec(self, values)
+
+    monkeypatch.setattr(volume_integral, "gmres", gmres)
+    monkeypatch.setattr(VolumeIntegralGreen, "_matvec", matvec)
+    op = RayBornOperator(
+        base.grid, base.geometry, base.frequencies_hz, work_counts=work, **settings
+    )
+    prediction, diagonal = op.background_data_and_diagonal(weights)
+    np.testing.assert_allclose(prediction, expected[0], rtol=1e-13)
+    np.testing.assert_allclose(diagonal, expected[1], rtol=1e-13)
+    batch = len(op.positions) * len(op.frequencies_hz)
+    assert work["green_solves"] == batch
+    jacobian = born_jacobian(op)
+    delta = np.full(op.grid.shape, 1e-10)
+    for multiplier, execute in enumerate(
+        (lambda: jacobian.forward(delta), lambda: jacobian.adjoint(prediction)), start=2
+    ):
+        execute()
+        assert work["green_solves"] == (batch * multiplier if cache == 0 else batch)
+        assert all(work[name] == count for name, count in actual_work.items())
+    assert work["forward_calls"] == 7
+    assert work["background_builds"] == 1
+    op.close()
+    assert not op._cache
+
+
+def test_acquisition_calibrated_source_and_water_reference_shared_across_backgrounds():
+    from usctbench.operators.ray_born import RayBornAcquisition
+
+    base = setup_operator()
+    work = {}
+    acquisition = RayBornAcquisition(base.grid, base.geometry, base.frequencies_hz)
+    op = RayBornOperator(
+        base.grid,
+        base.geometry,
+        base.frequencies_hz,
+        acquisition=acquisition,
+        background_sound_speed_mps=1505.0,
+        work_counts=work,
+    )
+    op.source_spectrum = base.source_spectrum
+    prediction, diagonal = op.background_data_and_diagonal()
+    assert diagonal is None
+    assert work["eikonal_solves"] == 2 * len(op.positions)
+    forward = RayBornForward(
+        base.grid,
+        base.geometry,
+        base.frequencies_hz,
+        acquisition=op.acquisition,
+        work_counts=work,
+        max_cache_bytes=0,
+    )
+    lin = forward.linearize(op.background_squared_slowness)
+    assert lin.jacobian.acquisition is acquisition
+    assert lin.jacobian.reference_cache is op.reference_cache
+    assert lin.jacobian.distance is op.distance
+    assert lin.jacobian.source_spectrum is op.source_spectrum
+    assert work["eikonal_solves"] == 3 * len(op.positions)
+    np.testing.assert_allclose(lin.value, prediction, rtol=1e-13)
+    op.close()
+    np.testing.assert_allclose(lin.jacobian.source_spectrum, base.source_spectrum)
+
+
+def test_volume_failed_solve_is_counted_and_residual_guard_remains(monkeypatch):
+    from usctbench.operators import volume_integral
+
+    base = setup_operator()
+    work = {}
+    solver = VolumeIntegralGreen(
+        base.grid,
+        base.frequencies_hz[0],
+        np.full(base.grid.shape, 1600),
+        1500,
+        rtol=1e-12,
+        maxiter=1,
+        work_counts=work,
+    )
+    monkeypatch.setattr(volume_integral, "gmres", lambda op, rhs, **kw: (rhs, 0))
+    with pytest.raises(FloatingPointError, match="volume-integral Green solve failed"):
+        solver.fields(base.green_fields(0))
+    assert work == {"green_solves": 1, "green_matvecs": 1}
+
+
+def test_cuda_background_and_jacobian_share_device_cache(monkeypatch):
+    from collections import Counter
+
+    cp = pytest.importorskip("cupy")
+    if cp.cuda.runtime.getDeviceCount() == 0:
+        pytest.skip("CUDA device required")
+    from usctbench.operators.ray_born import born_jacobian
+
+    base = setup_operator(True)
+    settings = dict(
+        acquisition=base.acquisition,
+        background_sound_speed_mps=base.background,
+        green_backend="volume_integral",
+        green_solver_rtol=1e-11,
+        max_cache_bytes=100000,
+    )
+    cpu = RayBornOperator(base.grid, base.geometry, base.frequencies_hz, **settings)
+    gpu = RayBornOperator(
+        base.grid, base.geometry, base.frequencies_hz, green_device=0, **settings
+    )
+    transfers = []
+    real_asnumpy = cp.asnumpy
+
+    def asnumpy(values, *args, **kwargs):
+        transfers.append(values.shape)
+        return real_asnumpy(values, *args, **kwargs)
+
+    monkeypatch.setattr(cp, "asnumpy", asnumpy)
+    prediction, diagonal = gpu.background_data_and_diagonal(np.ones(gpu.data_shape))
+    expected_prediction, expected_diagonal = cpu.background_data_and_diagonal(
+        np.ones(cpu.data_shape)
+    )
+    np.testing.assert_allclose(prediction, expected_prediction, rtol=1e-9, atol=1e-12)
+    np.testing.assert_allclose(diagonal, expected_diagonal, rtol=1e-9)
+    # CuPy GMRES may transfer its small Hessenberg system for CPU least squares.
+    # The field cache must stay on-device; only public results need host arrays.
+    field_shape = (len(gpu.positions), gpu.n_pixels)
+    transfer_counts = Counter(transfers)
+    assert field_shape not in transfer_counts, transfer_counts
+    assert transfer_counts[gpu.data_shape] == 1, transfer_counts
+    assert transfer_counts[(gpu.n_pixels,)] == 1, transfer_counts
+    assert all(isinstance(field, cp.ndarray) for field in gpu._cache.values())
+    assert sum(field.nbytes for field in gpu._cache.values()) <= gpu.max_cache_bytes
+    counts = dict(gpu.work_counts)
+    jacobian = born_jacobian(gpu)
+    assert jacobian is gpu
+    arrays = gpu.acquisition.device_arrays(0)
+    delta = np.full(gpu.grid.shape, 1e-10)
+    np.testing.assert_allclose(jacobian.forward(delta), cpu.forward(delta), rtol=1e-9)
+    np.testing.assert_allclose(
+        jacobian.adjoint(prediction), cpu.adjoint(prediction), rtol=1e-9
+    )
+    assert gpu.work_counts == counts
+    assert gpu.acquisition.device_arrays(0) is arrays
+    assert adjoint_error(jacobian, delta, prediction) < 1e-12
+    assert field_shape not in transfers, Counter(transfers)
+    assert isinstance(gpu.green_fields(0), np.ndarray)
+    assert transfers[-1] == field_shape  # Explicit public host-field request.
+    gpu.close()
+    gpu.acquisition.close()
+    assert not gpu._cache and not gpu.acquisition._device_arrays

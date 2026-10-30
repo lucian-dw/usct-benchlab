@@ -17,6 +17,7 @@ from usctbench.core.schema import (
     ReconstructionResult,
     USCTCase,
 )
+from usctbench.data.pressure import pressure_units
 
 SCHEMA_VERSION = "0.1"
 
@@ -24,9 +25,9 @@ SCHEMA_VERSION = "0.1"
 # Pressure units are acquisition facts, not inferred from numerical magnitude.
 MEASUREMENT_FIELDS = {
     "frequencies_hz": ("frequency", "Hz"),
-    "freq_data": ("frequency,tx,rx", "metadata.frequency_data_units"),
+    "freq_data": ("frequency,tx,rx", "metadata.pressure_contract.data_units"),
     "time_data": ("time,tx,rx", "metadata.pressure_units"),
-    "water_reference": ("frequency,tx,rx", "metadata.frequency_data_units"),
+    "water_reference": ("frequency,tx,rx", "metadata.pressure_contract.data_units"),
     "water_reference_time": ("time,tx,rx", "metadata.pressure_units"),
     "source_spectrum": ("frequency|frequency,tx", "metadata.source_units"),
     "source_wavelet": ("time", "metadata.source_units"),
@@ -133,9 +134,13 @@ def write_case_hdf5(case: USCTCase, path: str | Path) -> Path:
                     )
                 dataset.attrs["axes"] = layout
                 dataset.attrs["units"] = (
-                    case.metadata.get(units.removeprefix("metadata."), "unknown")
-                    if units.startswith("metadata.")
-                    else units
+                    pressure_units(case.metadata)
+                    if units == "metadata.pressure_contract.data_units"
+                    else (
+                        case.metadata.get(units.removeprefix("metadata."), "unknown")
+                        if units.startswith("metadata.")
+                        else units
+                    )
                 )
 
         ground_truth = handle.create_group("ground_truth")
@@ -218,6 +223,10 @@ def write_result_hdf5(result: ReconstructionResult, path: str | Path) -> Path:
         handle.attrs["record_type"] = "ReconstructionResult"
         handle.attrs["algorithm"] = result.algorithm
         handle.attrs["case_id"] = result.case_id
+        for name in ("experiment_id", "variant"):
+            value = getattr(result, name)
+            if value is not None:
+                handle.attrs[name] = value
         handle.attrs["runtime_s"] = result.runtime_s
         handle.attrs["status"] = str(result.status)
         if result.failure_reason is not None:
@@ -238,6 +247,11 @@ def read_result_hdf5(path: str | Path) -> ReconstructionResult:
         return ReconstructionResult(
             algorithm=_read_str_attr(handle.attrs, "algorithm"),
             case_id=_read_str_attr(handle.attrs, "case_id"),
+            **{
+                name: _read_str_attr(handle.attrs, name)
+                for name in ("experiment_id", "variant")
+                if name in handle.attrs
+            },
             sound_speed_mps=_read_dataset(handle, "sound_speed_mps"),
             metrics=_json_loads(handle.attrs.get("metrics_json", "")),
             runtime_s=float(handle.attrs["runtime_s"]),

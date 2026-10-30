@@ -10,7 +10,7 @@ from scipy.linalg import norm
 from scipy.sparse.linalg import LinearOperator, lsmr, lsqr
 
 from usctbench.operators.base import LinearSolveInfo
-from usctbench.operators.regularization import regularizer
+from usctbench.operators.regularization import prepare_regularizer
 
 
 def solve_linearized(
@@ -64,9 +64,8 @@ def solve_linearized(
     ndata, nmodel = sqrt_w.size, int(active.sum())
     data_rows = ndata * (2 if complex_data else 1)
     sqrt_mu = np.sqrt(damping)
-    reg_current = (
-        np.asarray(regularizer(current, regularization)) if damping else np.empty(0)
-    )
+    penalty = prepare_regularizer(regularization)
+    reg_current = np.asarray(penalty.forward(current)) if damping else np.empty(0)
     reg_shape = reg_current.shape
 
     def expand(free):
@@ -83,9 +82,7 @@ def solve_linearized(
         data = sqrt_w * prediction[selected]
         parts = [data.real, data.imag] if complex_data else [data]
         if damping:
-            parts.append(
-                sqrt_mu * np.asarray(regularizer(image, regularization)).ravel()
-            )
+            parts.append(sqrt_mu * np.asarray(penalty.forward(image)).ravel())
         return np.concatenate(parts)
 
     def rmatvec(vector):
@@ -99,12 +96,7 @@ def solve_linearized(
         ).real.reshape(current.shape)
         if damping:
             reg_data = vector[data_rows:].reshape(reg_shape)
-            reg_adj = (
-                regularization.adjoint(reg_data)
-                if hasattr(regularization, "adjoint")
-                else regularizer(reg_data, regularization)
-            )
-            image = image + sqrt_mu * reg_adj
+            image = image + sqrt_mu * penalty.adjoint(reg_data)
         return image[active]
 
     target_data = residual[selected] / sqrt_w
@@ -184,7 +176,8 @@ def solve_linearized(
     if not np.isfinite(free).all():
         raise FloatingPointError("nonfinite physical linearized step")
     relative = float(normar / norm(initial_gradient))
-    converged = bool(code in {0, 1, 2, 4, 5} and relative <= rtol)
+    # LSMR/LSQR own their backward-error criteria; rtol belongs to normal CG.
+    converged = bool(code in {0, 1, 2, 4, 5})
     reasons = {
         0: "zero_solution",
         1: "compatible_backward_error",
@@ -198,7 +191,11 @@ def solve_linearized(
     return expand(free), LinearSolveInfo(
         method,
         int(completed),
-        "normal_residual_target" if converged else reasons[int(code)],
+        (
+            "normal_residual_target"
+            if method == "normal_cg" and converged
+            else reasons[int(code)]
+        ),
         relative,
         float(rhs_scale * normr),
         converged,

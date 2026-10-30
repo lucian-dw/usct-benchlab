@@ -9,7 +9,7 @@ import h5py
 import numpy as np
 
 
-def publish_result(path, schema, metadata, arrays, axes, units):
+def write_artifact(path, schema, metadata, arrays, axes, units):
     path = Path(path)
     data = path.with_suffix(".h5")
     if path.exists() or data.exists():
@@ -147,4 +147,4 @@ def frequency_input(case, path):
         "tx_xy_m": "m",
         "rx_xy_m": "m",
     }
-    return publish_result(path, "wust.frequency_input", metadata, arrays, axes, units)
+    return write_artifact(path, "wust.frequency_input", metadata, arrays, axes, units)

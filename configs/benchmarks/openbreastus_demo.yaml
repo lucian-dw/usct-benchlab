@@ -3,12 +3,16 @@ case_glob: ${USCT_OPENBREASTUS_CASE_GLOB:-../../data/openbreastus_demo/cases/*.h
 outputs:
   root: ${USCT_RUN_ROOT:-../../runs}
 algorithms:
-  - name: straight_cgls
+  - id: cgls_default
+    name: straight_cgls
     config: ../algorithms/cgls.yaml
-  - name: straight_sirt
+  - id: sirt_default
+    name: straight_sirt
     config: ../algorithms/sirt.yaml
-  - name: straight_sart
+  - id: sart_default
+    name: straight_sart
     config: ../algorithms/sart.yaml
-  - name: bent_ray_gn
+  - id: bent_default
+    name: bent_ray_gn
     config: ../algorithms/bent_ray.yaml
 # Property maps converted to straight-ray travel-time surrogates, not RF.

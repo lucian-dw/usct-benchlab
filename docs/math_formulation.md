@@ -37,6 +37,23 @@ ROI pixels outside the update region remain fixed. Projected CG restarts when
 constraints or IRLS weights change. A zero data residual alone is not
 stationarity of the regularized objective.
 
+The projected-gradient infinity norm is computed from the complete training
+objective on the box/ROI active set and compared with its first value times
+`optimality_rtol`. Each computed norm and threshold belongs to that accepted
+history row. Output selection reads the row at `selected_iteration`; an
+uncomputed value is null. A stationary final working point does not certify a
+different validation-selected model. For example, minimizing
+$\tfrac12(x-1)^2+\tfrac12x^2$ gives $x=0.5$, while a validation-selected $x=0.2$
+still has gradient magnitude 0.6.
+
+IRLS freezes training weights for at most `irls_max_inner_steps`. Refreshing
+weights resets the conjugate direction, stage and steps-since-refresh counter.
+A stale stationary direction, infeasible or non-descent direction, rejected
+trial, or stale-weight stagnation receives one fresh feasible-gradient retry.
+This retry consumes actual operator work but not another accepted iteration.
+Curvature failures retain their linear-solver failure classification. Acceptance
+uses the actual Huber objective, not the frozen-weight quadratic surrogate.
+
 For SIRT/SART, $r_i=\sum_j A_{ij}$ and subset column normalizers
 $d_j=\sum_{i\in S}w_iA_{ij}$ give
 
@@ -61,7 +78,7 @@ discretization correction. Differentiating its active stencil yields $J$ and
 $J^\top$; derivatives are local to that stencil, not globally smooth at switches.
 
 $$
-\Phi(s)=\frac12\|W(F(s)-t)\|_2^2+
+\Phi(s)=\frac12\|\sqrt W(F(s)-t)\|_2^2+
 \frac{\lambda^2}{2}\|L(s-s_0)\|_2^2 .
 $$
 
@@ -75,6 +92,29 @@ the true-objective acceptance test. Their preparation functions retain distinct
 model spaces, priors and trial policies: Bent projects each shortened step,
 $P(q+\alpha 2^{-k}d)$; Born first forms a feasible displacement and then shortens
 it, $q+2^{-k}(P(q+\alpha d)-q)$. Armijo uses the actual feasible displacement.
+
+The driver checks the full regularized gradient relative to its initial norm,
+then tests the active-set feasible gradient for zero. Exact and surrogate
+derivatives retain distinct stationarity reasons. Newton, optionally smoothed
+Newton, and feasible negative-gradient directions are proposals only. For
+$\delta=q_{trial}-q$, acceptance requires
+$\langle g,\delta\rangle<0$ and
+$\Phi(q_{trial})\le\Phi(q)+10^{-4}\langle g,\delta\rangle$.
+Disabling backtracking still requires this descent test. Detailed trial and
+direction diagnostics are constructed only when requested.
+
+Regularizer preparation resolves $L$ and $L^*$ once; rectangular penalties use
+their actual adjoint. In reduced space the pair is $L B$ and $B^*L^*$, with no
+coarse-grid replacement. The current accepted state owns the model, prediction,
+objective and linearization together. A supplied `initial_linearization` is
+the value/Jacobian at `problem.initial` and is committed without another forward
+call; each accepted trial linearization is reused for the following direction.
+Validation checkpoints retain models and predictions, not background operators.
+
+Inner normal CG uses its relative normal-residual tolerance. LSMR/LSQR retain
+their native backward-error and condition-limit stopping criteria; a separate
+universal `rtol` does not override them. Inner stopping describes the linearized
+subproblem, not convergence of the nonlinear reconstruction.
 
 ## Born scattering
 
@@ -134,7 +174,7 @@ frequencies are not one objective descent curve.
 | --- | --- | --- |
 | Straight ray | straight_cgls / straight_sirt / straight_sart | operators/straight_ray.py; solvers/projected_cg.py, row_action.py |
 | Eikonal | bent_ray_gn | operators/eikonal.py; algorithms/bent_ray.py |
-| Born | rwave_adapter | operators/ray_born.py, volume_integral.py; solvers/linear.py, nonlinear.py |
+| Born | born | operators/ray_born.py, volume_integral.py; solvers/linear.py, nonlinear.py |
 | Helmholtz FWI | fwi_wust | algorithms/fwi/algorithm.py; independent WUST Runtime |
 
 See [operator contracts](operator_contract.md) for units/inner products and

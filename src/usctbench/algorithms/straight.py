@@ -63,17 +63,9 @@ def reconstruct(case, config, algorithm):
             raise ValueError("reduced model currently requires no inversion ROI")
         basis = BilinearBasis(case.grid, p.model_grid_shape)
         model_shape = basis.shape
-        solver_operator = ReducedLinearOperator(
-            projector, basis, matrix=projector.matrix
-        )
+        solver_operator = ReducedLinearOperator(projector, basis)
         solver_kind = FineGridRegularizer(basis, kind)
     initial = np.zeros(model_shape)
-    control.declare_update(
-        "delta_slowness" if basis is None else "delta_slowness_coefficients",
-        "full_slowness" if basis is None else "full_slowness_coefficients",
-        "s/m",
-        scope="full_physical_grid" if basis is None else "full_coefficient_grid",
-    )
     s0 = np.full(model_shape, 1.0 / c0)
 
     def project(x):
@@ -85,16 +77,14 @@ def reconstruct(case, config, algorithm):
         return 1.0 / (1.0 / c0 + fine)
 
     use_preconditioning = p.coverage_preconditioning if is_cg else False
-    preconditioner, coverage = None, None
+    preconditioner = None
     # Coverage construction is a real adjoint application and is budgeted.
     # It cannot consume held-out receiver values or exceed the adjoint budget.
-    if use_preconditioning and not is_cg:
-        raise ValueError("coverage_preconditioning is supported by straight_cgls only")
     if use_preconditioning:
         from usctbench.core.stopping import BudgetExhausted
 
         try:
-            preconditioner, coverage = control.call(
+            preconditioner, _ = control.call(
                 "adjoint",
                 coverage_preconditioner,
                 solver_operator,
@@ -108,10 +98,6 @@ def reconstruct(case, config, algorithm):
         except BudgetExhausted as exc:
             control.monitor.finish(exc.reason)
     robust_loss = p.robust_loss if is_cg else "none"
-    if robust_loss not in {"none", "huber", "irls", "huber_irls"}:
-        raise ValueError("robust_loss must be none or huber/irls/huber_irls")
-    if not is_cg and robust_loss != "none":
-        raise ValueError("robust_loss is supported by straight_cgls only")
     if control.monitor.reason is not None:
         state, metrics = control.output(initial)
     elif is_cg:
@@ -153,6 +139,7 @@ def reconstruct(case, config, algorithm):
         state, metrics = row_action(
             solver_operator,
             control,
+            row_sums=projector.row_norms(power=1),
             initial=initial,
             reference=s0,
             project=project,
@@ -171,41 +158,10 @@ def reconstruct(case, config, algorithm):
                 {"kind": "pixels"} if basis is None else basis.metadata()
             ),
             "projector_csr_storage_bytes": projector.storage_bytes,
-            "roi_update_only": roi_only,
-            "roi_laplacian": roi_laplacian,
-            "coverage_preconditioning": use_preconditioning,
-            "robust_loss": robust_loss,
             "measurement_reference_sound_speed_mps": measurement_c0,
-            "objective_name": (
-                (
-                    "weighted_huber"
-                    if robust_loss != "none"
-                    else "weighted_least_squares"
-                )
-                if is_cg
-                else "row_normalized_weighted_least_squares"
-            ),
-            "iterations_scope": "global across all subsets/IRLS stages",
             **ray_weight_metrics(weights, mask, config),
         }
     )
-    if is_cg:
-        metrics.update(
-            {
-                "regularization": str(p.regularization),
-                "regularization_lambda": p.regularization_lambda,
-                "regularization_lambda_squared": lambda_value**2,
-            }
-        )
-    else:
-        metrics.update(
-            {
-                "relaxation": float(p.relaxation),
-                "subsets": p.subsets if algorithm == "straight_sart" else 1,
-                "smooth_sigma": float(p.smooth_sigma),
-                "smooth_every": int(p.smooth_every),
-            }
-        )
 
     return ReconstructionResult(
         algorithm=algorithm,

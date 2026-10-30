@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 
 from usctbench.core.stopping import StopMonitor, WorkLedger
-from usctbench.evaluation.data import make_data_split, residual_statistics
+from usctbench.evaluation.data import make_data_split
 
 
 @dataclass
@@ -53,41 +53,19 @@ class InversionControl:
         self.monitor = StopMonitor(
             self.policy, self.work, iteration_unit=iteration_unit
         )
-        self.precision = np.where(self.split.train, self.split.weights, 0.0)
+        self.precision = self.split.train_weights
         self.safe_observed = np.where(self.split.train, self.observed, 0)
-        self.last_prediction = self.best_prediction = None
         self.current_state = None
+        self.best_state = None
         self.inner_solver_history = []
         self.pending_linear_info = None
         self.numerical_error = None
-        self.update_semantics = {
-            "optimization_variable": None,
-            "update_variable": None,
-            "update_units": None,
-            "update_norm": None,
-            "update_norm_scope": None,
-            "update_normalization": None,
-        }
 
-    def declare_update(
-        self,
-        optimization_variable,
-        update_variable,
-        units,
-        *,
-        scope="full_physical_grid",
-        normalization=None,
-    ):
-        """Describe the actual statistic without changing the numerical path."""
-        self.update_semantics = {
-            "optimization_variable": optimization_variable,
-            "update_variable": update_variable,
-            "update_units": units,
-            "update_norm": "euclidean_l2",
-            "update_norm_scope": scope,
-            "update_normalization": normalization
-            or "norm(q_new-q_old)/max(norm(q_old),float64_tiny)",
-        }
+    @property
+    def selected_state(self):
+        if self.policy.restore_best_validation and self.best_state is not None:
+            return self.best_state
+        return self.current_state
 
     def call(self, kind, function, *args, **kwargs):
         return self.work.call(kind, function, *args, **kwargs)
@@ -116,30 +94,18 @@ class InversionControl:
         *,
         objective=None,
         update_relative=None,
-        optimizer_diagnostics=None,
         linearization=None,
     ):
         if self.monitor.reason is not None:
             return self.monitor.reason
-        if optimizer_diagnostics is not None and any(
-            value is not None and not np.isfinite(value)
-            for value in optimizer_diagnostics.values()
-        ):
+        if not np.all(np.isfinite(state)):
             return self.monitor.finish("numerical_failure")
-        train = residual_statistics(
-            prediction, self.observed, mask=self.split.train, weights=self.split.weights
-        )
-        validation = residual_statistics(
-            prediction,
-            self.observed,
-            mask=self.split.validation,
-            weights=self.split.weights,
-        )
+        train = self.split.statistics(prediction, "train")
+        validation = self.split.statistics(prediction, "validation")
         previous_best = self.monitor.best_iteration
         previous_history_length = len(self.monitor.history)
         reason = self.monitor.observe(
             iteration,
-            state,
             residual_norm=train["weighted_residual_norm"],
             observed_norm=train["weighted_observed_norm"],
             objective=(
@@ -156,45 +122,39 @@ class InversionControl:
             if self.pending_linear_info is not None:
                 self.monitor.history[-1]["linear_solve"] = self.pending_linear_info
                 self.pending_linear_info = None
-            if optimizer_diagnostics is not None:
-                self.monitor.history[-1]["optimizer_diagnostics"] = dict(
-                    optimizer_diagnostics
-                )
-            self.last_prediction = np.array(prediction, copy=True)
             self.current_state = AcceptedState(
-                self.monitor.last_state,
-                self.last_prediction,
+                np.array(state, copy=True),
+                np.array(prediction, copy=True),
                 self.monitor.history[-1]["objective"],
                 iteration,
                 linearization,
             )
             if self.monitor.best_iteration != previous_best:
-                self.best_prediction = self.last_prediction.copy()
+                current = self.current_state
+                self.best_state = AcceptedState(
+                    current.model.copy(),
+                    current.prediction.copy(),
+                    current.objective,
+                    current.iteration,
+                )
         return reason
 
     def output(self, fallback):
-        state, _ = self.monitor.selected_state()
-        if state is None:
-            state = np.array(fallback, copy=True)
-        selected_best = (
-            self.policy.restore_best_validation and self.best_prediction is not None
-        )
-        prediction = self.best_prediction if selected_best else self.last_prediction
+        selected = self.selected_state
+        state = np.array(fallback if selected is None else selected.model, copy=True)
+        prediction = None if selected is None else selected.prediction
         stop = self.monitor.record()
-        stop.update(self.update_semantics)
         metrics = {
             "stop_reason": stop["reason"],
             "stopping": stop,
             "iterations": stop["completed_iterations"],
             "iteration_history": self.monitor.history,
             "evaluation_split": self.split.metadata,
-            "heldout_role": "validation_for_stopping_and_checkpoint_selection_not_untouched_test",
             "roi_mask_provided": self.case.grid.roi_mask is not None,
             "roi_update_restriction_active": bool(
                 self.config.parameters.roi_update_only
                 and self.case.grid.roi_mask is not None
             ),
-            "residual_curve": [row["residual_norm"] for row in self.monitor.history],
         }
         if self.numerical_error is not None:
             metrics["numerical_error"] = (
@@ -203,7 +163,7 @@ class InversionControl:
         if self.config.diagnostics and self.inner_solver_history:
             metrics["inner_solver_history"] = self.inner_solver_history
         if prediction is not None:
-            evaluation = self.split.evaluate(prediction, self.observed)
+            evaluation = self.split.evaluate(prediction)
             metrics["evaluation"] = evaluation
             train = evaluation["train"]
             metrics["data_relative_residual"] = train["weighted_relative_residual"]
@@ -211,6 +171,9 @@ class InversionControl:
             first = self.monitor.history[0]["residual_norm"]
             metrics["initial_data_residual_norm"] = first
             metrics["data_residual_reduction"] = (
-                1 - train["weighted_residual_norm"] / first if first else 0.0
+                1 - train["weighted_residual_norm"] / first if first else None
+            )
+            metrics["data_residual_reduction_status"] = (
+                "ok" if first else "undefined_zero_initial_residual"
             )
         return state, metrics

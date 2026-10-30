@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import zipfile
+import json
 
 import h5py
 import numpy as np
 import pytest
+from scipy.io import savemat
 
 from usctbench.core.io import read_case_hdf5
-from usctbench.data.conversion import _grid_from_coordinates
 from usctbench.data.nbpslice2d import convert_nbp_slice2d_mat
 from usctbench.operators.straight_ray import StraightRayProjector
 from usctbench.data.nbpslice2d import (
@@ -25,6 +26,8 @@ def test_synthetic_cases_have_algorithm_ready_features():
 
     assert sos_case.measurement.delta_tof_s.shape == (8, 8)
     assert sos_case.ground_truth.sound_speed_mps.shape == (10, 10)
+    assert sos_case.metadata["roi_source"] == "full_grid"
+    assert sos_case.metadata["roi_use"] == "reconstruction_domain"
 
 
 def test_prepare_synthetic_demo_writes_hdf5_cases(tmp_path):
@@ -37,16 +40,26 @@ def test_prepare_synthetic_demo_writes_hdf5_cases(tmp_path):
         tmp_path / "synthetic" / "cases" / "synthetic_circular_sos.h5"
     )
     assert case.grid.shape == (8, 8)
+    manifest = json.loads((tmp_path / "synthetic" / "manifest.json").read_text())
+    assert manifest["generation"]["inclusion_radius_m"] == 0.008
 
 
-def test_volume_axes_units_and_missing_coordinates_are_explicit(tmp_path):
+@pytest.mark.parametrize("mat_format", ["hdf5", "v5"])
+def test_volume_axes_units_are_explicit(tmp_path, mat_format):
     from usctbench.data.openbreastus import convert_speed_mat_volume
 
     source = tmp_path / "volume.mat"
     image = np.arange(24).reshape(4, 6) + 1480.0
-    with h5py.File(source, "w") as handle:
-        handle["sos"] = (image.T / 1000.0)[None, ...]
-        handle["unrelated_larger_array"] = np.ones((8, 10, 12))
+    arrays = {
+        "sos": (image.T / 1000.0)[None, ...],
+        "unrelated_larger_array": np.ones((8, 10, 12)),
+    }
+    if mat_format == "hdf5":
+        with h5py.File(source, "w") as handle:
+            for name, value in arrays.items():
+                handle[name] = value
+    else:
+        savemat(source, arrays)
     with pytest.raises(TypeError, match="dataset_name"):
         convert_speed_mat_volume(source, tmp_path / "missing_name")
     with pytest.raises(ValueError, match="dataset_name"):
@@ -71,29 +84,11 @@ def test_volume_axes_units_and_missing_coordinates_are_explicit(tmp_path):
     assert case.grid.spacing_m == (0.001, 0.002)
     assert case.metadata["source_image_axes"] == "xy"
     assert case.metadata["category_source"] == "unknown"
-    with pytest.raises(ValueError, match="coordinates are required"):
-        _grid_from_coordinates((4, 6), xi=None, yi=None)
-
-
-def test_grid_from_coordinates_uses_point_spacing():
-    xi = np.linspace(-0.01, 0.01, 5)
-    yi = np.linspace(-0.02, 0.02, 9)
-
-    grid = _grid_from_coordinates((9, 5), xi=xi, yi=yi)
-
-    assert np.isclose(grid.spacing_m[0], 0.005)
-    assert np.isclose(grid.spacing_m[1], 0.005)
-    np.testing.assert_allclose(grid.origin_m, [-0.0225, -0.0125])
-    resized = _grid_from_coordinates((7, 3), xi=xi, yi=yi)
-    np.testing.assert_allclose(
-        np.array(resized.spacing_m) * resized.shape,
-        np.array(grid.spacing_m) * grid.shape,
-    )
-    np.testing.assert_array_equal(resized.origin_m, grid.origin_m)
+    assert case.metadata["roi_source"] == "full_grid"
 
 
 def test_rectangular_maps_and_labels_share_physical_cell_centers():
-    from usctbench.data.conversion import _downsample_mean, _downsample_label
+    from usctbench.data.conversion import resample_bilinear, resample_labels_nearest
 
     shape, target = (11, 17), (7, 9)
     spacing = np.array([0.0002, 0.0007])
@@ -107,8 +102,10 @@ def test_rectangular_maps_and_labels_share_physical_cell_centers():
     )
     iy = np.rint((ty + 0.5) * target_spacing[0] / spacing[0] - 0.5).astype(int)
     ix = np.rint((tx + 0.5) * target_spacing[1] / spacing[1] - 0.5).astype(int)
-    np.testing.assert_allclose(_downsample_mean(speed, target), expected_speed)
-    np.testing.assert_array_equal(_downsample_label(labels, target), labels[iy, ix])
+    np.testing.assert_allclose(resample_bilinear(speed, target), expected_speed)
+    np.testing.assert_array_equal(
+        resample_labels_nearest(labels, target), labels[iy, ix]
+    )
 
 
 def test_reader_does_not_intercept_caller_oserror(tmp_path):
@@ -189,6 +186,8 @@ def test_raw_extra_material_maps_are_not_required_or_used(tmp_path):
     np.testing.assert_array_equal(with_extra.measurement.delta_tof_s.ravel(), expected)
     assert not any("atten" in key for key in with_extra.metadata)
     assert with_extra.measurement.frequencies_hz is None
+    assert with_extra.metadata["roi_source"] == "ground_truth_label"
+    assert with_extra.metadata["roi_use"] == "reconstruction_prior"
 
 
 def test_nbpslice2d_zip_inspection_and_smoke_conversion(tmp_path):
@@ -212,3 +211,50 @@ def test_nbpslice2d_zip_inspection_and_smoke_conversion(tmp_path):
     assert index["summary"]["num_cases"] == 1
     assert manifest["cases"]
     assert (tmp_path / "nbp" / "cases").exists()
+
+
+def test_nbp_reads_each_required_array_once_and_records_missing_roi(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "unlabelled.mat"
+    with h5py.File(source, "w") as handle:
+        handle["sos"] = np.full((4, 5), 1.5)
+        handle["den"] = np.ones((4, 5))
+        handle["label"] = np.zeros((4, 5), dtype=np.uint8)
+        handle["type"] = [ord("B")]
+    reads = {"/sos": 0, "/den": 0, "/label": 0, "/type": 0}
+    original = h5py.Dataset.__getitem__
+
+    def read(dataset, *args, **kwargs):
+        if dataset.name in reads:
+            reads[dataset.name] += 1
+        return original(dataset, *args, **kwargs)
+
+    monkeypatch.setattr(h5py.Dataset, "__getitem__", read)
+    record = convert_nbp_slice2d_mat(
+        source, tmp_path / "cases", output_shape=(4, 5), n_transducers=4
+    )[0]
+    assert all(count == 1 for count in reads.values())
+    case = read_case_hdf5(record["path"])
+    assert case.grid.roi_mask is None
+    assert case.metadata["roi_source"] == "none"
+    assert case.metadata["roi_use"] == "unrestricted"
+    assert case.metadata["density_label"] == "B"
+
+
+@pytest.mark.parametrize(
+    "label,type_code,match",
+    [
+        (np.zeros((2, 3)), [65], "matching 2-D"),
+        (np.zeros((4, 5)), [65, 66], "one finite integer"),
+    ],
+)
+def test_nbp_rejects_inconsistent_required_metadata(tmp_path, label, type_code, match):
+    source = tmp_path / "invalid.mat"
+    with h5py.File(source, "w") as handle:
+        handle["sos"] = np.full((4, 5), 1.5)
+        handle["den"] = np.ones((4, 5))
+        handle["label"] = label
+        handle["type"] = type_code
+    with pytest.raises(ValueError, match=match):
+        convert_nbp_slice2d_mat(source, tmp_path / "cases", n_transducers=4)

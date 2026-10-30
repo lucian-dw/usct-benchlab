@@ -75,12 +75,6 @@ def prepare_bent_problem(
         regularization if basis is None else FineGridRegularizer(basis, regularization),
         roi,
         1e-3 * np.sqrt(starting.size) * reference.flat[0],
-        "water_reference",
-        {
-            "strategy": "project_each_shortened_direction",
-            "displacement_parameter": "slowness" if basis is None else "coefficients",
-            "roi_fixed": roi is not None,
-        },
     )
 
 
@@ -133,16 +127,8 @@ class BentRayAlgorithm:
             valid_mask=valid,
             iteration_unit="Gauss-Newton outer step",
         )
-        control.declare_update(
-            (
-                "slowness"
-                if p.model_grid_shape is None
-                else "delta_slowness_coefficients"
-            ),
-            "full_slowness",
-            "s/m",
-            normalization="norm(q_new-q_old)/norm(q_old); positive bounded slowness",
-        )
+        forward.budget_check = control.work.check_time
+        forward.work_counts = control.work.counts
         inner = int(p.inner_iterations)
         inner_solver = p.inner_solver
         inner_options = p.inner_options.model_dump()
@@ -167,7 +153,6 @@ class BentRayAlgorithm:
         s = np.clip(1 / initial_speed, 1 / bounds[1], 1 / bounds[0])
         if roi is not None:
             s = np.where(roi, s, s0)
-        initial = s.copy()
         offset = distance / c0 if differential else np.zeros_like(distance)
         initialization = str(p.initialization)
         initialization_iterations = p.initialization_iterations
@@ -184,6 +169,15 @@ class BentRayAlgorithm:
                 raise ValueError("reference speed must lie within sound-speed bounds")
             basis = BilinearBasis(case.grid, p.model_grid_shape)
 
+        problem = prepare_bent_problem(
+            forward, s, s0, bounds, offset, basis=basis, regularization=kind, roi=roi
+        )
+        fallback = problem.initial.copy()
+        smooth_scale = (
+            sigma
+            if basis is None
+            else tuple(sigma * k / n for k, n in zip(basis.shape, case.grid.shape))
+        )
         try:
             if initialization == "cgls":
                 from usctbench.operators.straight_ray import (
@@ -213,21 +207,7 @@ class BentRayAlgorithm:
                 s = np.clip(s0 + seed_update, 1 / bounds[1], 1 / bounds[0])
                 if roi is not None:
                     s = np.where(roi, s, s0)
-            problem = prepare_bent_problem(
-                forward,
-                s,
-                s0,
-                bounds,
-                offset,
-                basis=basis,
-                regularization=kind,
-                roi=roi,
-            )
-            smooth_scale = (
-                sigma
-                if basis is None
-                else tuple(sigma * k / n for k, n in zip(basis.shape, case.grid.shape))
-            )
+                problem.initial = s
             selected, metrics = gauss_newton(
                 problem,
                 control,
@@ -240,14 +220,13 @@ class BentRayAlgorithm:
                 max_backtracks=9 if line_search else 0,
                 gradient_rtol=gradient_rtol,
             )
-            s = problem.physical_model(selected)
         except BudgetExhausted as exc:
             control.monitor.finish(exc.reason)
-            s, metrics = control.output(initial)
+            selected, metrics = control.output(fallback)
         except FloatingPointError as exc:
             control.fail(exc)
-            s, metrics = control.output(initial)
-        sound_speed = 1 / s
+            selected, metrics = control.output(fallback)
+        sound_speed = 1 / problem.physical_model(selected)
         metrics.update(
             {
                 "backend": "native_eikonal_fast_marching",
@@ -258,33 +237,15 @@ class BentRayAlgorithm:
                 "model_parameterization": (
                     {"kind": "pixels"} if basis is None else basis.metadata()
                 ),
-                "surrogate_travel_time_backend": False,
-                "full_external_eikonal_solver": False,
-                "method_family": "first_arrival_eikonal",
-                "linearization_parameter": "slowness_s_per_m",
-                "inner_iterations": inner,
-                "inner_solver": inner_solver,
-                "inner_options": inner_options,
                 "initialization": initialization,
                 "initialization_training_only": initialization == "cgls",
                 "initialization_iterations": (
                     initialization_iterations if initialization == "cgls" else 0
                 ),
-                "smoothing_applied_to": "update_direction_not_accumulated_image",
-                "regularization": kind,
                 "regularization_lambda_squared": damping,
-                "line_search": line_search,
-                "line_search_acceptance": "projected_step_armijo_1e-4",
-                "gradient_rtol": gradient_rtol,
-                "gradient_space": "pixels" if basis is None else "coefficients",
-                "gradient_scope": (
-                    "training_regularized_objective_at_listed_iterates_not_necessarily_selected_checkpoint"
-                ),
                 "measurement_reference_sound_speed_mps": (
                     measurement_c0 if differential else None
                 ),
-                "roi_update_only": roi_only,
-                "roi_laplacian": False,
             }
         )
 

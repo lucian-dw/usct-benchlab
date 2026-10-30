@@ -90,3 +90,78 @@ def test_weighted_residual_and_missing_data():
     stats = split.evaluate(np.nan_to_num(obs) + 1, obs)["train"]
     assert stats["num_samples"] == 4
     assert stats["weighted_residual_norm"] == pytest.approx(np.sqrt(7))
+
+
+def test_prepared_statistics_reuse_norms_and_preserve_complex_holdouts(monkeypatch):
+    obs = np.arange(24).reshape(2, 3, 4).astype(complex) + 2j
+    obs[0, 0, 0] = np.nan
+    weights = np.linspace(0, 2, obs.size).reshape(obs.shape)
+    split = make_data_split(
+        obs,
+        weights=weights,
+        receiver_indices=[1],
+        frequency_indices=[1],
+        exclude_reciprocal=False,
+    )
+    prediction = obs + 0.5j
+    expected = {
+        name: residual_statistics(
+            prediction, obs, mask=getattr(split, name), weights=weights
+        )
+        for name in ("train", "validation", "receiver", "frequency", "joint")
+    }
+    norm_calls = []
+    real_norm = np.linalg.norm
+
+    def norm(values, *args, **kwargs):
+        norm_calls.append(1)
+        return real_norm(values, *args, **kwargs)
+
+    monkeypatch.setattr(np.linalg, "norm", norm)
+    for name in ("train", "validation"):
+        assert split.statistics(prediction, name) == expected[name]
+    assert len(norm_calls) == 4  # Only residual and weighted residual per partition.
+    assert split.evaluate(prediction) == {
+        name: expected[name] for name in ("train", "receiver", "frequency", "joint")
+    }
+    np.testing.assert_array_equal(
+        split.train_weights, np.where(split.train, weights, 0)
+    )
+    assert not split.validation.flags.writeable
+    assert not split.train_weights.flags.writeable
+
+
+def test_explicit_contrast_observations_prepare_new_norms_without_changing_split():
+    obs = np.array([[1 + 2j, 4], [2j, 3]])
+    split = make_data_split(obs, receiver_indices=[1], exclude_reciprocal=False)
+    predicted = obs + 1j
+    original = split.evaluate(predicted)
+    offset = np.full(obs.shape, 1 + 1j)
+    contrast = split.evaluate(predicted - offset, obs - offset)
+    assert (
+        contrast["train"]["weighted_observed_norm"]
+        != original["train"]["weighted_observed_norm"]
+    )
+    assert (
+        contrast["train"]["weighted_residual_norm"]
+        == original["train"]["weighted_residual_norm"]
+    )
+    assert split.evaluate(predicted) == original
+    zero = split.evaluate(predicted - obs, np.zeros_like(obs))
+    assert zero["train"]["relative_residual"] is None
+
+
+def test_prepared_statistics_keep_empty_zero_norm_and_failure_distinct():
+    obs = np.array([[0.0, 0.0, np.nan]])
+    split = make_data_split(obs, weights=[[1, 0, 1]])
+    assert (
+        split.statistics(np.array([[1, np.nan, np.nan]]), "train")["relative_residual"]
+        is None
+    )
+    assert (
+        split.statistics(np.full(obs.shape, np.nan), "validation")["status"] == "empty"
+    )
+    with pytest.raises(FloatingPointError, match="non-finite prediction"):
+        split.statistics(np.full(obs.shape, np.nan), "train")
+    with pytest.raises(ValueError, match="same shape"):
+        split.statistics(np.ones(3), "train")

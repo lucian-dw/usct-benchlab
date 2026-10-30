@@ -192,6 +192,33 @@ def test_iteration_limit_is_not_convergence():
     assert info.stop_reason == "iteration_limit"
 
 
+@pytest.mark.parametrize("method", ["lsmr", "lsqr"])
+def test_native_backward_error_stopping_is_not_overridden_by_cg_rtol(method):
+    matrix = np.array([[1.0, 0], [0, 2.0], [1.0, 1.0]])
+    target = np.array([1.0, 1.0, 0.0])
+    control = controls(np.ones(3))
+    step, info = solve_linearized(
+        DenseJacobian(matrix, (1, 2)),
+        target,
+        np.zeros((1, 2)),
+        control,
+        weights=np.ones(3),
+        iterations=10,
+        method=method,
+        atol=0.2,
+        btol=0.2,
+        rtol=0,
+    )
+    gradient = matrix.T @ (matrix @ step.ravel() - target)
+    assert info.converged and info.scipy_stop_code in {1, 2}
+    assert np.linalg.norm(gradient) > 0
+    assert info.relative_residual > 0
+    assert np.linalg.norm(matrix @ step.ravel() - target) < np.linalg.norm(target)
+    assert info.normal_residual_norm == pytest.approx(
+        np.linalg.norm(gradient), rel=1e-12
+    )
+
+
 @pytest.mark.parametrize("method", ["normal_cg", "lsmr", "lsqr"])
 @pytest.mark.parametrize("reduced", [False, True])
 def test_complex_jacobian_real_observation_has_real_half_solution(method, reduced):
@@ -199,7 +226,6 @@ def test_complex_jacobian_real_observation_has_real_half_solution(method, reduce
 
     jacobian = DenseJacobian(np.array([[1 + 1j]]), (1, 1))
     if reduced:
-        jacobian.n_rays, jacobian.ray_shape = 1, (1,)
         basis = SimpleNamespace(
             grid=None, shape=(1, 1), forward=lambda x: x, adjoint=lambda x: x
         )

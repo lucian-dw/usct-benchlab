@@ -71,3 +71,35 @@ def test_model_prior_uses_no_gt_or_validation_for_updates_and_obeys_budget(name)
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
     assert a.metrics["model_parameterization"]["propagation_shape"] == [8, 8]
     assert a.metrics["data_residual_reduction"] > 0
+
+
+@pytest.mark.parametrize("failure", ["budget", "nonfinite"])
+def test_bent_coefficient_exit_maps_selected_variable_to_physical_grid(
+    monkeypatch, failure
+):
+    case = make_sound_speed_case(shape=(4, 5), n_transducers=4)
+    case.grid.roi_mask = None
+    case.ground_truth = GroundTruthSpec()
+    if failure == "nonfinite":
+
+        def fail(*args):
+            raise FloatingPointError("independent injected field failure")
+
+        monkeypatch.setattr(EikonalForward, "linearize", fail)
+    config = prepare_config(
+        "bent_ray_gn",
+        {
+            "parameters": {"model_grid_shape": [2, 3]},
+            "run_controls": {
+                "max_iterations": 2,
+                "max_forward_calls": 0 if failure == "budget" else 2,
+            },
+        },
+        case=case,
+    )
+    result = BentRayAlgorithm().run(case, config)
+    np.testing.assert_array_equal(result.sound_speed_mps, np.full((4, 5), 1500.0))
+    assert result.metrics["stopping"]["selected_iteration"] is None
+    assert result.metrics["stop_reason"] == (
+        "forward_calls_budget" if failure == "budget" else "numerical_failure"
+    )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from usctbench.core.compat import StrEnum
+from enum import StrEnum
 from usctbench.core.run_controls import RunControls
 from usctbench.core.execution import (
     Deployment,
@@ -284,6 +284,8 @@ class USCTCase(_ArrayModel):
 class AlgorithmConfig(_ArrayModel):
     """Algorithm configuration passed to registry entries."""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = None
     diagnostics: bool = Field(
         False,
@@ -307,6 +309,8 @@ class ReconstructionResult(_ArrayModel):
 
     algorithm: str
     case_id: str
+    experiment_id: str | None = None
+    variant: str | None = None
     sound_speed_mps: np.ndarray | None = None
     metrics: dict[str, Any] = Field(default_factory=dict)
     runtime_s: float = 0.0

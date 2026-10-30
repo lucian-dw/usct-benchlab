@@ -10,7 +10,7 @@ import numpy as np
 
 from usctbench.core.schema import ReconstructionResult, ResultStatus
 
-from .io import frequency_input, read_artifact, publish_result
+from .io import frequency_input, read_artifact, write_artifact
 from .runtime import Deadline, RuntimeFailure, WUSTClient
 
 
@@ -68,7 +68,7 @@ def prepare_request(case, p, folder, max_updates, backend):
     input_path = folder / "frequency.json"
     initial_path = folder / "initial.json"
     frequency_input(case, input_path)
-    publish_result(
+    write_artifact(
         initial_path,
         "wust.initial_model",
         {"initialization": p.initialization, "mask_policy": mask_policy},

@@ -60,6 +60,34 @@ See [usage](docs/usage.md), [parameters](docs/parameter_contract.md) and the
 - `prepare_config` owns runtime preparation; direct algorithm calls require its
   result. Agent admission and case facts do not resolve host deployment/policy.
 - Dataset readers own their formats, pressure units share one contract,
-  codecs use `publish_result`, and suites load each case once.
+  codecs use `write_artifact`, and suites load each case once.
 - Detailed traces require `diagnostics: true`. Undefined relative improvement
   is null with a status; accepted histories and work counters remain available.
+
+## Round 3: current interfaces and numerical ownership
+
+- `rwave_adapter`, `RayBornAlgorithm` and `algorithms/rwave.py` become `born`,
+  `BornAlgorithm` and `algorithms/born.py`. The four explicit WKB/Full-Green,
+  fixed/nonlinear variants remain; this is not an upstream r-Wave reproduction.
+- Readers use `resample_bilinear`, `resample_labels_nearest` and
+  `read_kwave_pressure_mat`. The pressure reader returns a case; its caller
+  derives requested features before saving once. Time/frequency water references
+  and their physical units are distinct. Born conjugates pressure, source and
+  frequency water reference together from the declared Fourier contract.
+- Each benchmark experiment requires a unique `id`. Numerical artifacts,
+  summaries and results retain that identity and the selected variant.
+- AcceptedState owns model/prediction/linearization; the stopping monitor owns
+  scalar history. Selected checkpoint optimality is not the last work point's
+  stationarity. GN direction proposals/Armijo and CG weight refresh/restart are
+  explicit steps, with prepared regularizers and opt-in detailed diagnostics.
+- Configured Born reuses its initial Linearization. Prediction and requested
+  normal diagonal share a frequency loop; actual source solves and matvecs are
+  counted where executed. GPU background and Jacobian share a device field cache.
+- AlgorithmEntry owns parameter/budget/stopping capabilities. Python minimum is
+  now 3.12, `describe-algorithm` is always JSON, and unknown top-level options fail.
+- WUST file ingestion prepares observations once; reconstruction consumes them.
+  Update-mask PML and sampling Dirichlet restrictions are separate. Final full
+  frequency evaluation is admitted before launch. Missing values are producer
+  JSON null, not reader compatibility rewrites.
+
+See [validation](docs/validation.md) for this round's executed local and A100 gates.

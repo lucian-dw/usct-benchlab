@@ -73,21 +73,3 @@ class RunControls(BaseModel):
             if cap is not None:
                 values[key] = cap if values[key] is None else min(values[key], cap)
         return RunControls.model_validate(values)
-
-    def validate_for_wust(self):
-        unsupported = (
-            "max_forward_calls",
-            "max_adjoint_calls",
-            "update_rtol",
-            "target_relative_residual",
-            "noise_norm",
-            "objective_rtol",
-            "validation_patience",
-        )
-        if (
-            any(getattr(self, key) is not None for key in unsupported)
-            or self.restore_best_validation
-        ):
-            raise ValueError(
-                "WUST supports iteration/time budgets only; no online convergence or call caps"
-            )

@@ -50,7 +50,7 @@ def test_describe_does_not_probe_matlab(client, monkeypatch):
 
     monkeypatch.setattr(client, "command", command)
     assert client.admit()["schema_version"] == 2
-    assert calls == [["describe", "--json"]]
+    assert calls == [["describe"]]
 
 
 def test_runtime_failure_and_unclean_stdout(client):

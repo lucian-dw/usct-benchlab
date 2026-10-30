@@ -4,7 +4,9 @@ import csv
 from pathlib import Path
 
 FIELDS = (
+    "experiment_id",
     "algorithm",
+    "variant",
     "case_id",
     "measurement_provenance",
     "forward_model",
@@ -41,11 +43,13 @@ def write_summary(records, directory):
         "residuals are different observables, not a shared ranking. Hold-out scores",
         "used for selection are validation, not independent test scores.",
         "",
-        "| Algorithm | Case | Observation (units) | Status | Stop | Time (s) | Region | RMSE (m/s) | PSNR (dB) | SSIM |",
-        "| --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | ---: |",
+        "| Experiment | Algorithm | Variant | Case | Observation (units) | Status | Stop | Time (s) | Region | RMSE (m/s) | PSNR (dB) | SSIM |",
+        "| --- | --- | --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | ---: |",
     ]
     columns = (
+        "experiment_id",
         "algorithm",
+        "variant",
         "case_id",
         "observation",
         "status",
@@ -72,7 +76,7 @@ def write_summary(records, directory):
         lines.append("| " + " | ".join(cell(row.get(key)) for key in columns) + " |")
         if row.get("message"):
             lines.append(
-                f"\n{row['case_id']} / {row['algorithm']}: {cell(row['failure_stage'])}: {cell(row['message'])}\n"
+                f"\n{cell(row.get('experiment_id'))} / {row['case_id']} / {row['algorithm']}: {cell(row['failure_stage'])}: {cell(row['message'])}\n"
             )
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return {"summary_csv": str(csv_path), "report_md": str(report_path)}

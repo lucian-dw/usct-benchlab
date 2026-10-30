@@ -22,55 +22,88 @@ def residual_statistics(predicted, observed, *, mask=None, weights=None) -> dict
     Zero observed norm makes a relative residual undefined (JSON null).
     Weights are nonnegative precision weights, i.e. norms use sqrt(weights).
     """
-    pred, obs = np.asarray(predicted), np.asarray(observed)
-    if pred.shape != obs.shape:
-        raise ValueError("predicted and observed data must have the same shape")
-    active = np.isfinite(obs)
-    if mask is not None:
-        active &= _broadcast(mask, obs.shape, dtype=bool, name="mask")
-    weight = _broadcast(
-        1.0 if weights is None else weights, obs.shape, dtype=float, name="weights"
+    return _PreparedStatistics.prepare(observed, mask=mask, weights=weights).evaluate(
+        predicted
     )
-    if not np.all(np.isfinite(weight)) or np.any(weight < 0):
-        raise ValueError("weights must be finite and nonnegative")
-    active &= weight > 0
-    count = int(active.sum())
-    result = {"num_samples": count, "status": "ok" if count else "empty"}
-    if not count:
-        for key in (
-            "residual_norm",
-            "observed_norm",
-            "relative_residual",
-            "rmse",
-            "mae",
-            "weighted_residual_norm",
-            "weighted_observed_norm",
-            "weighted_relative_residual",
-        ):
-            result[key] = None
+
+
+@dataclass(frozen=True)
+class _PreparedStatistics:
+    shape: tuple
+    active: np.ndarray
+    observed: np.ndarray
+    sqrt_weights: np.ndarray
+    observed_norm: float
+    weighted_observed_norm: float
+
+    @classmethod
+    def prepare(cls, observed, *, mask=None, weights=None):
+        obs = np.asarray(observed)
+        active = np.isfinite(obs)
+        if mask is not None:
+            active &= _broadcast(mask, obs.shape, dtype=bool, name="mask")
+        weight = _broadcast(
+            1.0 if weights is None else weights, obs.shape, dtype=float, name="weights"
+        )
+        if not np.all(np.isfinite(weight)) or np.any(weight < 0):
+            raise ValueError("weights must be finite and nonnegative")
+        active &= weight > 0
+        return cls.from_active(obs, active, weight)
+
+    @classmethod
+    def from_active(cls, observed, active, weights):
+        values = observed[active].copy()
+        sqrt_weights = np.sqrt(weights[active])
+        norm = float(np.linalg.norm(values))
+        weighted_norm = float(np.linalg.norm(sqrt_weights * values))
+        if not np.all(np.isfinite([norm, weighted_norm])):
+            raise FloatingPointError("overflow in measurement residual norm")
+        return cls(observed.shape, active, values, sqrt_weights, norm, weighted_norm)
+
+    def evaluate(self, predicted):
+        pred = np.asarray(predicted)
+        if pred.shape != self.shape:
+            raise ValueError("predicted and observed data must have the same shape")
+        count = self.observed.size
+        result = {"num_samples": count, "status": "ok" if count else "empty"}
+        if not count:
+            for key in (
+                "residual_norm",
+                "observed_norm",
+                "relative_residual",
+                "rmse",
+                "mae",
+                "weighted_residual_norm",
+                "weighted_observed_norm",
+                "weighted_relative_residual",
+            ):
+                result[key] = None
+            return result
+        values = pred[self.active]
+        if not np.all(np.isfinite(values)):
+            raise FloatingPointError("non-finite prediction on an active observation")
+        residual = values - self.observed
+        norm = float(np.linalg.norm(residual))
+        weighted_norm = float(np.linalg.norm(self.sqrt_weights * residual))
+        if not np.all(np.isfinite([norm, weighted_norm])):
+            raise FloatingPointError("overflow in measurement residual norm")
+        result.update(
+            residual_norm=norm,
+            observed_norm=self.observed_norm,
+            relative_residual=(
+                norm / self.observed_norm if self.observed_norm > 0 else None
+            ),
+            rmse=float(norm / np.sqrt(count)),
+            mae=float(np.mean(np.abs(residual))),
+            weighted_residual_norm=weighted_norm,
+            weighted_observed_norm=self.weighted_observed_norm,
+            weighted_relative_residual=(
+                weighted_norm / self.weighted_observed_norm
+                if self.weighted_observed_norm > 0
+                else None
+            ),
+        )
         return result
-    if not np.all(np.isfinite(pred[active])):
-        raise FloatingPointError("non-finite prediction on an active observation")
-    residual = pred[active] - obs[active]
-    norm = float(np.linalg.norm(residual))
-    observed_norm = float(np.linalg.norm(obs[active]))
-    weighted_norm = float(np.linalg.norm(np.sqrt(weight[active]) * residual))
-    weighted_observed = float(np.linalg.norm(np.sqrt(weight[active]) * obs[active]))
-    if not np.all(np.isfinite([norm, observed_norm, weighted_norm, weighted_observed])):
-        raise FloatingPointError("overflow in measurement residual norm")
-    result.update(
-        residual_norm=norm,
-        observed_norm=observed_norm,
-        relative_residual=norm / observed_norm if observed_norm > 0 else None,
-        rmse=float(norm / np.sqrt(count)),
-        mae=float(np.mean(np.abs(residual))),
-        weighted_residual_norm=weighted_norm,
-        weighted_observed_norm=weighted_observed,
-        weighted_relative_residual=(
-            weighted_norm / weighted_observed if weighted_observed > 0 else None
-        ),
-    )
-    return result
 
 
 @dataclass(frozen=True)
@@ -84,15 +117,21 @@ class DataSplit:
     unused: np.ndarray
     weights: np.ndarray
     metadata: dict
+    validation: np.ndarray
+    train_weights: np.ndarray
+    _statistics: dict
 
-    @property
-    def validation(self):
-        return self.receiver | self.frequency | self.joint
+    def statistics(self, prediction, name):
+        return self._statistics[name].evaluate(prediction)
 
-    def evaluate(self, predicted, observed) -> dict:
+    def evaluate(self, predicted, observed=None) -> dict:
         return {
-            name: residual_statistics(
-                predicted, observed, mask=getattr(self, name), weights=self.weights
+            name: (
+                self.statistics(predicted, name)
+                if observed is None
+                else residual_statistics(
+                    predicted, observed, mask=getattr(self, name), weights=self.weights
+                )
             )
             for name in ("train", "receiver", "frequency", "joint")
         }
@@ -216,7 +255,14 @@ def make_data_split(
     }
     if not np.any(masks["train"]):
         raise ValueError("holdout leaves no training observations")
-    for value in masks.values():
+    validation = masks["receiver"] | masks["frequency"] | masks["joint"]
+    train_weights = np.where(masks["train"], weight, 0.0)
+    statistics = {
+        name: _PreparedStatistics.from_active(obs, mask, weight)
+        for name, mask in {**masks, "validation": validation}.items()
+        if name != "unused"
+    }
+    for value in (*masks.values(), validation, train_weights):
         value.setflags(write=False)
     weight.setflags(write=False)
     metadata = {
@@ -228,4 +274,11 @@ def make_data_split(
         "invalid_or_zero_weight_count": int(obs.size - active.sum()),
         "holdout_role": "validation_not_final_test",
     }
-    return DataSplit(**masks, weights=weight, metadata=metadata)
+    return DataSplit(
+        **masks,
+        weights=weight,
+        metadata=metadata,
+        validation=validation,
+        train_weights=train_weights,
+        _statistics=statistics,
+    )

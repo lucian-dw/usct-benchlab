@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 from scipy.sparse import csr_array, kron
-from usctbench.operators.regularization import regularizer
+from usctbench.operators.regularization import prepare_regularizer
 
 from usctbench.core.schema import GridSpec
 
@@ -76,54 +76,28 @@ class BilinearBasis:
 
 
 class ReducedLinearOperator:
-    """A B and B^T A^T; optionally cache the sparse product for straight rays."""
+    """Generic A B and B^T A^T, independent of the measurement layout."""
 
-    def __init__(self, operator, basis, *, matrix=None):
+    def __init__(self, operator, basis):
         self.operator, self.basis = operator, basis
         self.data_dtype = operator.data_dtype
         self.grid, self.n_pixels = basis.grid, int(np.prod(basis.shape))
-        self.n_rays, self.ray_shape = operator.n_rays, operator.ray_shape
-        self.sparse = matrix is not None
-        self.matrix = None if matrix is None else (matrix @ basis.matrix).tocsr()
 
     def forward(self, image):
-        if self.sparse:
-            a = np.asarray(image)
-            return np.asarray(self.matrix @ a.ravel()).ravel()
         return self.operator.forward(self.basis.forward(image))
 
     def adjoint(self, values):
-        if self.sparse:
-            a = np.asarray(values)
-            return np.asarray(self.matrix.T @ a.ravel()).reshape(self.basis.shape)
         return self.basis.adjoint(self.operator.adjoint(values))
-
-    def row_norms(self, power=2):
-        if power not in (1, 2):
-            raise ValueError("power must be 1 or 2")
-        return np.asarray(self.matrix.power(power).sum(axis=1)).ravel()
-
-    def col_norms(self, power=2):
-        if power not in (1, 2):
-            raise ValueError("power must be 1 or 2")
-        return np.asarray(self.matrix.power(power).sum(axis=0)).reshape(
-            self.basis.shape
-        )
 
 
 class FineGridRegularizer:
     """L B with transpose B^T L^T, including rectangular fine-grid penalties."""
 
     def __init__(self, basis, kind):
-        self.basis, self.kind = basis, kind
+        self.basis, self.penalty = basis, prepare_regularizer(kind)
 
     def forward(self, coefficients):
-        return regularizer(self.basis.forward(coefficients), self.kind)
+        return self.penalty.forward(self.basis.forward(coefficients))
 
     def adjoint(self, values):
-        transposed = (
-            self.kind.adjoint(values)
-            if hasattr(self.kind, "adjoint")
-            else regularizer(values, self.kind)
-        )
-        return self.basis.adjoint(transposed)
+        return self.basis.adjoint(self.penalty.adjoint(values))

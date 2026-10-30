@@ -25,9 +25,6 @@ def test_inconsistent_row_action_matches_its_documented_model(subsets, expected)
         def adjoint(self, y):
             return (matrix.T @ y.ravel()).reshape(1, 1)
 
-        def row_norms(self, power):
-            return (matrix**power).sum(axis=1)
-
     observed = np.ones((1, 2))
     case = USCTCase(
         case_id="inconsistent_ray_reference",
@@ -50,6 +47,7 @@ def test_inconsistent_row_action_matches_its_documented_model(subsets, expected)
     state, metrics = row_action(
         Operator(),
         control,
+        row_sums=matrix.sum(axis=1),
         initial=np.zeros((1, 1)),
         reference=np.ones((1, 1)),
         project=lambda x: x,

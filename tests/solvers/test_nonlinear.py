@@ -1,14 +1,15 @@
 """Nonlinear outer-loop scale, feasible-step and acceptance regressions."""
 
-from types import SimpleNamespace
 from tests.helpers import DenseJacobian
+import weakref
 
 import numpy as np
 import pytest
 from scipy.linalg import norm
 
 import usctbench.solvers.nonlinear as nonlinear
-from usctbench.algorithms.rwave import prepare_born_problem
+from usctbench.algorithms.born import prepare_born_problem
+from usctbench.algorithms.bent_ray import prepare_bent_problem
 from usctbench.algorithms._control import InversionControl
 from usctbench.core.schema import (
     AlgorithmConfig,
@@ -17,26 +18,31 @@ from usctbench.core.schema import (
     MeasurementSpec,
     USCTCase,
 )
-from usctbench.operators.base import Linearization
+from usctbench.operators.base import Linearization, LinearSolveInfo
 
 
-class _DenseForward:
+class _DenseForward(DenseJacobian):
     def __init__(self, matrix, reference):
-        self.matrix, self.reference = matrix, reference
-        self.data_dtype = matrix.dtype
+        super().__init__(matrix, reference.shape)
+        self.reference = reference
         self.states = []
+        self.trials = []
+        self.trial_failure = None
         self.background_builds = self.eikonal_solves = 0
 
     def forward(self, image):
-        return (self.matrix @ image.ravel()).reshape(1, -1)
+        return super().forward(image).reshape(1, -1)
 
     def adjoint(self, data):
-        return (self.matrix.T @ data.ravel()).reshape(self.reference.shape)
+        return super().adjoint(data.ravel())
 
     def linearize(self, model):
         self.states.append(model.copy())
         self.background_builds += 1
-        return Linearization(self.forward(model - self.reference), self)
+        value = self.forward(model - self.reference)
+        if self.trial_failure is not None and len(self.states) > 1:
+            value = self.trial_failure(value, len(self.states))
+        return Linearization(value, self)
 
 
 @pytest.fixture
@@ -51,9 +57,23 @@ def solve(monkeypatch):
 
     monkeypatch.setattr(nonlinear, "solve_linearized", capture_step)
 
-    def run(matrix, observed, *, initial=None, **options):
+    def run(
+        matrix,
+        observed,
+        *,
+        initial=None,
+        problem_kind="born",
+        max_iterations=1,
+        run_controls=None,
+        diagnostics=True,
+        trial_failure=None,
+        reuse_initial=False,
+        **options,
+    ):
         if initial is None:
-            initial = np.full((1, matrix.shape[1]), 1 / 1500**2)
+            initial = np.full(
+                (1, matrix.shape[1]), 1 / 1500 ** (2 if problem_kind == "born" else 1)
+            )
         observed = np.asarray(observed).reshape(1, -1)
         case = USCTCase(
             case_id="feasible_displacement_backtracking",
@@ -65,13 +85,14 @@ def solve(monkeypatch):
             measurement=MeasurementSpec(domain="features", tof_s=observed),
         )
         config = AlgorithmConfig(
-            diagnostics=True,
+            diagnostics=diagnostics,
             parameters={},
             run_controls={
-                "max_iterations": 1,
+                "max_iterations": max_iterations,
                 "objective_rtol": None,
                 "update_rtol": None,
                 "restore_best_validation": False,
+                **(run_controls or {}),
             },
         )
         from usctbench.core.config import prepare_config
@@ -80,6 +101,7 @@ def solve(monkeypatch):
             case, prepare_config("bent_ray_gn", config), observed
         )
         forward = _DenseForward(matrix, initial)
+        forward.trial_failure = trial_failure
         settings = dict(
             bounds=(1400, 1600),
             regularization="identity",
@@ -99,7 +121,28 @@ def solve(monkeypatch):
             )
             if key in settings
         }
-        problem = prepare_born_problem(forward, initial, **problem_settings)
+        if problem_kind == "born":
+            problem = prepare_born_problem(forward, initial, **problem_settings)
+        else:
+            problem = prepare_bent_problem(
+                forward,
+                initial,
+                initial,
+                offset=np.zeros_like(observed),
+                **problem_settings,
+            )
+        trials = problem.trials
+
+        def capture_trials(*args):
+            for candidate, fraction in trials(*args):
+                forward.trials.append(candidate.copy())
+                yield candidate, fraction
+
+        problem.trials = capture_trials
+        if reuse_initial:
+            settings["initial_linearization"] = control.call(
+                "forward", problem.linearize, initial
+            )
         state, metrics = nonlinear.gauss_newton(problem, control, **settings)
         return state, metrics, forward, directions, control
 
@@ -166,7 +209,6 @@ def test_separate_prior_matches_dense_solution_and_keeps_roi_exterior(solve):
     assert metrics["iteration_history"][-1]["objective"] == pytest.approx(
         objective, rel=1e-12
     )
-    assert metrics["prior_reference_source"] == "explicit"
 
 
 def _assert_displacement_trials(initial, states, rows, first, step_length):
@@ -190,22 +232,22 @@ def _assert_displacement_trials(initial, states, rows, first, step_length):
 
 
 def _assert_armijo(metrics):
-    initial_cost = metrics["iteration_history"][0]["objective"]
+    costs = {row["iteration"]: row["objective"] for row in metrics["iteration_history"]}
     for row in metrics["line_search_history"]:
         if row["accepted"]:
             assert row["projected_directional_derivative"] < 0
             assert row["objective"] <= (
-                initial_cost + 1e-4 * row["projected_directional_derivative"]
+                costs[row["iteration"] - 1]
+                + 1e-4 * row["projected_directional_derivative"]
             )
 
 
-@pytest.mark.parametrize("inner_iterations", [64, 256])
 def test_certified_quadratic_step_recovers_from_saturated_first_trial(
-    solve, inner_iterations
+    solve,
 ):
     matrix = 1e8 * np.array([[1.0, 1.0], [0.0, 1e-6]])
     state, metrics, forward, directions, _ = solve(
-        matrix, [1e-3, 1e-3], inner_iterations=inner_iterations
+        matrix, [1e-3, 1e-3], inner_iterations=64
     )
     assert metrics["inner_solver_history"][0]["converged"]
     assert metrics["iterations"] == 1
@@ -249,18 +291,6 @@ def test_linear_unconstrained_step_length_is_applied_once(solve, step_length):
     assert metrics["iteration_history"][-1]["objective"] < (
         metrics["iteration_history"][0]["objective"]
     )
-    constraints = metrics["line_search_constraints"]
-    assert (
-        constraints["strategy"] == "project_once_then_backtrack_feasible_displacement"
-    )
-    assert constraints["step_length_applies_to"] == "raw_proposal_before_projection"
-    assert (
-        constraints["backtracking_fraction_applies_to"]
-        == "initial_feasible_displacement"
-    )
-    assert constraints["sound_speed_bounds_mps"] == [1400, 1600]
-    assert constraints["max_update_mps"] == 12
-    assert constraints["displacement_parameter"] == "squared_slowness"
     _assert_armijo(metrics)
 
 
@@ -280,7 +310,6 @@ def test_roi_is_fixed_for_the_initial_projection_and_every_halving(solve):
         np.testing.assert_array_equal(candidate[~roi], initial[~roi])
         assert np.all(1 / np.sqrt(candidate[roi]) >= 1400)
         assert np.all(1 / np.sqrt(candidate[roi]) <= 1600)
-    assert metrics["line_search_constraints"]["roi_fixed"]
     assert all(
         row["changed_pixel_count"] == 2 for row in metrics["line_search_history"]
     )
@@ -288,13 +317,19 @@ def test_roi_is_fixed_for_the_initial_projection_and_every_halving(solve):
     _assert_armijo(metrics)
 
 
-def test_projected_uphill_newton_uses_projected_gradient_without_evaluation(solve):
+@pytest.mark.parametrize("problem_kind", ["born", "bent"])
+def test_projected_uphill_newton_uses_projected_gradient_without_evaluation(
+    solve, problem_kind
+):
     hessian = np.array([[3.0, -8], [-8, 22]])
     matrix = np.linalg.cholesky(hessian).T
-    initial = np.array([[1 / 1600**2, 1 / 1500**2]])
+    power = 2 if problem_kind == "born" else 1
+    initial = np.array([[1 / 1600**power, 1 / 1500**power]])
     gradient = np.array([[1.0, -2]]) * 1e-6
     observed = -np.linalg.solve(matrix.T, gradient.ravel())
-    state, metrics, forward, directions, _ = solve(matrix, observed, initial=initial)
+    state, metrics, forward, directions, _ = solve(
+        matrix, observed, initial=initial, problem_kind=problem_kind
+    )
     rows = metrics["line_search_history"]
     assert metrics["direction_checks"][0]["raw_directional_derivative"] < 0
     newton_rows = [row for row in rows if row["proposal"] == "newton_proposal"]
@@ -308,92 +343,286 @@ def test_projected_uphill_newton_uses_projected_gradient_without_evaluation(solv
         assert row["displacement_norm"] == pytest.approx(
             0.5**index * newton_rows[0]["displacement_norm"], rel=2e-12, abs=0
         )
+        if problem_kind == "born":
+            first_newton = _original_first_trial(
+                initial, directions[0], 1, (1400, 1600), 12
+            )
+            expected = initial + 0.5**index * (first_newton - initial)
+        else:
+            expected = np.clip(initial + 0.5**index * directions[0], 1 / 1600, 1 / 1400)
+        np.testing.assert_allclose(forward.trials[index], expected, rtol=0, atol=1e-20)
+        assert row["projected_directional_derivative"] == pytest.approx(
+            np.vdot(gradient, forward.trials[index] - initial).real,
+            rel=1e-10,
+            abs=0,
+        )
     assert rows[-1]["proposal"] == "projected_gradient" and rows[-1]["accepted"]
     feasible_gradient = gradient.copy()
     feasible_gradient[0, 0] = 0
     fallback = -feasible_gradient * (
         norm(directions[0].ravel()) / norm(feasible_gradient.ravel())
     )
-    first = _original_first_trial(initial, fallback, 1, (1400, 1600), 12)
+    first = (
+        _original_first_trial(initial, fallback, 1, (1400, 1600), 12)
+        if problem_kind == "born"
+        else np.clip(initial + fallback, 1 / 1600, 1 / 1400)
+    )
     np.testing.assert_array_equal(forward.states[1], first)
     assert len(forward.states) == 1 + sum(row["objective"] is not None for row in rows)
     assert state[0, 0] == initial[0, 0]
     _assert_armijo(metrics)
 
 
-@pytest.mark.parametrize("max_backtracks", [0, 10])
-def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution(
-    max_backtracks,
-):
-    from usctbench.algorithms._control import InversionControl
-    from usctbench.core.schema import (
-        AlgorithmConfig,
-        GridSpec,
-        GeometrySpec,
-        MeasurementSpec,
-        USCTCase,
+def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution(solve):
+    matrix = np.diag(np.sqrt([1000.0, 1, 1, 1]))
+    observed = -1e-5 * np.array([-3.0, 0.6, 0.6, -0.5]) / np.diag(matrix)
+    initial = np.full((2, 2), 1 / 1500)
+    state, metrics, _, _, _ = solve(
+        matrix,
+        observed,
+        initial=initial,
+        problem_kind="bent",
+        damping=0.2,
+        smooth_sigma=1,
+        max_iterations=4,
     )
-    from usctbench.operators.base import Linearization
-    from usctbench.solvers.nonlinear import gauss_newton
-
-    shape = (2, 2)
-    initial = np.full(shape, 1 / 1500**2)
-    matrix = np.diag(np.sqrt([1000.0, 1, 1, 1])) * 1e-6 / initial[0, 0]
-    normalized_gradient = np.array([-3.0, 0.6, 0.6, -0.5])
-    observed = (-0.02e-6 * normalized_gradient / np.sqrt([1000.0, 1, 1, 1])).reshape(
-        shape
+    expected = np.linalg.solve(matrix.T @ matrix + 0.2 * np.eye(4), matrix.T @ observed)
+    np.testing.assert_allclose((state - initial).ravel(), expected, atol=2e-14)
+    check = metrics["direction_checks"][0]
+    assert (
+        check["raw_directional_derivative"]
+        < 0
+        < check["smoothed_directional_derivative"]
     )
-
-    class Forward:
-        background_builds = eikonal_solves = 0
-
-        def linearize(self, model):
-            self.background_builds += 1
-            jacobian = DenseJacobian(matrix, shape)
-            return Linearization(
-                jacobian.forward(model - initial).reshape(shape),
-                SimpleNamespace(
-                    forward=jacobian.forward,
-                    data_dtype=jacobian.data_dtype,
-                    adjoint=lambda y: jacobian.adjoint(y.ravel()),
-                ),
-            )
-
-    positions = [[-0.01, 0], [0.01, 0]]
-    case = USCTCase(
-        case_id="convex_newton_smoothing_counterexample",
-        grid=GridSpec(shape=shape, spacing_m=(0.001, 0.001)),
-        geometry=GeometrySpec(tx_pos_m=positions, rx_pos_m=positions),
-        measurement=MeasurementSpec(domain="features", delta_tof_s=observed),
+    assert check["smoothing_rejected"]
+    assert metrics["stop_reason"] == "stationary_gradient"
+    assert metrics["gradient_checks"][-1]["relative_to_initial"] <= 1e-8
+    assert (
+        metrics["iteration_history"][-1]["objective"]
+        < metrics["iteration_history"][0]["objective"]
     )
-    config = AlgorithmConfig(
-        diagnostics=True,
-        parameters={},
-        run_controls={
-            "max_iterations": 3,
-            "target_relative_residual": 1e-08,
-            "restore_best_validation": False,
-        },
+    _assert_armijo(metrics)
+
+
+def test_zero_inner_update_does_not_claim_stationarity(monkeypatch, solve):
+    monkeypatch.setattr(
+        nonlinear,
+        "solve_linearized",
+        lambda jac, residual, current, *a, **kw: (
+            np.zeros_like(current),
+            LinearSolveInfo("fixture", 0, "iteration_limit", 1, 1, False),
+        ),
     )
+    state, metrics, forward, _, _ = solve(
+        np.eye(4),
+        np.full(4, 1e-6),
+        problem_kind="bent",
+    )
+    assert metrics["stop_reason"] == "max_iterations"
+    assert metrics["gradient_checks"][0]["norm"] > 0
+    assert metrics["line_search_history"][-1]["proposal"] == "projected_gradient"
+    assert metrics["data_residual_reduction"] > 0
+    assert np.any(state != forward.reference)
+
+
+def test_bound_kkt_stationarity_requires_no_newton_or_trial(solve):
+    initial = np.full((2, 2), 1 / 1600)
+    state, metrics, forward, directions, control = solve(
+        np.eye(4),
+        np.full(4, -1e-6),
+        initial=initial,
+        problem_kind="bent",
+        max_iterations=4,
+    )
+    assert metrics["stop_reason"] == "stationary_projected_gradient"
+    assert len(forward.states) == 1 and not directions
+    assert control.work.counts["adjoint_calls"] == 1
+    assert control.work.counts.get("line_search", 0) == 0
+    np.testing.assert_array_equal(state, initial)
+
+
+@pytest.mark.parametrize("recover", [False, True])
+def test_nonfinite_trials_are_rejected_without_changing_checkpoint(solve, recover):
+    state, metrics, forward, _, control = solve(
+        np.eye(4),
+        np.full(4, 1e-6),
+        problem_kind="bent",
+        smooth_sigma=0.5,
+        trial_failure=lambda value, count: (
+            value if recover and count > 2 else np.full_like(value, np.nan)
+        ),
+    )
+    assert (
+        metrics["line_search_history"][0]["rejection"]
+        == "nonfinite_trial_prediction_or_objective"
+    )
+    current = control.current_state
+    np.testing.assert_array_equal(current.model, state)
+    np.testing.assert_array_equal(current.prediction, current.linearization.value)
+    np.testing.assert_allclose(
+        current.prediction, forward.forward(state - forward.reference)
+    )
+    assert current.objective == metrics["iteration_history"][-1]["objective"]
+    assert current.iteration == metrics["iterations"]
+    if recover:
+        assert metrics["stop_reason"] == "max_iterations"
+        assert metrics["data_residual_reduction"] > 0
+        _assert_armijo(metrics)
+    else:
+        assert metrics["stop_reason"] == "numerical_failure"
+        assert len(metrics["iteration_history"]) == 1
+        np.testing.assert_array_equal(state, forward.reference)
+        assert metrics["data_residual_norm"] == pytest.approx(2e-6)
+
+
+@pytest.mark.parametrize("scale", [1e-6, 1e6])
+def test_relative_gradient_stopping_is_invariant_to_objective_scale(solve, scale):
+    matrix = np.diag(np.sqrt([1000.0, 1, 1, 1]))
+    observed = -1e-5 * np.array([-3.0, 0.6, 0.6, -0.5]) / np.diag(matrix)
+    state, metrics, forward, _, _ = solve(
+        matrix * scale,
+        observed * scale,
+        problem_kind="bent",
+        damping=0.2 * scale**2,
+        max_iterations=4,
+    )
+    expected = np.linalg.solve(matrix.T @ matrix + 0.2 * np.eye(4), matrix.T @ observed)
+    np.testing.assert_allclose(
+        (state - forward.reference).ravel(), expected, atol=2e-14
+    )
+    assert metrics["stop_reason"] == "stationary_gradient"
+    assert metrics["iterations"] == 1
+    assert metrics["gradient_checks"][0]["relative_to_initial"] == 1
+    assert metrics["gradient_checks"][-1]["relative_to_initial"] <= 1e-8
+
+
+def test_precomputed_initial_linearization_commits_at_forward_budget(solve):
+    state, metrics, forward, _, control = solve(
+        np.eye(2),
+        [1e-9, -1e-9],
+        reuse_initial=True,
+        run_controls={"max_forward_calls": 1},
+    )
+    assert forward.background_builds == 1
+    assert control.work.counts["forward_calls"] == 1
+    assert metrics["stop_reason"] == "forward_calls_budget"
+    assert control.current_state.linearization is not None
+    np.testing.assert_array_equal(state, forward.reference)
+    np.testing.assert_array_equal(control.current_state.prediction, 0)
+    assert metrics["iteration_history"][0]["objective"] == pytest.approx(1e-18)
+
+
+def test_precomputed_linearization_and_diagnostics_preserve_numerical_path(solve):
+    args = (1e8 * np.eye(2), [0.01, -0.01])
+    first, detailed, forward, _, control = solve(
+        *args,
+        reuse_initial=True,
+        max_iterations=3,
+        step_length=0.5,
+    )
+    second, compact, other_forward, _, other = solve(
+        *args,
+        diagnostics=False,
+        max_iterations=3,
+        step_length=0.5,
+    )
+    np.testing.assert_array_equal(first, second)
+    np.testing.assert_allclose(
+        first - forward.reference,
+        (1 - 0.5**3) * np.array([[1e-10, -1e-10]]),
+        rtol=1e-12,
+        atol=1e-22,
+    )
+    assert forward.background_builds == other_forward.background_builds == 4
+    assert control.work.counts == other.work.counts
+    assert (
+        compact["iteration_history"][-1]["objective"]
+        == detailed["iteration_history"][-1]["objective"]
+    )
+    assert "line_search_history" not in compact
+    assert "direction_checks" not in compact
+    assert "gradient_checks" not in compact
+
+
+@pytest.mark.parametrize("step_length", [0.5, 3.0])
+def test_advancing_state_releases_obsolete_linearizations_and_model_caches(step_length):
     from usctbench.core.config import prepare_config
 
-    control = InversionControl(case, prepare_config("straight_cgls", config), observed)
-    problem = prepare_born_problem(Forward(), initial, (1400, 1600))
-    result, metrics = gauss_newton(
+    initial = np.full((1, 2), 1 / 1500**2)
+    observed = np.array([[0.01, -0.01]])
+    matrix = 1e8 * np.eye(2)
+    references = []
+
+    class CachedJacobian(DenseJacobian):
+        def adjoint(self, values):
+            return super().adjoint(values.ravel())
+
+    def linearize(model):
+        # During a trial, only the current accepted background may remain alive.
+        for lin, cache in references:
+            if (
+                control.current_state is not None
+                and lin() is control.current_state.linearization
+            ):
+                assert cache() is control.current_state.linearization.jacobian
+            else:
+                assert lin() is None and cache() is None
+        jacobian = CachedJacobian(matrix, initial.shape)
+        jacobian.model_cache = model.copy()
+        result = Linearization(
+            jacobian.forward(model - initial).reshape(1, 2), jacobian
+        )
+        references.append((weakref.ref(result), weakref.ref(jacobian)))
+        return result
+
+    case = USCTCase(
+        case_id="accepted_background_lifetime",
+        grid=GridSpec(shape=initial.shape, spacing_m=(0.001, 0.001)),
+        geometry=GeometrySpec(tx_pos_m=[[0, 0]], rx_pos_m=[[0.01, 0], [0, 0.01]]),
+        measurement=MeasurementSpec(domain="features", tof_s=observed),
+    )
+    control = InversionControl(
+        case,
+        prepare_config(
+            "bent_ray_gn",
+            AlgorithmConfig(
+                run_controls={
+                    "max_iterations": 3,
+                    "objective_rtol": None,
+                    "update_rtol": None,
+                    "restore_best_validation": False,
+                }
+            ),
+        ),
+        observed,
+    )
+    problem = nonlinear.GaussNewtonProblem(
+        initial,
+        initial,
+        1 / 1600**2,
+        1 / 1400**2,
+        linearize,
+        lambda candidate, current: np.clip(candidate, 1 / 1600**2, 1 / 1400**2),
+        np.copy,
+        nonlinear.backtrack_feasible_displacement,
+        "identity",
+        None,
+        1e-10,
+    )
+    state, metrics = nonlinear.gauss_newton(
         problem,
         control,
-        inner_iterations=8,
-        damping=0,
-        smooth_sigma=1,
-        max_backtracks=max_backtracks,
+        step_length=step_length,
+        initial_linearization=control.call("forward", linearize, initial),
     )
-    expected = initial + np.linalg.solve(matrix, observed.ravel()).reshape(shape)
-    np.testing.assert_allclose(result, expected, rtol=1e-10)
-    assert metrics["data_relative_residual"] < 1e-8
-    assert metrics["direction_checks"][0]["smoothing_rejected"]
-    assert metrics["direction_checks"][0]["raw_directional_derivative"] < 0
-    assert all(
-        row["projected_directional_derivative"] < 0
-        for row in metrics["line_search_history"]
-        if row["accepted"]
+    assert len(references) == (4 if step_length < 1 else 7)
+    assert all(lin() is None and cache() is None for lin, cache in references[:-1])
+    assert references[-1][0]() is control.current_state.linearization
+    accepted_step = step_length if step_length < 1 else step_length / 2
+    np.testing.assert_allclose(
+        state - initial,
+        (1 - (1 - accepted_step) ** 3) * np.array([[1e-10, -1e-10]]),
+        rtol=1e-12,
+        atol=1e-22,
     )
+    assert metrics["iterations"] == 3

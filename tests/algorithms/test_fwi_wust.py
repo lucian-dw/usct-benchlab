@@ -11,10 +11,11 @@ from usctbench.algorithms.fwi import algorithm as module
 from usctbench.algorithms.fwi.io import (
     frequency_input,
     read_artifact,
-    publish_result,
+    write_artifact,
 )
 from usctbench.algorithms.fwi.parameters import WUSTParameters
-from usctbench.core.algorithm_specs import make_agent_config, SPECS
+from usctbench.core.algorithm_specs import make_agent_config
+from usctbench.core.registry import get_algorithm_entry
 from usctbench.core.config import prepare_config
 from usctbench.core.schema import (
     AlgorithmConfig,
@@ -110,7 +111,7 @@ class FakeClient:
             "records": [{"loss_before_update": 1.0} for _ in range(n)],
             "final_data_residual": None,
         }
-        return publish_result(
+        return write_artifact(
             req["output_manifest"],
             "wust.reconstruction",
             meta,
@@ -202,7 +203,7 @@ def test_input_geometry_sign_axes_masks_and_no_gt_leak(wave_case, config, tmp_pa
 )
 def test_unsupported_controls_fail(wave_case, config, key, value):
     setattr(config.run_controls, key, value)
-    with pytest.raises(ValueError, match="iteration/time budgets"):
+    with pytest.raises(ValueError, match=key):
         module.WUSTFWIAlgorithm().run(
             wave_case,
             prepare_config(module.WUSTFWIAlgorithm().name, config, case=wave_case),
@@ -244,7 +245,7 @@ def test_obsolete_parameters_rejected(key, value):
 
 
 def test_agent_and_runtime_admission_contract():
-    description = SPECS["fwi_wust"].describe()
+    description = get_algorithm_entry("fwi_wust").describe()
     assert description["family"] == "full_wave"
     assert len(description["variants"]) == 1
     assert not {

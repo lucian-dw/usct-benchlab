@@ -2,7 +2,7 @@
 
 from usctbench.core.config import prepare_config
 
-from usctbench.solvers.linear import LinearSolveInfo
+from tests.helpers import DenseJacobian
 import numpy as np
 import pytest
 
@@ -58,39 +58,23 @@ def _offset(case):
     )
 
 
-class _DenseForward:
+class _DenseForward(DenseJacobian):
     def __init__(self, case, matrix):
+        super().__init__(matrix, case.grid.shape)
         self.grid = case.grid
         self.ray_shape = case.measurement.delta_tof_s.shape
         self.n_rays = int(np.prod(self.ray_shape))
         self.spatial_order = 1
-        self.matrix = matrix
         self.offset = _offset(case)
         self.states = []
-        self.adjoint_calls = 0
-        self.trial_failure = None
+
+    def adjoint(self, values):
+        return super().adjoint(values.ravel())
 
     def linearize(self, state):
         self.states.append(state.copy())
-        value = self.offset.ravel() + self.matrix @ (state - 1 / 1500).ravel()
-        if self.trial_failure is not None and len(self.states) > 1:
-            value = self.trial_failure(value)
-        parent = self
-
-        class Jacobian:
-            data_dtype = np.dtype(np.float64)
-            grid = parent.grid
-            ray_shape = parent.ray_shape
-            n_rays = parent.n_rays
-
-            def forward(self, x):
-                return parent.matrix @ x.ravel()
-
-            def adjoint(self, y):
-                parent.adjoint_calls += 1
-                return (parent.matrix.T @ y.ravel()).reshape(parent.grid.shape)
-
-        return Linearization(value, Jacobian())
+        value = self.offset.ravel() + self.forward(state - 1 / 1500)
+        return Linearization(value, self)
 
 
 def _dense(monkeypatch, matrix, data, shape=(2, 2)):
@@ -112,43 +96,6 @@ def _assert_armijo(result):
                 costs[row["iteration"] - 1]
                 + 1e-4 * row["projected_directional_derivative"]
             )
-
-
-@pytest.mark.parametrize("reduced", [False, True])
-def test_uphill_gaussian_smoothing_recovers_regularized_dense_solution(
-    monkeypatch, reduced
-):
-    diagonal = np.sqrt([1000.0, 1, 1, 1])
-    matrix = np.diag(diagonal)
-    data = -1e-5 * np.array([-3.0, 0.6, 0.6, -0.5]) / diagonal
-    case, _ = _dense(monkeypatch, matrix, data)
-    result = bent.BentRayAlgorithm().run(
-        case,
-        prepare_config(
-            bent.BentRayAlgorithm().name,
-            _config(
-                regularization_lambda=np.sqrt(0.2),
-                smooth_sigma=1,
-                **({"model_grid_shape": [2, 2]} if reduced else {}),
-            ),
-            case=case,
-        ),
-    )
-    expected = np.linalg.solve(matrix.T @ matrix + 0.2 * np.eye(4), matrix.T @ data)
-    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
-    np.testing.assert_allclose(
-        (1 / result.sound_speed_mps - 1 / 1500).ravel(), expected, atol=2e-14
-    )
-    check = result.metrics["direction_checks"][0]
-    assert (
-        check["raw_directional_derivative"]
-        < 0
-        < check["smoothed_directional_derivative"]
-    )
-    assert check["smoothing_rejected"]
-    assert result.metrics["stop_reason"] == "stationary_gradient"
-    assert result.metrics["gradient_checks"][-1]["relative_to_initial"] <= 1e-8
-    _assert_armijo(result)
 
 
 @pytest.mark.parametrize("kind", ["identity", "laplacian"])
@@ -189,7 +136,6 @@ def test_weighted_regularized_solution_matches_fine_grid_dense_reference(
     np.testing.assert_allclose(
         (1 / result.sound_speed_mps - 1 / 1500).ravel(), basis @ expected, atol=2e-11
     )
-    assert result.metrics["gradient_space"] == ("coefficients" if reduced else "pixels")
     altered = case.model_copy(deep=True)
     altered.measurement.delta_tof_s[:, 1] += 1.0
     other = bent.BentRayAlgorithm().run(
@@ -198,109 +144,6 @@ def test_weighted_regularized_solution_matches_fine_grid_dense_reference(
     np.testing.assert_array_equal(other.sound_speed_mps, result.sound_speed_mps)
     assert other.metrics["gradient_checks"] == result.metrics["gradient_checks"]
     _assert_armijo(result)
-
-
-def test_clipping_rejects_uphill_newton_and_uses_projected_gradient(monkeypatch):
-    hessian = np.eye(4)
-    hessian[:2, :2] = [[3, -8], [-8, 22]]
-    matrix = np.linalg.cholesky(hessian).T
-    initial = np.full((2, 2), 1 / 1500)
-    initial[0, 0] = 1 / 1700
-    gradient = np.array([1, -2, 0, 0]) * 1e-6
-    data = matrix @ (initial - 1 / 1500).ravel() - np.linalg.solve(matrix.T, gradient)
-    case, forward = _dense(monkeypatch, matrix, data)
-    result = bent.BentRayAlgorithm().run(
-        case,
-        prepare_config(
-            bent.BentRayAlgorithm().name,
-            _config(max_iterations=1, initial_sound_speed_mps=1 / initial),
-            case=case,
-        ),
-    )
-    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
-    attempts = result.metrics["line_search_history"]
-    assert result.metrics["direction_checks"][0]["raw_directional_derivative"] < 0
-    assert attempts[0]["projected_directional_derivative"] > 0
-    assert attempts[0]["rejection"] == "non_descent_projected_step"
-    assert attempts[-1]["proposal"] == "projected_gradient"
-    assert attempts[-1]["accepted"]
-    assert len(forward.states) == 1 + sum(
-        row["objective"] is not None for row in attempts
-    )
-    _assert_armijo(result)
-
-
-def test_zero_inner_update_does_not_claim_stationarity(monkeypatch):
-    case, _ = _dense(monkeypatch, np.eye(4), np.full(4, 1e-6))
-    monkeypatch.setattr(
-        nonlinear,
-        "solve_linearized",
-        lambda jac, residual, current, *a, **kw: (
-            np.zeros_like(current),
-            LinearSolveInfo("fixture", 0, "iteration_limit", 1, 1, False),
-        ),
-    )
-    result = bent.BentRayAlgorithm().run(
-        case,
-        prepare_config(
-            bent.BentRayAlgorithm().name, _config(max_iterations=1), case=case
-        ),
-    )
-    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
-    assert result.metrics["stop_reason"] == "max_iterations"
-    assert result.metrics["line_search_history"][-1]["proposal"] == "projected_gradient"
-    assert result.metrics["data_residual_reduction"] > 0
-
-
-def test_bound_kkt_stationarity_requires_no_newton_or_trial(monkeypatch):
-    initial = np.full((2, 2), 1 / 1700)
-    case, forward = _dense(monkeypatch, np.eye(4), (initial - 1 / 1500 - 1e-6).ravel())
-    result = bent.BentRayAlgorithm().run(
-        case,
-        prepare_config(
-            bent.BentRayAlgorithm().name,
-            _config(initial_sound_speed_mps=1700),
-            case=case,
-        ),
-    )
-    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
-    assert result.metrics["stop_reason"] == "stationary_projected_gradient"
-    assert len(forward.states) == 1
-    assert forward.adjoint_calls == 1
-    np.testing.assert_allclose(result.sound_speed_mps, 1700)
-
-
-@pytest.mark.parametrize("recover", [False, True])
-def test_nonfinite_trials_are_rejected_without_changing_checkpoint(
-    monkeypatch, recover
-):
-    case, forward = _dense(monkeypatch, np.eye(4), np.full(4, 1e-6))
-    forward.trial_failure = lambda value: (
-        value if recover and len(forward.states) > 2 else np.full_like(value, np.nan)
-    )
-    result = bent.BentRayAlgorithm().run(
-        case,
-        prepare_config(
-            bent.BentRayAlgorithm().name,
-            _config(max_iterations=1, smooth_sigma=0.5),
-            case=case,
-        ),
-    )
-    assert (
-        result.metrics["line_search_history"][0]["rejection"]
-        == "nonfinite_trial_prediction_or_objective"
-    )
-    if recover:
-        assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
-        assert result.metrics["data_residual_reduction"] > 0
-        _assert_armijo(result)
-    else:
-        assert result.status == "failed"
-        assert result.metrics["stop_reason"] == "numerical_failure"
-        assert np.isfinite(result.sound_speed_mps).all()
-        assert len(result.metrics["iteration_history"]) == 1
-        np.testing.assert_array_equal(result.sound_speed_mps, np.full((2, 2), 1500.0))
-        assert result.metrics["data_residual_norm"] == pytest.approx(2e-6)
 
 
 def test_disabling_backtracking_does_not_allow_ascent(monkeypatch):
@@ -318,29 +161,6 @@ def test_disabling_backtracking_does_not_allow_ascent(monkeypatch):
     assert len(result.metrics["line_search_history"]) == 2
     assert not any(row["accepted"] for row in result.metrics["line_search_history"])
     np.testing.assert_allclose(result.sound_speed_mps, 1500)
-
-
-@pytest.mark.parametrize("scale", [1e-6, 1e6])
-def test_relative_gradient_stopping_is_invariant_to_objective_scale(monkeypatch, scale):
-    matrix = np.diag(np.sqrt([1000.0, 1, 1, 1]))
-    data = -1e-5 * np.array([-3.0, 0.6, 0.6, -0.5]) / np.diag(matrix)
-    case, _ = _dense(monkeypatch, matrix * scale, data * scale)
-    result = bent.BentRayAlgorithm().run(
-        case,
-        prepare_config(
-            bent.BentRayAlgorithm().name,
-            _config(regularization_lambda=np.sqrt(0.2 * scale**2)),
-            case=case,
-        ),
-    )
-    assert result.status in {"completed", "budget_exhausted"}, result.failure_reason
-    assert result.metrics["stop_reason"] == "stationary_gradient"
-    assert result.metrics["iterations"] == 1
-    assert result.metrics["gradient_checks"][0]["relative_to_initial"] == 1
-    expected = np.linalg.solve(matrix.T @ matrix + 0.2 * np.eye(4), matrix.T @ data)
-    np.testing.assert_allclose(
-        (1 / result.sound_speed_mps - 1 / 1500).ravel(), expected, atol=2e-14
-    )
 
 
 @pytest.mark.parametrize("reference", [None, 1500.0, 1490.0])

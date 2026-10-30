@@ -81,7 +81,6 @@ def test_one_small_step_or_pre_minimum_steps_do_not_stop():
     for k, update in enumerate(updates):
         reason = monitor.observe(
             k,
-            np.ones(2),
             residual_norm=1,
             observed_norm=2,
             objective=0.5,
@@ -138,7 +137,6 @@ def test_stage_change_resets_update_patience_not_global_iteration_budget():
         monitor.set_stage(stage)
         reason = monitor.observe(
             k,
-            np.ones(2),
             residual_norm=1,
             observed_norm=2,
             objective=0.5,
@@ -167,7 +165,7 @@ def monitor(**kwargs):
 def observe(m, i, **kwargs):
     args = dict(residual_norm=1.0, observed_norm=2.0, objective=0.5)
     args.update(kwargs)
-    return m.observe(i, np.array([i + 1.0]), **args)
+    return m.observe(i, **args)
 
 
 def test_or_rules_record_all_triggers_with_priority():
@@ -208,15 +206,14 @@ def test_stop_reasons(kwargs, second, reason):
     assert record["quality_target_met"] is (reason == "exact_data_fit")
 
 
-def test_validation_restores_best_not_last_state():
+def test_validation_selects_best_not_last_iteration():
     m = monitor(validation_patience=2, objective_rtol=None)
     observe(m, 0, validation_relative=0.9)
     observe(m, 1, validation_relative=0.5)
     observe(m, 2, validation_relative=0.7)
     assert observe(m, 3, validation_relative=0.8) == "validation_plateau"
-    state, index = m.selected_state()
+    index = m.selected_iteration
     assert index == 1
-    np.testing.assert_array_equal(state, [2.0])
     assert m.record()["completed_iterations"] == 3
 
 
@@ -233,9 +230,8 @@ def test_quality_target_tracks_selected_checkpoint_not_termination(
     assert (
         observe(m, 1, validation_relative=0.2, residual_norm=0.5) == "target_residual"
     )
-    state, index = m.selected_state()
+    index = m.selected_iteration
     assert index == (0 if restore_best_validation else 1)
-    np.testing.assert_array_equal(state, [index + 1.0])
     record = m.record()
     assert record["quality_target_met"] is (not restore_best_validation)
     assert record["selected_iteration"] == index
@@ -257,13 +253,12 @@ def test_budgets_checked_before_operator_call():
         WorkLedger(RunControls(max_elapsed_s=0)).call("adjoint", lambda: 0)
 
 
-def test_numerical_failure_preserves_last_complete_state():
+def test_numerical_failure_preserves_last_complete_iteration():
     m = monitor()
     observe(m, 0)
     assert observe(m, 1, objective=np.nan) == "numerical_failure"
-    state, index = m.selected_state()
+    index = m.selected_iteration
     assert index == 0
-    assert state[0] == 1
 
 
 def test_termination_is_sticky_and_cannot_replace_checkpoint():
@@ -299,3 +294,35 @@ def test_control_rejected_objective_cannot_mismatch_image_and_prediction():
     assert metrics["data_residual_norm"] == 4
     assert metrics["stop_reason"] == "numerical_failure"
     assert metrics["stopping"]["termination_category"] == "failure"
+
+
+def test_control_owns_selected_snapshot_without_retaining_best_linearization():
+    from usctbench.algorithms._control import InversionControl
+    from usctbench.core.config import prepare_config
+    from usctbench.data.synthetic import make_sound_speed_case
+
+    case = make_sound_speed_case(shape=(4, 4), n_transducers=4)
+    config = prepare_config(
+        "straight_cgls",
+        AlgorithmConfig(
+            evaluation={"receiver_indices": [1], "exclude_reciprocal": False},
+            run_controls={"max_iterations": 3, "restore_best_validation": True},
+        ),
+    )
+    control = InversionControl(case, config, np.ones((4, 4)))
+    first = np.full((4, 4), 0.2)
+    prediction = np.full((4, 4), 0.9)
+    lin0, lin1 = object(), object()
+    control.observe(0, first, prediction, objective=1, linearization=lin0)
+    control.observe(
+        1, np.full((4, 4), 0.5), np.full((4, 4), 0.1), objective=0.5, linearization=lin1
+    )
+    selected, metrics = control.output(np.zeros((4, 4)))
+    np.testing.assert_array_equal(selected, first)
+    np.testing.assert_array_equal(control.selected_state.prediction, prediction)
+    assert control.current_state.linearization is lin1
+    assert control.best_state.linearization is None
+    assert metrics["stopping"]["selected_iteration"] == 0
+    assert metrics["stopping"]["completed_iterations"] == 1
+    selected[:] = 99
+    np.testing.assert_array_equal(control.selected_state.model, first)

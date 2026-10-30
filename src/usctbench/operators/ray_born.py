@@ -13,12 +13,13 @@ complete port of the upstream r-Wave Hessian-free, paraxial shooting algorithm.
 from __future__ import annotations
 
 from collections import OrderedDict
+from contextlib import nullcontext
 
 import numpy as np
 from scipy.special import hankel1
 
 from usctbench.core.schema import GeometrySpec, GridSpec
-from usctbench.operators.eikonal import EikonalForward, fast_march
+from usctbench.operators.eikonal import EikonalForward, PreparedMarching
 
 
 def homogeneous_green(
@@ -55,6 +56,87 @@ def transport_log_amplitude(tape, slowness: np.ndarray, spacing, source):
     )
 
 
+class RayBornAcquisition:
+    """Fixed geometry and calibrated source spectrum shared across backgrounds."""
+
+    def __init__(self, grid, geometry, frequencies_hz, source_spectrum=None):
+        self.grid, self.geometry = grid, geometry
+        self.frequencies_hz = np.array(frequencies_hz, dtype=float, copy=True)
+        if (
+            self.frequencies_hz.ndim != 1
+            or not self.frequencies_hz.size
+            or not np.all(np.isfinite(self.frequencies_hz))
+            or np.any(self.frequencies_hz <= 0)
+        ):
+            raise ValueError("frequencies_hz must be a finite positive vector")
+        self.data_shape = (
+            len(self.frequencies_hz),
+            len(geometry.tx_pos_m),
+            len(geometry.rx_pos_m),
+        )
+        all_positions = np.vstack((geometry.tx_pos_m, geometry.rx_pos_m))
+        if not np.all(np.isfinite(all_positions)):
+            raise ValueError("transducer positions must be finite")
+        self.positions, inverse = np.unique(all_positions, axis=0, return_inverse=True)
+        self.tx_ids, self.rx_ids = np.split(inverse, [len(geometry.tx_pos_m)])
+        coordinates = np.indices(grid.shape).reshape(2, -1).T
+        self.coordinates = (
+            np.array(grid.origin_m) + (coordinates + 0.5) * grid.spacing_m
+        )
+        self.distance = np.linalg.norm(
+            self.positions[:, None] - self.coordinates[None], axis=-1
+        )
+        self.direct_distance = np.linalg.norm(
+            geometry.tx_pos_m[:, None] - geometry.rx_pos_m[None], axis=-1
+        )
+        self.valid_pair_mask = self.direct_distance > 0
+        self.reference_cache = {}
+        self._device_arrays = {}
+        self.set_source_spectrum(
+            np.ones(self.data_shape[:2], dtype=complex)
+            if source_spectrum is None
+            else source_spectrum
+        )
+        for value in (
+            self.frequencies_hz,
+            self.positions,
+            self.tx_ids,
+            self.rx_ids,
+            self.coordinates,
+            self.distance,
+            self.direct_distance,
+            self.valid_pair_mask,
+        ):
+            value.setflags(write=False)
+
+    def set_source_spectrum(self, source_spectrum):
+        source = np.asarray(source_spectrum, dtype=complex)
+        if source.shape != self.data_shape[:2] or not np.all(np.isfinite(source)):
+            raise ValueError(
+                "source_spectrum must have canonical shape (frequency, tx)"
+            )
+        self.source_spectrum = source.copy()
+        self.source_spectrum.setflags(write=False)
+        self._device_arrays.clear()
+
+    def device_arrays(self, device):
+        import cupy as cp
+
+        if device not in self._device_arrays:
+            with cp.cuda.Device(device):
+                self._device_arrays[device] = (
+                    cp.asarray(self.tx_ids),
+                    cp.asarray(self.rx_ids),
+                    cp.asarray(self.source_spectrum),
+                )
+        return self._device_arrays[device]
+
+    def close(self):
+        """Release run-owned reference fields and fixed device arrays."""
+        self.reference_cache.clear()
+        self._device_arrays.clear()
+
+
 class RayBornForward:
     """Nonlinear Eikonal/WKB pressure and its distorted-wave Born update map.
 
@@ -81,24 +163,33 @@ class RayBornForward:
         budget_check=None,
         green_device=None,
         reference_cache=None,
+        acquisition=None,
+        work_counts=None,
     ):
         self.grid, self.geometry = grid, geometry
-        self.frequencies_hz = np.asarray(frequencies_hz)
+        self.acquisition = (
+            acquisition
+            if acquisition is not None
+            else RayBornAcquisition(grid, geometry, frequencies_hz, source_spectrum)
+        )
+        self.frequencies_hz = self.acquisition.frequencies_hz
+        self.work_counts = work_counts if work_counts is not None else {}
         self.settings = dict(
             exterior_speed_mps=exterior_speed_mps,
-            source_spectrum=source_spectrum,
+            acquisition=self.acquisition,
+            work_counts=self.work_counts,
             max_cache_bytes=max_cache_bytes,
             green_backend=green_backend,
             green_solver_rtol=green_solver_rtol,
             green_solver_maxiter=green_solver_maxiter,
             budget_check=budget_check,
             green_device=green_device,
-            reference_cache=reference_cache if reference_cache is not None else {},
+            reference_cache=(
+                reference_cache
+                if reference_cache is not None
+                else self.acquisition.reference_cache
+            ),
         )
-        self.eikonal_solves = 0
-        self.background_builds = 0
-        self.green_solves = 0
-        self.green_matvecs = 0
 
     def linearize(self, squared_slowness):
         from usctbench.operators.base import Linearization
@@ -117,13 +208,7 @@ class RayBornForward:
             background_sound_speed_mps=1 / np.sqrt(model),
             **self.settings,
         )
-        try:
-            value = operator.background_data()
-        finally:
-            self.background_builds += 1
-            self.eikonal_solves += operator.eikonal_solves
-            self.green_solves += operator.green_solves
-            self.green_matvecs += operator.green_matvecs
+        value = operator.background_data()
         jacobian = born_jacobian(operator)
         return Linearization(
             value,
@@ -166,6 +251,8 @@ class RayBornOperator:
         green_solver_maxiter=20,
         budget_check=None,
         green_device=None,
+        acquisition=None,
+        work_counts=None,
     ):
         if green_device is not None and (
             isinstance(green_device, bool)
@@ -192,19 +279,22 @@ class RayBornOperator:
             green_solver_rtol,
             green_solver_maxiter,
         )
-        self.green_solves, self.green_matvecs = 0, 0
-        self.budget_check = budget_check
-        self.green_maximum_relative_residual = 0.0
-        self.grid = grid
-        self.geometry = geometry
-        self.frequencies_hz = np.asarray(frequencies_hz, dtype=float)
-        if (
-            self.frequencies_hz.ndim != 1
-            or not self.frequencies_hz.size
-            or not np.all(np.isfinite(self.frequencies_hz))
-            or np.any(self.frequencies_hz <= 0)
+        self.work_counts = work_counts if work_counts is not None else {}
+        for name in (
+            "background_builds",
+            "eikonal_solves",
+            "green_solves",
+            "green_matvecs",
         ):
-            raise ValueError("frequencies_hz must be a finite positive vector")
+            self.work_counts.setdefault(name, 0)
+        self.budget_check = budget_check
+        self.acquisition = (
+            acquisition
+            if acquisition is not None
+            else RayBornAcquisition(grid, geometry, frequencies_hz, source_spectrum)
+        )
+        self.grid, self.geometry = self.acquisition.grid, self.acquisition.geometry
+        self.frequencies_hz = self.acquisition.frequencies_hz
         if not np.isfinite(exterior_speed_mps) or exterior_speed_mps <= 0:
             raise ValueError("exterior_speed_mps must be finite and positive")
         background = np.asarray(background_sound_speed_mps, dtype=float)
@@ -221,12 +311,12 @@ class RayBornOperator:
         self.background = background.copy()
         self.background_squared_slowness = 1 / self.background**2
         self.exterior_speed_mps = float(exterior_speed_mps)
-        self.reference_cache = reference_cache if reference_cache is not None else {}
-        self.data_shape = (
-            len(self.frequencies_hz),
-            len(geometry.tx_pos_m),
-            len(geometry.rx_pos_m),
+        self.reference_cache = (
+            reference_cache
+            if reference_cache is not None
+            else self.acquisition.reference_cache
         )
+        self.data_shape = self.acquisition.data_shape
         self.n_rays = int(np.prod(self.data_shape))
         self.n_pixels = int(np.prod(grid.shape))
         self.area = float(np.prod(grid.spacing_m))
@@ -234,76 +324,107 @@ class RayBornOperator:
         self.max_cache_bytes = int(max_cache_bytes)
         if self.max_cache_bytes < 0:
             raise ValueError("max_cache_bytes must be nonnegative")
-        if source_spectrum is None:
-            source_spectrum = np.ones(self.data_shape[:2], dtype=complex)
-        source_spectrum = np.asarray(source_spectrum, dtype=complex)
-        if source_spectrum.shape != self.data_shape[:2] or not np.all(
-            np.isfinite(source_spectrum)
-        ):
-            raise ValueError(
-                "source_spectrum must have canonical shape (frequency, tx)"
-            )
-        self.source_spectrum = source_spectrum.copy()
-        all_positions = np.vstack((geometry.tx_pos_m, geometry.rx_pos_m))
-        if not np.all(np.isfinite(all_positions)):
-            raise ValueError("transducer positions must be finite")
-        self.positions, inverse = np.unique(all_positions, axis=0, return_inverse=True)
-        self.tx_ids, self.rx_ids = np.split(inverse, [len(geometry.tx_pos_m)])
-        coordinates = np.indices(grid.shape).reshape(2, -1).T
-        coordinates = np.array(grid.origin_m) + (coordinates + 0.5) * grid.spacing_m
-        self.distance = np.linalg.norm(
-            self.positions[:, None] - coordinates[None], axis=-1
-        )
-        self.direct_distance = np.linalg.norm(
-            geometry.tx_pos_m[:, None] - geometry.rx_pos_m[None], axis=-1
-        )
-        self.valid_pair_mask = self.direct_distance > 0
+        self.positions = self.acquisition.positions
+        self.tx_ids, self.rx_ids = self.acquisition.tx_ids, self.acquisition.rx_ids
+        self.distance = self.acquisition.distance
+        self.direct_distance = self.acquisition.direct_distance
+        self.valid_pair_mask = self.acquisition.valid_pair_mask
+        self.xp = np
+        if self.green_device is not None:
+            import cupy as cp
+
+            self.xp = cp
         if self.green_backend == "eikonal_wkb":
             self.delay = np.zeros_like(self.distance)
             self.log_amplitude_ratio = np.zeros_like(self.distance)
             self.direct_delay = np.zeros(self.data_shape[1:])
             self.direct_log_amplitude_ratio = np.zeros(self.data_shape[1:])
         self.green_method = "analytic_hankel"
-        self.eikonal_solves = 0
         self._cache = OrderedDict()
+        self.work_counts["background_builds"] += 1
         if not np.all(self.background == self.exterior_speed_mps):
             if self.green_backend == "eikonal_wkb":
                 self._heterogeneous_fields()
             else:
                 self.green_method = "full_green_volume_integral"
 
+    @property
+    def source_spectrum(self):
+        return self.acquisition.source_spectrum
+
+    @source_spectrum.setter
+    def source_spectrum(self, value):
+        self.acquisition.set_source_spectrum(value)
+
+    def _device_context(self):
+        return (
+            nullcontext()
+            if self.green_device is None
+            else self.xp.cuda.Device(self.green_device)
+        )
+
+    def _sampling_arrays(self):
+        if self.green_device is None:
+            return self.tx_ids, self.rx_ids, self.source_spectrum
+        return self.acquisition.device_arrays(self.green_device)
+
+    def _host(self, value):
+        return value if self.green_device is None else self.xp.asnumpy(value)
+
+    def close(self):
+        """Release this background's fields without invalidating shared acquisition."""
+        self._cache.clear()
+
     def _heterogeneous_fields(self):
-        if "eikonal_geometry" not in self.reference_cache:
+        geometry_key = (
+            "eikonal_geometry",
+            id(self.acquisition),
+            self.exterior_speed_mps,
+        )
+        if geometry_key not in self.reference_cache:
             geometry = GeometrySpec(
                 tx_pos_m=self.positions, rx_pos_m=self.geometry.rx_pos_m
             )
-            self.reference_cache["eikonal_geometry"] = EikonalForward(
+            self.reference_cache[geometry_key] = EikonalForward(
                 self.grid, geometry, background_speed_mps=self.exterior_speed_mps
             )
-        model = self.reference_cache["eikonal_geometry"]
+        model = self.reference_cache[geometry_key]
         slowness = model.extend(
             1 / self.background, background=1 / self.exterior_speed_mps
         )
-        water = np.full(model.shape, 1 / self.exterior_speed_mps)
+        prepared = PreparedMarching(
+            slowness,
+            self.grid.spacing_m,
+            budget_check=self.budget_check,
+            work_counts=self.work_counts,
+        )
+        water_marching = None
         for index, source in enumerate(model.source_coordinates):
             if self.budget_check is not None:
                 self.budget_check()
             key = (
+                geometry_key,
                 model.shape,
                 tuple(self.grid.spacing_m),
                 tuple(source),
                 self.exterior_speed_mps,
             )
             if key not in self.reference_cache:
-                reference = fast_march(water, self.grid.spacing_m, source)
+                if water_marching is None:
+                    water = np.full(model.shape, 1 / self.exterior_speed_mps)
+                    water_marching = PreparedMarching(
+                        water,
+                        self.grid.spacing_m,
+                        budget_check=self.budget_check,
+                        work_counts=self.work_counts,
+                    )
+                reference = water_marching.solve(source)
                 reference_log = transport_log_amplitude(
-                    reference, water, self.grid.spacing_m, source
+                    reference, water_marching.model, self.grid.spacing_m, source
                 )
                 self.reference_cache[key] = (reference.times, reference_log)
-                self.eikonal_solves += 1
             reference_times, reference_log = self.reference_cache[key]
-            tape = fast_march(slowness, self.grid.spacing_m, source)
-            self.eikonal_solves += 1
+            tape = prepared.solve(source)
             delay = tape.times - reference_times
             log_ratio = (
                 transport_log_amplitude(tape, slowness, self.grid.spacing_m, source)
@@ -323,6 +444,11 @@ class RayBornOperator:
         self.green_method = "eikonal_wkb_transport"
 
     def green_fields(self, frequency_index: int):
+        """Return host fields; internal consumers keep the cache on its device."""
+        with self._device_context():
+            return self._host(self._green_fields(frequency_index))
+
+    def _green_fields(self, frequency_index):
         if frequency_index in self._cache:
             self._cache.move_to_end(frequency_index)
             return self._cache[frequency_index]
@@ -346,15 +472,11 @@ class RayBornOperator:
                 maxiter=self.green_solver_maxiter,
                 budget_check=self.budget_check,
                 device=self.green_device,
+                work_counts=self.work_counts,
             )
-            try:
-                green = solver.fields(green)
-            finally:
-                self.green_solves += solver.solves
-                self.green_matvecs += solver.matvecs
-            self.green_maximum_relative_residual = max(
-                self.green_maximum_relative_residual, solver.maximum_relative_residual
-            )
+            green = solver.fields(green, return_device=True)
+        else:
+            green = self.xp.asarray(green)
         if green.nbytes <= self.max_cache_bytes:
             while (
                 self._cache
@@ -366,40 +488,72 @@ class RayBornOperator:
         return green
 
     def background_data(self) -> np.ndarray:
-        result = np.empty(self.data_shape, dtype=complex)
-        for index, frequency in enumerate(self.frequencies_hz):
-            result[index] = homogeneous_green(
-                self.direct_distance,
-                frequency,
-                self.exterior_speed_mps,
-                self.source_radius_m,
-            )
-            if self.green_backend == "eikonal_wkb":
-                result[index] *= np.exp(
-                    self.direct_log_amplitude_ratio
-                    + 2j * np.pi * frequency * self.direct_delay
-                )
-            result[index] *= self.source_spectrum[index, :, None]
-            if self.green_method == "full_green_volume_integral":
-                fields = self.green_fields(index)
-                receivers = homogeneous_green(
-                    self.distance[self.rx_ids],
+        return self.background_data_and_diagonal()[0]
+
+    def background_data_and_diagonal(self, weights=None):
+        """Prepare pressure and optional Re(J^H W J) diagonal in one field pass.
+
+        Each frequency's fields serve both outputs even with max_cache_bytes=0.
+        Precision must already exclude held-out channels. Both outputs are NumPy.
+        """
+        weights = None if weights is None else self._precision(weights)
+        xp = self.xp
+        with self._device_context():
+            tx_ids, _, source = self._sampling_arrays()
+            result = xp.empty(self.data_shape, dtype=complex)
+            diagonal = None if weights is None else xp.zeros(self.n_pixels)
+            precision = None if weights is None else xp.asarray(weights)
+            for index, frequency in enumerate(self.frequencies_hz):
+                if self.budget_check is not None:
+                    self.budget_check()
+                direct = homogeneous_green(
+                    self.direct_distance,
                     frequency,
                     self.exterior_speed_mps,
                     self.source_radius_m,
                 )
-                potential = (
-                    (2 * np.pi * frequency) ** 2
-                    * self.area
-                    * (
-                        self.background_squared_slowness
-                        - 1 / self.exterior_speed_mps**2
+                if self.green_backend == "eikonal_wkb":
+                    direct *= np.exp(
+                        self.direct_log_amplitude_ratio
+                        + 2j * np.pi * frequency * self.direct_delay
                     )
+                result[index] = xp.asarray(direct) * source[index, :, None]
+                fields = (
+                    self._green_fields(index)
+                    if diagonal is not None
+                    or self.green_method == "full_green_volume_integral"
+                    else None
                 )
-                result[index] += (
-                    (fields[self.tx_ids] * potential.ravel()) @ receivers.T
-                ) * self.source_spectrum[index, :, None]
-        return result
+                if self.green_method == "full_green_volume_integral":
+                    receivers = xp.asarray(
+                        homogeneous_green(
+                            self.distance[self.rx_ids],
+                            frequency,
+                            self.exterior_speed_mps,
+                            self.source_radius_m,
+                        )
+                    )
+                    potential = xp.asarray(
+                        (2 * np.pi * frequency) ** 2
+                        * self.area
+                        * (
+                            self.background_squared_slowness
+                            - 1 / self.exterior_speed_mps**2
+                        )
+                    )
+                    result[index] += (
+                        (fields[tx_ids] * potential.ravel()) @ receivers.T
+                    ) * source[index, :, None]
+                if diagonal is not None:
+                    diagonal += self._frequency_diagonal(
+                        index, fields, precision[index]
+                    )
+                del fields
+            return self._host(result), (
+                None
+                if diagonal is None
+                else self._host(diagonal).reshape(self.grid.shape)
+            )
 
     def forward(self, squared_slowness_perturbation: np.ndarray) -> np.ndarray:
         dm = np.asarray(squared_slowness_perturbation)
@@ -409,17 +563,23 @@ class RayBornOperator:
             or not np.all(np.isfinite(dm))
         ):
             raise ValueError("squared-slowness perturbation must be a finite real grid")
-        result = np.empty(self.data_shape, dtype=complex)
-        for index, frequency in enumerate(self.frequencies_hz):
-            green = self.green_fields(index)
-            field = (green[self.tx_ids] * dm.ravel()) @ green[self.rx_ids].T
-            result[index] = (
-                field
-                * (2 * np.pi * frequency) ** 2
-                * self.area
-                * self.source_spectrum[index, :, None]
-            )
-        return result
+        with self._device_context():
+            tx_ids, rx_ids, source = self._sampling_arrays()
+            perturbation = self.xp.asarray(dm.ravel())
+            result = self.xp.empty(self.data_shape, dtype=complex)
+            for index, frequency in enumerate(self.frequencies_hz):
+                if self.budget_check is not None:
+                    self.budget_check()
+                green = self._green_fields(index)
+                field = (green[tx_ids] * perturbation) @ green[rx_ids].T
+                result[index] = (
+                    field
+                    * (2 * np.pi * frequency) ** 2
+                    * self.area
+                    * source[index, :, None]
+                )
+                del green
+            return self._host(result)
 
     def predict(self, sound_speed_mps: np.ndarray) -> np.ndarray:
         speed = np.asarray(sound_speed_mps, dtype=float)
@@ -434,7 +594,45 @@ class RayBornOperator:
         )
 
     def adjoint(self, data: np.ndarray) -> np.ndarray:
-        return ray_born_adjoint(self, data)
+        values = np.asarray(data, dtype=complex)
+        if values.shape != self.data_shape or not np.all(np.isfinite(values)):
+            raise ValueError(
+                "adjoint data must be finite with shape (frequency, tx, rx)"
+            )
+        with self._device_context():
+            tx_ids, rx_ids, source = self._sampling_arrays()
+            values = self.xp.asarray(values)
+            result = self.xp.zeros(self.n_pixels)
+            for index, frequency in enumerate(self.frequencies_hz):
+                if self.budget_check is not None:
+                    self.budget_check()
+                green = self._green_fields(index)
+                weighted = values[index] * source[index, :, None].conj()
+                receiver_field = weighted @ green[rx_ids].conj()
+                result += (
+                    self.xp.sum(green[tx_ids].conj() * receiver_field, axis=0).real
+                    * (2 * np.pi * frequency) ** 2
+                    * self.area
+                )
+                del green
+            return self._host(result).reshape(self.grid.shape)
+
+    def _precision(self, precision):
+        weights = np.broadcast_to(np.asarray(precision, dtype=float), self.data_shape)
+        if not np.all(np.isfinite(weights)) or np.any(weights < 0):
+            raise ValueError("precision must be finite and nonnegative")
+        return weights
+
+    def _frequency_diagonal(self, index, green, weights):
+        tx_ids, rx_ids, source = self._sampling_arrays()
+        tx = self.xp.abs(green[tx_ids]) ** 2
+        rx = self.xp.abs(green[rx_ids]) ** 2
+        weighted = weights * self.xp.abs(source[index, :, None]) ** 2
+        return (
+            self.xp.sum(tx * (weighted @ rx), axis=0)
+            * (2 * np.pi * self.frequencies_hz[index]) ** 4
+            * self.area**2
+        )
 
     def normal_diagonal(self, precision):
         """Exact diagonal of Re(J^H W J), without a dense Jacobian.
@@ -442,46 +640,19 @@ class RayBornOperator:
         Precision must already exclude validation channels. This makes penalty
         scaling covariant with the pressure/source units, not arbitrary units.
         """
-        weights = np.broadcast_to(np.asarray(precision, dtype=float), self.data_shape)
-        if not np.all(np.isfinite(weights)) or np.any(weights < 0):
-            raise ValueError("precision must be finite and nonnegative")
-        result = np.zeros(self.n_pixels)
-        for index, frequency in enumerate(self.frequencies_hz):
-            green = self.green_fields(index)
-            tx = np.abs(green[self.tx_ids]) ** 2
-            rx = np.abs(green[self.rx_ids]) ** 2
-            weighted = (
-                weights[index] * np.abs(self.source_spectrum[index, :, None]) ** 2
-            )
-            result += (
-                np.sum(tx * (weighted @ rx), axis=0)
-                * (2 * np.pi * frequency) ** 4
-                * self.area**2
-            )
-        return result.reshape(self.grid.shape)
+        weights = self._precision(precision)
+        with self._device_context():
+            weights = self.xp.asarray(weights)
+            result = self.xp.zeros(self.n_pixels)
+            for index in range(len(self.frequencies_hz)):
+                if self.budget_check is not None:
+                    self.budget_check()
+                green = self._green_fields(index)
+                result += self._frequency_diagonal(index, green, weights[index])
+                del green
+            return self._host(result).reshape(self.grid.shape)
 
 
 def born_jacobian(operator):
-    """Use the same fixed-background CPU/GPU map in both inversion variants."""
-    if operator.green_device is None:
-        return operator
-    from usctbench.operators.cuda_green import CudaBornJacobian
-
-    return CudaBornJacobian(operator, operator.green_device)
-
-
-def ray_born_adjoint(operator, data: np.ndarray) -> np.ndarray:
-    values = np.asarray(data, dtype=complex)
-    if values.shape != operator.data_shape or not np.all(np.isfinite(values)):
-        raise ValueError("adjoint data must be finite with shape (frequency, tx, rx)")
-    result = np.zeros(operator.n_pixels)
-    for index, frequency in enumerate(operator.frequencies_hz):
-        green = operator.green_fields(index)
-        weighted = values[index] * operator.source_spectrum[index, :, None].conj()
-        receiver_field = weighted @ green[operator.rx_ids].conj()
-        result += (
-            np.sum(green[operator.tx_ids].conj() * receiver_field, axis=0).real
-            * (2 * np.pi * frequency) ** 2
-            * operator.area
-        )
-    return result.reshape(operator.grid.shape)
+    """Prediction and Jacobian share the background's sole CPU/device field cache."""
+    return operator

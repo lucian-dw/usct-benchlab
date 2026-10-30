@@ -10,7 +10,6 @@ import numpy as np
 from scipy.fft import fft2, ifft2, next_fast_len
 from scipy.sparse.linalg import LinearOperator, gmres
 from scipy.special import hankel1
-from usctbench.operators.base import LinearSolveInfo
 
 
 class VolumeIntegralGreen:
@@ -25,14 +24,14 @@ class VolumeIntegralGreen:
         maxiter,
         budget_check=None,
         device=None,
+        work_counts=None,
     ):
         self.grid, self.rtol, self.maxiter = grid, float(rtol), int(maxiter)
         self.budget_check = budget_check
         self.device = device
+        self.work_counts = work_counts if work_counts is not None else {}
         self.shape = tuple(grid.shape)
         self.fft_shape = tuple(next_fast_len(2 * n - 1) for n in self.shape)
-        self.solves, self.matvecs, self.maximum_relative_residual = 0, 0, 0.0
-        self.last_solve = None
         omega = 2 * np.pi * frequency_hz
         area = float(np.prod(grid.spacing_m))
         self.potential = (
@@ -65,8 +64,6 @@ class VolumeIntegralGreen:
         kernel[ny : self.fft_shape[0] - ny + 1, :] = 0
         kernel[:, nx : self.fft_shape[1] - nx + 1] = 0
         self.kernel_fft = fft2(kernel)
-        n = ny * nx
-        self.operator = LinearOperator((n, n), matvec=self._matvec, dtype=complex)
 
     def convolve(self, values):
         values = np.asarray(values).reshape(self.shape)
@@ -76,30 +73,34 @@ class VolumeIntegralGreen:
     def _matvec(self, values):
         if self.budget_check is not None:
             self.budget_check()
-        self.matvecs += 1
+        self.work_counts["green_matvecs"] = self.work_counts.get("green_matvecs", 0) + 1
         field = np.asarray(values).reshape(self.shape)
         return (field - self.convolve(self.potential * field)).ravel()
 
-    def fields(self, incident):
-        incident = np.asarray(incident, dtype=complex)
+    def fields(self, incident, *, return_device=False):
         if self.device is not None:
+            import cupy as cp
             from usctbench.operators.cuda_green import solve_fields
 
-            return solve_fields(self, incident, self.device)
+            fields = solve_fields(self, incident, self.device)
+            return fields if return_device else cp.asnumpy(fields)
+        incident = np.asarray(incident, dtype=complex)
+        n = int(np.prod(self.shape))
+        operator = LinearOperator((n, n), matvec=self._matvec, dtype=complex)
         result = np.empty_like(incident)
         for index, rhs in enumerate(incident):
             if self.budget_check is not None:
                 self.budget_check()
-            iteration_count = 0
 
             def completed_iteration(_):
-                nonlocal iteration_count
                 if self.budget_check is not None:
                     self.budget_check()
-                iteration_count += 1
 
+            self.work_counts["green_solves"] = (
+                self.work_counts.get("green_solves", 0) + 1
+            )
             value, info = gmres(
-                self.operator,
+                operator,
                 rhs,
                 x0=rhs,
                 rtol=self.rtol,
@@ -112,21 +113,8 @@ class VolumeIntegralGreen:
             residual = float(
                 np.linalg.norm(self._matvec(value) - rhs) / np.linalg.norm(rhs)
             )
-            self.solves += 1
-            self.maximum_relative_residual = max(
-                self.maximum_relative_residual, residual
-            )
             converged = (
                 info == 0 and np.isfinite(residual) and residual <= self.rtol * 1.01
-            )
-            self.last_solve = LinearSolveInfo(
-                "gmres",
-                iteration_count,
-                "residual_tolerance" if converged else "solve_failed",
-                residual,
-                residual * float(np.linalg.norm(rhs)),
-                converged,
-                int(info),
             )
             if not converged:
                 raise FloatingPointError(

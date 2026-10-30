@@ -12,7 +12,7 @@ from typing import Any
 import io
 import h5py
 import numpy as np
-from .conversion import _downsample_mean, _downsample_label, _safe_case_id
+from .conversion import resample_bilinear, resample_labels_nearest, _safe_case_id
 from usctbench.data.synthetic import (
     build_surrogate_tof_case,
     make_grid,
@@ -218,21 +218,34 @@ def _nbp_handle_to_case_record(
     n_transducers: int,
     reference_sound_speed_mps: float,
 ) -> tuple[USCTCase, dict[str, Any]]:
-    metadata = _nbp_metadata_from_handle(handle)
-    if metadata is None:
+    required = ("sos", "den", "label", "type")
+    if not all(name in handle for name in required):
         raise ValueError("not a supported NBPslices2D MAT file")
-
-    sos_mps_raw = np.asarray(handle["sos"][()], dtype=float) * 1000.0
-    label_raw = np.asarray(handle["label"][()], dtype=np.uint8)
-    density_raw = np.asarray(handle["den"][()], dtype=float)
-    type_code = int(np.asarray(handle["type"][()]).reshape(-1)[0])
+    raw = {name: handle[name][()] for name in required}
+    sos_mps_raw = np.asarray(raw["sos"], dtype=float) * 1000.0
+    label_raw = np.asarray(raw["label"], dtype=np.uint8)
+    density_raw = np.asarray(raw["den"], dtype=float)
+    if (
+        sos_mps_raw.ndim != 2
+        or density_raw.shape != sos_mps_raw.shape
+        or label_raw.shape != sos_mps_raw.shape
+    ):
+        raise ValueError("NBPslices2D sos, den and label must have matching 2-D shapes")
+    raw_type = np.asarray(raw["type"]).reshape(-1)
+    if (
+        raw_type.size != 1
+        or not np.isfinite(raw_type[0])
+        or raw_type[0] != int(raw_type[0])
+    ):
+        raise ValueError("NBPslices2D type must contain one finite integer code")
+    type_code = int(raw_type[0])
     density_label = chr(type_code) if 0 <= type_code <= 255 else str(type_code)
     density_class = NBP_DENSITY_CLASSES.get(density_label, "unknown")
 
     sos_mps_crop, label_crop, crop_info = _fit_nbp_field_of_view(sos_mps_raw, label_raw)
 
-    sound_speed_mps = _downsample_mean(sos_mps_crop, output_shape)
-    label_small = _downsample_label(label_crop, output_shape)
+    sound_speed_mps = resample_bilinear(sos_mps_crop, output_shape)
+    label_small = resample_labels_nearest(label_crop, output_shape)
     roi_mask = label_small > 0
     if not np.any(roi_mask):
         roi_mask = None
@@ -279,6 +292,10 @@ def _nbp_handle_to_case_record(
                 "nbp_type_code": type_code,
                 "category_source": "mat_type_field",
                 "roi_status": "available" if roi_mask is not None else "missing_label",
+                "roi_source": "ground_truth_label" if roi_mask is not None else "none",
+                "roi_use": (
+                    "reconstruction_prior" if roi_mask is not None else "unrestricted"
+                ),
                 "source_sound_speed_units": "km/s",
                 "source_image_axes": "yx",
                 "geometry_source": "synthetic_ring",
@@ -368,37 +385,6 @@ def _fit_nbp_field_of_view(
     return sound_speed_mps[crop], label[crop], info
 
 
-def _nbp_metadata_from_handle(handle: Any) -> dict[str, Any] | None:
-    required = ("sos", "den", "label", "type")
-    if not all(name in handle for name in required):
-        return None
-    sos_shape = tuple(int(v) for v in handle["sos"].shape)
-    den_shape = tuple(int(v) for v in handle["den"].shape)
-    label_shape = tuple(int(v) for v in handle["label"].shape)
-    if len(sos_shape) != 2 or den_shape != sos_shape or label_shape != sos_shape:
-        return None
-    type_code = _read_scalar(handle.get("type"))
-    density_label = (
-        chr(int(type_code))
-        if type_code is not None and 0 <= int(type_code) <= 255
-        else None
-    )
-    return {
-        "format": "nbpslice2d-mat",
-        "sound_speed_dataset": "sos",
-        "density_dataset": "den",
-        "label_dataset": "label",
-        "sound_speed_shape": list(sos_shape),
-        "density_shape": list(den_shape),
-        "label_shape": list(label_shape),
-        "type_code": int(type_code) if type_code is not None else None,
-        "density_label": density_label,
-        "density_class": NBP_DENSITY_CLASSES.get(density_label or "", "unknown"),
-        "sound_speed_units": "mm/us",
-        "density_units": "g/mm^3",
-    }
-
-
 def _select_nbp_zip_members(names: list[str], *, cases_per_type: int) -> list[str]:
     grouped: dict[str, list[str]] = {}
     for name in names:
@@ -413,12 +399,3 @@ def _select_nbp_zip_members(names: list[str], *, cases_per_type: int) -> list[st
     for label in sorted(grouped):
         selected.extend(sorted(grouped[label])[:cases_per_type])
     return selected
-
-
-def _read_scalar(dataset: Any) -> float | None:
-    if dataset is None:
-        return None
-    try:
-        return float(np.asarray(dataset[()]).reshape(-1)[0])
-    except Exception:
-        return None

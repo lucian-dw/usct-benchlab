@@ -136,10 +136,8 @@ def make_sound_speed_case(
                 "synthetic": True,
                 "feature_provenance": "oracle_straight_ray_forward_from_ground_truth_sound_speed",
                 "reference_sound_speed_mps": background_mps,
-                "synthetic_inclusion_radius_m": float(inclusion_radius_m),
-                "synthetic_inclusion_center_m": [
-                    float(value) for value in inclusion_center_m
-                ],
+                "roi_source": "full_grid",
+                "roi_use": "reconstruction_domain",
             },
             measurement_provenance=MeasurementProvenance.ORACLE_TRAVEL_TIME,
             benchmark_type="oracle_travel_time",

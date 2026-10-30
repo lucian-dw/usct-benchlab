@@ -1,6 +1,6 @@
 """Explicit acquisition facts; unknown provenance is never inferred from names."""
 
-from usctbench.core.compat import StrEnum
+from enum import StrEnum
 
 
 class MeasurementProvenance(StrEnum):
@@ -29,6 +29,8 @@ def case_measurement_metadata(metadata):
             "observable_definition",
             "tof_observation_contract",
             "water_reference_used",
+            "roi_source",
+            "roi_use",
         )
     }
 
@@ -40,7 +42,6 @@ def stamp_measurement_metadata(
     benchmark_type,
     forward_model,
     feature_source="unknown",
-    simulation_qc_passed=None,
     extra=None,
 ):
     """Attach supplied preparation facts without inferring acquisition quality."""
@@ -51,8 +52,6 @@ def stamp_measurement_metadata(
         forward_model=forward_model,
         feature_source=feature_source,
     )
-    if simulation_qc_passed is not None:
-        stamped["simulation_qc_passed"] = simulation_qc_passed
     if extra:
         stamped.update(extra)
     return stamped

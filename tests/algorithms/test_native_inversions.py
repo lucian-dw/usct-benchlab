@@ -6,9 +6,10 @@ import numpy as np
 import pytest
 
 from usctbench.algorithms.bent_ray import BentRayAlgorithm
-from usctbench.algorithms.rwave import RayBornAlgorithm
+from usctbench.algorithms.born import BornAlgorithm
 from usctbench.core.schema import AlgorithmConfig, GroundTruthSpec, MeasurementSpec
 from usctbench.data.synthetic import make_sound_speed_case
+from usctbench.data.pressure import dtft_pressure_contract
 from usctbench.operators.eikonal import EikonalForward
 from usctbench.operators.ray_born import RayBornOperator
 
@@ -28,6 +29,7 @@ def small_case(physics):
         )
         case.measurement.delta_tof_s = op.forward(1 / c).reshape(8, 8) - distance / 1500
     else:
+        case.metadata["pressure_contract"] = dtft_pressure_contract()
         op = RayBornOperator(case.grid, case.geometry, [120e3, 160e3, 200e3])
         case.measurement = MeasurementSpec(
             domain="frequency",
@@ -40,7 +42,7 @@ def small_case(physics):
 
 
 @pytest.mark.parametrize(
-    "physics,algorithm", [("bent", BentRayAlgorithm), ("born", RayBornAlgorithm)]
+    "physics,algorithm", [("bent", BentRayAlgorithm), ("born", BornAlgorithm)]
 )
 def test_native_inversions_reduce_residual_and_need_no_truth(physics, algorithm):
     case = small_case(physics)
@@ -65,15 +67,15 @@ def test_native_inversions_reduce_residual_and_need_no_truth(physics, algorithm)
     assert "rmse" not in result.metrics
     assert result.metrics["stopping"]["work"]["adjoint_calls"] > 0
     stop = result.metrics["stopping"]
-    assert stop["update_variable"] == (
-        "full_slowness" if physics == "bent" else "full_squared_slowness"
-    )
-    assert stop["update_units"] == ("s/m" if physics == "bent" else "s^2/m^2")
     assert stop["resolved_policy"]["max_iterations"] == 5
+    assert (
+        stop["selected_iteration"]
+        == result.metrics["iteration_history"][-1]["iteration"]
+    )
 
 
 @pytest.mark.parametrize(
-    "physics,algorithm", [("bent", BentRayAlgorithm), ("born", RayBornAlgorithm)]
+    "physics,algorithm", [("bent", BentRayAlgorithm), ("born", BornAlgorithm)]
 )
 def test_heldout_values_do_not_change_training_trajectory(physics, algorithm):
     case = small_case(physics)
@@ -106,16 +108,19 @@ def test_heldout_values_do_not_change_training_trajectory(physics, algorithm):
     ), algorithm().run(altered, prepare_config(algorithm().name, config, case=altered))
     assert a.status == b.status in {"completed", "budget_exhausted"}
     np.testing.assert_array_equal(a.sound_speed_mps, b.sound_speed_mps)
-    np.testing.assert_allclose(a.metrics["residual_curve"], b.metrics["residual_curve"])
+    np.testing.assert_allclose(
+        [row["residual_norm"] for row in a.metrics["iteration_history"]],
+        [row["residual_norm"] for row in b.metrics["iteration_history"]],
+    )
     assert a.metrics["evaluation_split"] == b.metrics["evaluation_split"]
 
 
 def test_frequency_holdout_does_not_train_or_leak_reciprocal_receiver():
     case = small_case("born")
-    result = RayBornAlgorithm().run(
+    result = BornAlgorithm().run(
         case,
         prepare_config(
-            RayBornAlgorithm().name,
+            BornAlgorithm().name,
             AlgorithmConfig(
                 parameters={"variant": "wkb_fixed"},
                 run_controls={"max_iterations": 4},

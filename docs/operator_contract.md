@@ -52,8 +52,9 @@ Unknowns are straight $\delta s$ [s/m], Eikonal $s$ [s/m], Born $m$ [s²/m²],
 and WUST $s$ [s/m]. Speed conversion and box projection belong to solver updates.
 
 Invalid observations are masked before arithmetic, not filled with valid zeros.
-An actual zero measurement remains valid. Holdouts never enter training
-normalization or source fitting. Observed masks are not GT-derived support.
+An actual zero measurement remains valid. Specimen holdouts never enter training
+normalization or source fitting. Independent water calibration is a distinct
+acquisition, not specimen validation data. Observed masks are not GT-derived support.
 
 ## Boundaries
 

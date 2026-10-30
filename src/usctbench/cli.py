@@ -6,11 +6,11 @@ import os
 
 from usctbench import describe, evaluate, list_algorithms, run, suite
 from usctbench.core.config import load_yaml
-from usctbench.core.io import read_case_hdf5
+from usctbench.core.io import read_case_hdf5, write_case_hdf5
 from usctbench.core.schema import GridSpec
 from usctbench.data import openbreastus, nbpslice2d
 from usctbench.data.synthetic import make_sound_speed_case, prepare_synthetic_demo
-from usctbench.data.waveforms import convert_kwave_pressure_mat
+from usctbench.data.waveforms import read_kwave_pressure_mat
 
 
 def _print(value):
@@ -104,9 +104,8 @@ def _import_pressure(args):
     truth_grid = (
         GridSpec.model_validate(load_yaml(args.truth_grid)) if args.truth_grid else None
     )
-    case = convert_kwave_pressure_mat(
+    case = read_kwave_pressure_mat(
         args.input,
-        args.out,
         grid=grid,
         truth_grid=truth_grid,
         frequencies_hz=args.frequencies_hz,
@@ -116,6 +115,7 @@ def _import_pressure(args):
         reference_sound_speed_mps=args.reference_sound_speed_mps,
         water_dataset=args.water_dataset,
     )
+    write_case_hdf5(case, args.out)
     _print(
         {
             "case_id": case.case_id,
@@ -210,7 +210,6 @@ def build_parser():
     p = commands.add_parser("describe-algorithm")
     p.add_argument("algorithm_id")
     p.add_argument("--variant")
-    p.add_argument("--json", action="store_true")
     p.add_argument("--case")
     p.set_defaults(handler=_describe)
     data = commands.add_parser("data").add_subparsers(required=True)

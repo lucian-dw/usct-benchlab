@@ -3,17 +3,18 @@
 import glob
 import json
 from pathlib import Path
+import re
 import resource
 import sys
 import time
 from datetime import datetime, timezone
 
-from usctbench.benchmark.artifacts import publish, save_arrays, write_json
+from usctbench.benchmark.artifacts import SavedArrays, publish, save_arrays, write_json
 from usctbench.benchmark.report import write_summary
 from usctbench.core.config import expand_config_value, load_yaml, prepare_config
 from usctbench.core.io import read_case_hdf5
 from usctbench.core.provenance import case_measurement_metadata
-from usctbench.core.registry import get_algorithm
+from usctbench.core.registry import get_algorithm, get_algorithm_entry
 from usctbench.core.schema import (
     GroundTruthSpec,
     ReconstructionResult,
@@ -30,6 +31,7 @@ def run(
     config,
     out=None,
     *,
+    experiment_id=None,
     host_limits=None,
     deployment=None,
     score=True,
@@ -43,6 +45,8 @@ def run(
     started = time.perf_counter()
     case_id = case.case_id if isinstance(case, USCTCase) else Path(case).stem
     prepared = None
+    variant = None
+    saved = SavedArrays()
     stages = {}
     stage = "prepare"
     measurement = {}
@@ -53,6 +57,11 @@ def run(
         measurement = case_measurement_metadata(case.metadata)
         prepared = prepare_config(
             algorithm, config, case=case, host_limits=host_limits, deployment=deployment
+        )
+        variant = (
+            get_algorithm_entry(algorithm)
+            .specification.variant(getattr(prepared.parameters, "variant", None))
+            .id
         )
         if directory is not None and prepared.deployment.scratch_root is None:
             prepared.deployment = prepared.deployment.model_copy(
@@ -74,14 +83,17 @@ def run(
             status=ResultStatus.FAILED,
             failure_reason=stages[stage]["message"],
         )
+    result.experiment_id = experiment_id
+    result.variant = variant
     result.runtime_s = time.perf_counter() - started
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     peak_mib = float(peak) / (1024**2 if sys.platform == "darwin" else 1024)
     result.metrics["stages"] = stages
     if directory is not None:
-        directory.mkdir(parents=True, exist_ok=True)
+        result.artifacts.pop("result_h5", None)
         try:
-            save_arrays(result, directory)
+            saved = save_arrays(result, directory)
+            result.artifacts.update(saved.artifacts)
             stages["save"] = {"status": "completed"}
         except Exception as exc:
             stages["save"] = {
@@ -93,6 +105,7 @@ def run(
         publish(
             result,
             directory,
+            saved=saved,
             config=prepared,
             stages=stages,
             peak_rss_mib=peak_mib,
@@ -136,6 +149,7 @@ def run(
         publish(
             result,
             directory,
+            saved=saved,
             config=prepared,
             stages=stages,
             peak_rss_mib=peak_mib,
@@ -159,7 +173,15 @@ def evaluate(directory):
         ]
         row = {
             key: record.get(key)
-            for key in ("algorithm", "case_id", "status", "stop_reason", "runtime_s")
+            for key in (
+                "experiment_id",
+                "algorithm",
+                "variant",
+                "case_id",
+                "status",
+                "stop_reason",
+                "runtime_s",
+            )
         }
         row.update(
             numerical_result_available=record["numerical_result_available"],
@@ -213,23 +235,42 @@ def suite(path):
     algorithms = definition.get("algorithms")
     if not isinstance(algorithms, list) or not algorithms:
         raise ValueError("benchmark suite requires a nonempty algorithms list")
+    experiment_ids = set()
+    configs = []
+    for item in algorithms:
+        experiment_id = item.get("id") if isinstance(item, dict) else None
+        if (
+            not isinstance(experiment_id, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", experiment_id) is None
+        ):
+            raise ValueError(
+                "each suite experiment requires an explicit id: "
+                "letters/digits followed by letters/digits, '_', '-' or '.'"
+            )
+        if experiment_id in experiment_ids:
+            raise ValueError(f"duplicate experiment id: {experiment_id!r}")
+        experiment_ids.add(experiment_id)
+        configs.append(
+            (
+                experiment_id,
+                item["name"],
+                expand_config_value(load_yaml(relative(item["config"]))),
+            )
+        )
     run_id = (
         definition.get("run_id")
         or f"{definition.get('name', path.stem)}_{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
     )
     root = relative(definition.get("outputs", {}).get("root", "../../runs")) / run_id
-    configs = [
-        (item["name"], expand_config_value(load_yaml(relative(item["config"]))))
-        for item in algorithms
-    ]
     for case_path in cases:
         case = read_case_hdf5(case_path)
-        for name, config in configs:
+        for experiment_id, name, config in configs:
             run(
                 name,
                 case,
                 config,
-                root / name / case.case_id,
+                root / experiment_id / case.case_id,
+                experiment_id=experiment_id,
                 host_limits=definition.get("host_limits"),
                 deployment=definition.get("deployment"),
             )
