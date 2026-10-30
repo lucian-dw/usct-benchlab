@@ -80,6 +80,7 @@ class RayBornForward:
         green_solver_maxiter=20,
         budget_check=None,
         green_device=None,
+        reference_cache=None,
     ):
         self.grid, self.geometry = grid, geometry
         self.frequencies_hz = np.asarray(frequencies_hz)
@@ -92,7 +93,7 @@ class RayBornForward:
             green_solver_maxiter=green_solver_maxiter,
             budget_check=budget_check,
             green_device=green_device,
-            reference_cache={},
+            reference_cache=reference_cache if reference_cache is not None else {},
         )
         self.eikonal_solves = 0
         self.background_builds = 0
@@ -123,11 +124,7 @@ class RayBornForward:
             self.eikonal_solves += operator.eikonal_solves
             self.green_solves += operator.green_solves
             self.green_matvecs += operator.green_matvecs
-        jacobian = operator
-        if operator.green_device is not None:
-            from usctbench.operators.cuda_green import CudaBornJacobian
-
-            jacobian = CudaBornJacobian(operator, operator.green_device)
+        jacobian = born_jacobian(operator)
         return Linearization(
             value,
             jacobian,
@@ -261,10 +258,11 @@ class RayBornOperator:
             geometry.tx_pos_m[:, None] - geometry.rx_pos_m[None], axis=-1
         )
         self.valid_pair_mask = self.direct_distance > 0
-        self.delay = np.zeros_like(self.distance)
-        self.log_amplitude_ratio = np.zeros_like(self.distance)
-        self.direct_delay = np.zeros(self.data_shape[1:])
-        self.direct_log_amplitude_ratio = np.zeros(self.data_shape[1:])
+        if self.green_backend == "eikonal_wkb":
+            self.delay = np.zeros_like(self.distance)
+            self.log_amplitude_ratio = np.zeros_like(self.distance)
+            self.direct_delay = np.zeros(self.data_shape[1:])
+            self.direct_log_amplitude_ratio = np.zeros(self.data_shape[1:])
         self.green_method = "analytic_hankel"
         self.eikonal_solves = 0
         self._cache = OrderedDict()
@@ -330,7 +328,10 @@ class RayBornOperator:
         green = homogeneous_green(
             self.distance, frequency, self.exterior_speed_mps, self.source_radius_m
         )
-        green *= np.exp(self.log_amplitude_ratio + 2j * np.pi * frequency * self.delay)
+        if self.green_backend == "eikonal_wkb":
+            green *= np.exp(
+                self.log_amplitude_ratio + 2j * np.pi * frequency * self.delay
+            )
         if self.green_method == "full_green_volume_integral":
             from usctbench.operators.volume_integral import VolumeIntegralGreen
 
@@ -370,10 +371,12 @@ class RayBornOperator:
                 frequency,
                 self.exterior_speed_mps,
                 self.source_radius_m,
-            ) * np.exp(
-                self.direct_log_amplitude_ratio
-                + 2j * np.pi * frequency * self.direct_delay
             )
+            if self.green_backend == "eikonal_wkb":
+                result[index] *= np.exp(
+                    self.direct_log_amplitude_ratio
+                    + 2j * np.pi * frequency * self.direct_delay
+                )
             result[index] *= self.source_spectrum[index, :, None]
             if self.green_method == "full_green_volume_integral":
                 fields = self.green_fields(index)
@@ -454,6 +457,15 @@ class RayBornOperator:
                 * self.area**2
             )
         return result.reshape(self.grid.shape)
+
+
+def born_jacobian(operator):
+    """Use the same fixed-background CPU/GPU map in both inversion variants."""
+    if operator.green_device is None:
+        return operator
+    from usctbench.operators.cuda_green import CudaBornJacobian
+
+    return CudaBornJacobian(operator, operator.green_device)
 
 
 def ray_born_adjoint(operator, data: np.ndarray) -> np.ndarray:

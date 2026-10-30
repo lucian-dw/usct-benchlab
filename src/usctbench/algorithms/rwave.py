@@ -14,7 +14,7 @@ from usctbench.algorithms.ray import (
 from usctbench.data.calibration import fit_water_source, prepare_source_spectrum
 from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, USCTCase
 from usctbench.core.stopping import BudgetExhausted
-from usctbench.operators.ray_born import RayBornForward, RayBornOperator
+from usctbench.operators.ray_born import RayBornForward, RayBornOperator, born_jacobian
 from usctbench.solvers.linear import solve_linearized
 from usctbench.solvers.projected_cg import projected_cg
 from usctbench.solvers.nonlinear import (
@@ -148,6 +148,8 @@ class RayBornAlgorithm:
             "green_backend": str(p.green_backend),
             "green_solver_rtol": float(p.green_solver_rtol),
             "green_solver_maxiter": p.green_solver_maxiter,
+            "green_device": config.deployment.green_device,
+            "reference_cache": {},
         }
         mode = str(p.mode)
         initialization = p.initialization if mode == "nonlinear" else "configured"
@@ -346,7 +348,7 @@ class RayBornAlgorithm:
             control.monitor.set_stage("reconstruction")
             if mode == "fixed_background":
                 delta, metrics = projected_cg(
-                    operator,
+                    born_jacobian(operator),
                     control,
                     initial=np.zeros(case.grid.shape),
                     offset=offset,

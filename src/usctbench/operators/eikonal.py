@@ -197,18 +197,31 @@ class EikonalForward:
             for p in self.source_coordinates
         )
 
-    def _raw(self, slowness):
-        tapes = self.fields(slowness)
-        values = np.asarray([self.sample_receivers(t.times) for t in tapes]).ravel()
+    def _raw(self, slowness, *, retain_tapes=True):
+        extended = self.extend(slowness, background=self.background_slowness)
+        values, tapes = [], []
+        for source in self.source_coordinates:
+            tape = fast_march(
+                extended, self.grid.spacing_m, source, spatial_order=self.spatial_order
+            )
+            values.append(self.sample_receivers(tape.times))
+            if retain_tapes:
+                tapes.append(tape)
+            del tape
+        values = np.asarray(values).ravel()
         return values, tapes
 
     def linearize(self, slowness: np.ndarray) -> Linearization:
         self.forward_calls += 1
         values, tapes = self._raw(slowness)
+        values = self._calibrate(values)
+        return Linearization(values, EikonalJacobian(self, tapes))
+
+    def _calibrate(self, values):
         if self.calibrate:
             if self._reference is None:
                 water = np.full(self.grid.shape, self.background_slowness)
-                raw, _ = self._raw(water)
+                raw, _ = self._raw(water, retain_tapes=False)
                 distance = np.linalg.norm(
                     self.geometry.tx_pos_m[:, None] - self.geometry.rx_pos_m[None, :],
                     axis=-1,
@@ -219,10 +232,12 @@ class EikonalForward:
             # Homogeneous water then cancels exactly, without a second large
             # subtraction manufacturing a roundoff-only inverse problem.
             values = (values - self._reference) + self._water_tof
-        return Linearization(values, EikonalJacobian(self, tapes))
+        return values
 
     def forward(self, slowness: np.ndarray) -> np.ndarray:
-        return self.linearize(slowness).value
+        self.forward_calls += 1
+        values, _ = self._raw(slowness, retain_tapes=False)
+        return self._calibrate(values)
 
 
 def eikonal_adjoint(jacobian, data: np.ndarray) -> np.ndarray:

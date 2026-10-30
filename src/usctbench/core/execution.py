@@ -11,6 +11,12 @@ class Deployment(BaseModel):
     cuda_visible_devices: str | None = None
     backend: Literal["cpu", "gpu"] = "gpu"
     scratch_root: str | None = None
+    green_device: int | None = Field(
+        None,
+        ge=0,
+        strict=True,
+        description="Host-selected CuPy GPU index for volume-integral Born; None uses CPU",
+    )
 
 
 class EvaluationSettings(BaseModel):

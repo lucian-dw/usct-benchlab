@@ -33,6 +33,13 @@ def solve_fields(solver, incident, device):
         result = np.empty_like(incident, dtype=complex)
         restart = min(40, n)
         for index, rhs in enumerate(incident):
+            if solver.budget_check is not None:
+                solver.budget_check()
+
+            def completed_iteration(_):
+                if solver.budget_check is not None:
+                    solver.budget_check()
+
             b = cp.asarray(rhs, dtype=cp.complex128)
             value, info = gmres(
                 operator,
@@ -43,6 +50,7 @@ def solve_fields(solver, incident, device):
                 # CuPy 13 counts inner iterations; CPU maxiter counts restarts.
                 maxiter=restart * solver.maxiter,
                 tol=solver.rtol,
+                callback=completed_iteration,
             )
             residual = float(cp.linalg.norm(matvec(value) - b) / cp.linalg.norm(b))
             solver.solves += 1

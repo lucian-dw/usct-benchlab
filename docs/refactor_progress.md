@@ -339,3 +339,14 @@ large-data rerun or clinical validation is included in this delivery.
   initially expected a status instead of the intentional raised numerical error;
   it now checks that exception and that the accepted state is retained.
 - Next: F11 avoid unused FMM storage and route fixed/nonlinear GPU Jacobians alike.
+
+## Final taskbook F11
+
+- Pure Eikonal prediction releases each source tape after receiver sampling;
+  linearization still owns the tapes needed by its exact discrete Jacobian.
+- WKB-only fields are no longer allocated by Full-Green. The host selects the
+  optional CuPy device with `deployment.green_device`; both Born variants use
+  `born_jacobian`, and the current background and water-reference cache are reused.
+- Validation: 75 focused Eikonal/Born/native inversion tests passed. GPU numerical
+  comparison will use the existing A100 entry at final integration.
+- Next: F12-F13 WUST curvature, decomposition reuse and direct slowness derivative.
