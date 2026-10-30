@@ -10,7 +10,7 @@ import h5py
 import numpy as np
 
 
-def read_images(cases_dir, run_dir, case_ids, algorithms):
+def read_images(cases_dir, run_dir, case_ids, experiments):
     """Read grid/GT and selected result images only; preserve imported [y,x] axes."""
     cases = {}
     for path in sorted(cases_dir.glob("*.h5")):
@@ -32,23 +32,29 @@ def read_images(cases_dir, run_dir, case_ids, algorithms):
     for case_id in case_ids:
         truth, shape, extent = cases[case_id]
         row = [(truth, {}, extent)]
-        for algorithm in algorithms:
-            folder = run_dir / algorithm / case_id
+        for experiment in experiments:
+            folder = run_dir / experiment / case_id
             path = folder / "result.h5"
             image, metrics = None, {}
+            identity = {"algorithm": None, "variant": None}
             if path.exists():
                 with h5py.File(path) as handle:
+                    identity.update({key: handle.attrs.get(key) for key in identity})
                     if "sound_speed_mps" in handle:
                         image = handle["sound_speed_mps"][()]
                 if (folder / "metrics.json").exists():
                     metrics = json.loads((folder / "metrics.json").read_text())
+            if (folder / "run.json").exists():
+                record = json.loads((folder / "run.json").read_text())
+                identity.update({key: record.get(key) for key in identity})
             if image is not None and image.shape != shape:
                 raise ValueError(f"{path}: result shape differs from the case grid")
             row.append((image, metrics, extent))
             summary.append(
                 {
                     "case_id": case_id,
-                    "algorithm": algorithm,
+                    "experiment_id": experiment,
+                    **identity,
                     "missing": image is None,
                     **{key: metrics.get(key) for key in ("rmse", "psnr", "ssim")},
                 }
@@ -126,18 +132,18 @@ def main():
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--case-ids", nargs="+", required=True)
-    parser.add_argument("--algorithms", nargs="+", required=True)
+    parser.add_argument("--experiments", nargs="+", required=True)
     parser.add_argument("--row-labels", nargs="+")
-    parser.add_argument("--algorithm-labels", nargs="+")
+    parser.add_argument("--experiment-labels", nargs="+")
     parser.add_argument("--title", default="")
     parser.add_argument("--limits-mps", type=float, nargs=2)
     args = parser.parse_args()
-    labels = args.algorithm_labels or args.algorithms
+    labels = args.experiment_labels or args.experiments
     row_labels = args.row_labels or args.case_ids
-    if len(labels) != len(args.algorithms) or len(row_labels) != len(args.case_ids):
-        parser.error("labels must match the number of selected cases/algorithms")
+    if len(labels) != len(args.experiments) or len(row_labels) != len(args.case_ids):
+        parser.error("labels must match the number of selected cases/experiments")
     rows, summary = read_images(
-        args.cases_dir, args.run_dir, args.case_ids, args.algorithms
+        args.cases_dir, args.run_dir, args.case_ids, args.experiments
     )
     render(rows, args.out, ["GT", *labels], row_labels, args.title, args.limits_mps)
     with args.out.with_suffix(".summary.csv").open("w", newline="") as handle:

@@ -14,6 +14,40 @@ from usctbench.data.synthetic import make_sound_speed_case
 from usctbench.operators.eikonal import EikonalForward
 
 
+def test_completed_bent_initializer_survives_first_gn_budget_exit(monkeypatch):
+    from usctbench.algorithms import bent_ray
+
+    case = make_sound_speed_case(shape=(4, 5), n_transducers=4)
+    case.measurement.delta_tof_s += 1e-7
+    captured = []
+    real_solve = bent_ray.solve_linearized
+
+    def solve(*args, **kwargs):
+        result = real_solve(*args, **kwargs)
+        captured.append(result[0].copy())
+        return result
+
+    monkeypatch.setattr(bent_ray, "solve_linearized", solve)
+    cfg = prepare_config(
+        "bent_ray_gn",
+        {
+            "parameters": {
+                "initialization": "cgls",
+                "initialization_iterations": 2,
+                "inner_solver": "lsmr",
+                "roi_update_only": False,
+            },
+            "run_controls": {"max_iterations": 0, "max_forward_calls": 4},
+        },
+        case=case,
+    )
+    result = BentRayAlgorithm().run(case, cfg)
+    expected = 1 / np.clip(1 / 1500 + captured[0], 1 / 1700, 1 / 1300)
+    np.testing.assert_allclose(result.sound_speed_mps, expected)
+    assert np.max(np.abs(expected - 1500)) > 1e-3
+    assert result.metrics["stopping"]["selected_iteration"] is None
+
+
 @pytest.mark.parametrize("name", ["straight_cgls", "bent_ray_gn"])
 def test_model_prior_uses_no_gt_or_validation_for_updates_and_obeys_budget(name):
     case = make_sound_speed_case(

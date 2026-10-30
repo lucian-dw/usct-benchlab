@@ -177,3 +177,16 @@ The HDF5 arrays are saved before optional scoring/plotting.
   invalid samples with valid zeros.
 - Missing preview: install the viz extra; numerical results remain available.
 - Null SSIM/PSNR or absent GT: inspect metric status, not just the scalar field.
+
+## Saved comparison panels
+
+Select explicit suite experiment ids:
+
+```bash
+python scripts/render_examples.py --cases-dir CASES --run-dir RUN_ROOT \
+  --case-ids CASE --experiments cgls_default cgls_tuned \
+  --experiment-labels Default Tuned --out comparison.png
+```
+
+The CSV retains separate experiment_id, algorithm and variant columns, reading
+algorithm identity from saved artifacts.

@@ -1,5 +1,17 @@
 # Refactor changelog
 
+## Post-review C01-C03
+
+- Bent retains completed CGLS initialization when the first GN evaluation cannot
+  start; an unevaluated image does not become a selected iteration checkpoint.
+- Nonlinear Born transfers its prepared initial Linearization through the forward
+  object once, dropping caller references before GN. Water calibration temporaries
+  are released after fitting; fixed Born retains its working operator.
+- Comparison rendering selects experiment ids with `--experiments` and
+  `--experiment-labels`; CSV identity comes from saved run/HDF5 metadata.
+- Regression: full Python 437 passed, 1 CUDA skip; CPU Full-Green ownership
+  transfer checked separately. GPU peak memory was not measured in this patch.
+
 ## Current public workflow
 
 - One typed configuration, static registry and `run / suite / evaluate` API.

@@ -174,6 +174,7 @@ class RayBornForward:
         )
         self.frequencies_hz = self.acquisition.frequencies_hz
         self.work_counts = work_counts if work_counts is not None else {}
+        self.initial_linearization = None
         self.settings = dict(
             exterior_speed_mps=exterior_speed_mps,
             acquisition=self.acquisition,
@@ -190,6 +191,11 @@ class RayBornForward:
                 else self.acquisition.reference_cache
             ),
         )
+
+    def take_initial_linearization(self):
+        """Transfer the prepared initial state without retaining its field cache."""
+        initial, self.initial_linearization = self.initial_linearization, None
+        return initial
 
     def linearize(self, squared_slowness):
         from usctbench.operators.base import Linearization

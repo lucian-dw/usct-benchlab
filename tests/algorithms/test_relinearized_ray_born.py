@@ -64,6 +64,34 @@ def test_rebuilds_background_and_accepts_only_true_nonlinear_decrease():
     assert "rmse" not in metrics
 
 
+def test_born_caller_transfers_initial_cache_to_gn(monkeypatch):
+    import gc
+    import weakref
+    from usctbench.algorithms import born
+
+    case, _, _ = nonlinear_case()
+
+    def solver(problem, control, *, initial_linearization, **kwargs):
+        owner = weakref.ref(initial_linearization.jacobian)
+        assert owner() is not None
+        del initial_linearization
+        gc.collect()
+        assert owner() is None
+        control.monitor.finish("max_iterations")
+        return control.output(problem.initial)
+
+    monkeypatch.setattr(born, "gauss_newton", solver)
+    result = BornAlgorithm().run(
+        case,
+        prepare_config(
+            "born",
+            config(variant="full_green_nonlinear", background_sound_speed_mps=1505),
+            case=case,
+        ),
+    )
+    assert np.isfinite(result.sound_speed_mps).all()
+
+
 def test_nonlinear_holdout_is_not_used_for_updates_or_line_search():
     case, _, _ = nonlinear_case()
     changed = case.model_copy(deep=True)

@@ -172,7 +172,6 @@ class BentRayAlgorithm:
         problem = prepare_bent_problem(
             forward, s, s0, bounds, offset, basis=basis, regularization=kind, roi=roi
         )
-        fallback = problem.initial.copy()
         smooth_scale = (
             sigma
             if basis is None
@@ -222,10 +221,10 @@ class BentRayAlgorithm:
             )
         except BudgetExhausted as exc:
             control.monitor.finish(exc.reason)
-            selected, metrics = control.output(fallback)
+            selected, metrics = control.output(problem.initial)
         except FloatingPointError as exc:
             control.fail(exc)
-            selected, metrics = control.output(fallback)
+            selected, metrics = control.output(problem.initial)
         sound_speed = 1 / problem.physical_model(selected)
         metrics.update(
             {

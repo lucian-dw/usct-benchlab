@@ -246,6 +246,7 @@ class BornAlgorithm:
             else configured_model
         )
         offset = operator = None
+        initial_green_method = None
         initialization_qc = None
         damping = p.regularization_lambda**2
         scaling = str(p.regularization_scaling)
@@ -278,6 +279,7 @@ class BornAlgorithm:
                         water_operator.valid_pair_mask, water_prediction.shape
                     ),
                 )
+                del water_prediction, water_operator
             operator = control.call(
                 "setup_background",
                 RayBornOperator,
@@ -297,6 +299,7 @@ class BornAlgorithm:
                 operator.background_data_and_diagonal,
                 control.precision if scaling == "relative_jacobian_diagonal" else None,
             )
+            initial_green_method = operator.green_method
             initial_linearization = Linearization(
                 offset,
                 born_jacobian(operator),
@@ -369,6 +372,8 @@ class BornAlgorithm:
                     roi=roi,
                     max_update_mps=float(p.max_update_mps),
                 )
+                forward.initial_linearization = initial_linearization
+                del initial_linearization, operator
                 selected, metrics = gauss_newton(
                     problem,
                     control,
@@ -380,7 +385,7 @@ class BornAlgorithm:
                     smooth_sigma=float(p.smooth_sigma),
                     max_backtracks=p.max_backtracks,
                     gradient_rtol=float(p.gradient_rtol),
-                    initial_linearization=initial_linearization,
+                    initial_linearization=forward.take_initial_linearization(),
                 )
         except BudgetExhausted as exc:
             control.monitor.finish(exc.reason)
@@ -400,7 +405,7 @@ class BornAlgorithm:
             forward_model=p.green_backend,
             observation_domain="complex_pressure",
             observation_units=pressure_units(case.metadata),
-            initial_green_method=None if operator is None else operator.green_method,
+            initial_green_method=initial_green_method,
             source_calibration=calibration,
             inverse_grid_points_per_wavelength=inverse_ppw,
             regularization_length_m=physical_length,
