@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 import usctbench.algorithms.bent_ray as bent
+import usctbench.solvers.nonlinear as nonlinear
 from usctbench.core.schema import (
     AlgorithmConfig,
     GeometrySpec,
@@ -216,7 +217,7 @@ def test_clipping_rejects_uphill_newton_and_uses_projected_gradient(monkeypatch)
 def test_zero_inner_update_does_not_claim_stationarity(monkeypatch):
     case, _ = _dense(monkeypatch, np.eye(4), np.full(4, 1e-6))
     monkeypatch.setattr(
-        bent,
+        nonlinear,
         "solve_linearized",
         lambda jac, residual, current, *a, **kw: (
             np.zeros_like(current),
@@ -357,14 +358,14 @@ def test_native_regularized_objective_directional_derivative_and_roi(
         }
     )
     records = []
-    original_step = bent.solve_linearized
+    original_step = nonlinear.solve_linearized
 
     def record_step(jacobian, residual, current, control, **kwargs):
         update, info = original_step(jacobian, residual, current, control, **kwargs)
         records.append((current.copy(), update.copy(), control))
         return update, info
 
-    monkeypatch.setattr(bent, "solve_linearized", record_step)
+    monkeypatch.setattr(nonlinear, "solve_linearized", record_step)
     config = _config(
         max_iterations=2,
         inner_iterations=12,

@@ -1,36 +1,40 @@
 """Discrete image penalties and their Euclidean adjoints."""
 
 import numpy as np
+from types import SimpleNamespace
 from scipy.sparse import csr_array, diags, eye, kron, vstack
 from usctbench.core.schema import GridSpec
 
 
-def regularizer(image, kind="identity"):
+def prepare_regularizer(kind):
+    """Resolve L/L* once; built-in cell penalties are symmetric."""
     if hasattr(kind, "forward") and hasattr(kind, "adjoint"):
-        return kind.forward(image)
+        return kind
     if kind in {"identity", "l2"}:
-        return np.asarray(image)
+        return SimpleNamespace(forward=np.asarray, adjoint=np.asarray)
     if kind in {"laplacian", "roughness"}:
+        coefficients = (1.0, 1.0)
+    elif isinstance(kind, tuple) and len(kind) == 2:
+        coefficients = kind
+    else:
+        raise ValueError("regularization must be identity or laplacian")
+
+    def apply(image):
         a = np.pad(image, 1, mode="edge")
-        return a[:-2, 1:-1] + a[2:, 1:-1] + a[1:-1, :-2] + a[1:-1, 2:] - 4 * image
-    if isinstance(kind, tuple) and len(kind) == 2:
-        # Dimensionless ell^2 * physical Laplacian; edge replication supplies
-        # zero-normal-flux boundaries and preserves a symmetric discrete map.
-        a = np.pad(image, 1, mode="edge")
-        return kind[0] * (a[:-2, 1:-1] + a[2:, 1:-1] - 2 * image) + kind[1] * (
-            a[1:-1, :-2] + a[1:-1, 2:] - 2 * image
-        )
-    raise ValueError("regularization must be identity or laplacian")
+        return coefficients[0] * (
+            a[:-2, 1:-1] + a[2:, 1:-1] - 2 * image
+        ) + coefficients[1] * (a[1:-1, :-2] + a[1:-1, 2:] - 2 * image)
+
+    return SimpleNamespace(forward=apply, adjoint=apply)
+
+
+def regularizer(image, kind="identity"):
+    return prepare_regularizer(kind).forward(image)
 
 
 def normal_regularizer(image, kind="identity"):
-    if hasattr(kind, "forward") and hasattr(kind, "adjoint"):
-        return kind.adjoint(kind.forward(image))
-    return (
-        image
-        if kind in {"identity", "l2"}
-        else regularizer(regularizer(image, kind), kind)
-    )
+    penalty = prepare_regularizer(kind)
+    return penalty.adjoint(penalty.forward(image))
 
 
 class SpatialGradient:

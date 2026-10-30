@@ -1,6 +1,9 @@
-"""Relinearized pressure inversion with acceptance on the nonlinear model."""
+"""Shared Gauss-Newton driver; physical spaces and trials are prepared by callers."""
 
 from __future__ import annotations
+
+from dataclasses import dataclass
+from collections.abc import Callable
 
 import numpy as np
 from scipy.linalg import norm
@@ -8,71 +11,90 @@ from scipy.ndimage import gaussian_filter
 
 from usctbench.core.stopping import BudgetExhausted
 from usctbench.solvers.linear import solve_linearized
-from usctbench.operators.regularization import normal_regularizer, regularizer
+from usctbench.operators.regularization import prepare_regularizer
 
 
-def nonlinear_least_squares(
-    forward,
+@dataclass
+class GaussNewtonProblem:
+    initial: np.ndarray
+    reference: np.ndarray
+    lower: np.ndarray | float
+    upper: np.ndarray | float
+    linearize: Callable
+    project: Callable
+    physical_model: Callable
+    trials: Callable
+    regularization: object
+    roi: np.ndarray | None
+    fallback_step_norm: float
+    prior_source: str
+    constraints: dict
+
+
+def project_each_trial(problem, state, proposal, step_length, max_backtracks):
+    """Bent: P(q + alpha * 2**-k * d), in pixels or coefficient space."""
+    for k in range(max_backtracks + 1):
+        fraction = 0.5**k
+        yield problem.project(
+            state + step_length * fraction * proposal, state
+        ), fraction
+
+
+def backtrack_feasible_displacement(
+    problem, state, proposal, step_length, max_backtracks
+):
+    """Born: form q0=P(q+alpha*d) once, then q + 2**-k*(q0-q)."""
+    first = problem.project(state + step_length * proposal, state)
+    displacement = first - state
+    for k in range(max_backtracks + 1):
+        fraction = 0.5**k
+        yield (first if k == 0 else state + fraction * displacement), fraction
+
+
+def gauss_newton(
+    problem,
     control,
     *,
-    initial,
-    bounds,
-    prior_reference=None,
     inner_iterations=12,
     inner_solver="lsmr",
     inner_options=None,
     damping=0.0,
-    regularization="laplacian",
-    roi=None,
     step_length=1.0,
     smooth_sigma=0.0,
-    max_update_mps=12.0,
     max_backtracks=10,
     gradient_rtol=1e-8,
 ):
-    """Inexact Gauss-Newton outer steps; no validation values enter updates.
+    """Accept using the real objective and actual feasible displacement.
 
-    A Born step can fail to descend for a WKB model (caustics, low frequency or
-    discretization error). Such a run stops with line_search_failed, not a claim
-    of convergence. The returned state/prediction is an atomic complete iterate.
-
-    ``step_length`` scales each raw proposal once, before box/speed projection.
-    Backtracking fractions then shrink that initial feasible displacement;
-    the first trial retains the original projection exactly.
-    ``prior_reference`` anchors the penalty independently of the starting point.
-    By default it is the initial model. Pixels outside ROI remain at the starting
-    model, even when the penalty reference differs.
+    The accepted Linearization is reused for the next direction. Validation data
+    never enter gradients, curvature, priors, trial generation or acceptance.
     """
     inner_options = dict(inner_options or {})
-    state = np.asarray(initial, dtype=float).copy()
+    state = np.asarray(problem.initial, dtype=float).copy()
     initial_state = state.copy()
-    reference = state.copy() if prior_reference is None else np.asarray(prior_reference)
-    if prior_reference is not None and (
-        reference.shape != state.shape
-        or np.iscomplexobj(reference)
-        or not np.isfinite(reference).all()
-        or np.any(reference <= 0)
-    ):
-        raise ValueError(
-            "prior_reference must be a finite positive real model of the same shape"
-        )
-    reference = np.array(reference, dtype=float, copy=True)
-    attempts = []
-    direction_checks = []
-    gradient_checks = []
+    reference = problem.reference
+    penalty = prepare_regularizer(problem.regularization)
+    roi = problem.roi
+    attempts, direction_checks, gradient_checks = [], [], []
     initial_gradient_norm = None
     derivative_kind = None
 
     def objective(model, prediction):
+        active = control.split.train | control.split.validation
+        if not np.isfinite(prediction[active]).all():
+            raise FloatingPointError("nonfinite prediction on active data")
         residual = np.where(control.split.train, control.safe_observed - prediction, 0)
-        reg = regularizer(model - reference, regularization)
-        return float(
+        reg = penalty.forward(model - reference)
+        value = float(
             0.5 * np.sum(control.precision * np.abs(residual) ** 2)
             + 0.5 * damping * np.vdot(reg, reg).real
         )
+        if not np.isfinite(value):
+            raise FloatingPointError("nonfinite regularized objective")
+        return value
 
     try:
-        linearization = control.call("forward", forward.linearize, state)
+        linearization = control.call("forward", problem.linearize, state)
         derivative_kind = linearization.derivative_kind
         cost = objective(state, linearization.value)
         control.observe(
@@ -80,7 +102,6 @@ def nonlinear_least_squares(
             state,
             linearization.value,
             objective=cost,
-            sound_speed=1 / np.sqrt(state),
         )
         for iteration in range(1, control.policy.max_iterations + 1):
             if control.monitor.reason is not None:
@@ -89,7 +110,7 @@ def nonlinear_least_squares(
             gradient = -control.call(
                 "adjoint", linearization.jacobian.adjoint, residual
             )
-            gradient += damping * normal_regularizer(state - reference, regularization)
+            gradient += damping * penalty.adjoint(penalty.forward(state - reference))
             if roi is not None:
                 gradient = np.where(roi, gradient, 0)
             if not np.isfinite(gradient).all():
@@ -119,8 +140,8 @@ def nonlinear_least_squares(
                 )
                 break
             feasible_gradient = np.where(
-                ((state <= 1 / bounds[1] ** 2) & (gradient > 0))
-                | ((state >= 1 / bounds[0] ** 2) & (gradient < 0)),
+                ((state <= problem.lower) & (gradient > 0))
+                | ((state >= problem.upper) & (gradient < 0)),
                 0,
                 gradient,
             )
@@ -140,7 +161,7 @@ def nonlinear_least_squares(
                 weights=control.precision,
                 iterations=inner_iterations,
                 damping=damping,
-                regularization=regularization,
+                regularization=penalty,
                 roi=roi,
                 method=inner_solver,
                 **inner_options,
@@ -149,7 +170,7 @@ def nonlinear_least_squares(
             raw_direction = direction.copy()
             raw_slope = float(np.vdot(gradient, direction).real)
             smoothed_slope = None
-            if smooth_sigma:
+            if np.any(np.asarray(smooth_sigma) > 0):
                 smoothed = gaussian_filter(direction, smooth_sigma, mode="nearest")
                 if roi is not None:
                     smoothed = np.where(roi, smoothed, 0)
@@ -161,8 +182,7 @@ def nonlinear_least_squares(
             if roi is not None:
                 direction = np.where(roi, direction, 0)
             if not np.all(np.isfinite(direction)):
-                raise FloatingPointError("nonfinite Born update")
-            speed = 1 / np.sqrt(state)
+                raise FloatingPointError("nonfinite GN update")
             accepted = False
             proposals = [("newton_proposal", direction)]
             if not np.array_equal(direction, raw_direction):
@@ -175,7 +195,7 @@ def nonlinear_least_squares(
             if not np.isfinite(direction_scale):
                 raise FloatingPointError("nonfinite Newton direction norm")
             if direction_scale == 0:
-                direction_scale = 1e-3 * norm(state.ravel())
+                direction_scale = problem.fallback_step_norm
             gradient_step = -feasible_gradient * (direction_scale / feasible_norm)
             proposals.append(("projected_gradient", gradient_step))
             direction_checks.append(
@@ -187,32 +207,13 @@ def nonlinear_least_squares(
                     and smoothed_slope >= 0,
                 }
             )
+            finite_trial_seen = nonfinite_trial_seen = False
             for proposal_name, proposal in proposals:
-                first_candidate = np.clip(
-                    state + step_length * proposal,
-                    1 / bounds[1] ** 2,
-                    1 / bounds[0] ** 2,
-                )
-                candidate_speed = np.clip(
-                    1 / np.sqrt(first_candidate),
-                    speed - max_update_mps,
-                    speed + max_update_mps,
-                )
-                first_candidate = 1 / candidate_speed**2
-                if roi is not None:
-                    first_candidate = np.where(roi, first_candidate, initial_state)
-                initial_displacement = first_candidate - state
-                for backtrack in range(max_backtracks + 1):
-                    fraction = 0.5**backtrack
-                    # Keep the first trial bit-for-bit; later trials lie on its
-                    # feasible segment instead of saturating the raw step again.
-                    candidate = (
-                        first_candidate
-                        if backtrack == 0
-                        else state + fraction * initial_displacement
+                for backtrack, (candidate, fraction) in enumerate(
+                    problem.trials(
+                        problem, state, proposal, step_length, max_backtracks
                     )
-                    if roi is not None:
-                        candidate = np.where(roi, candidate, initial_state)
+                ):
                     displacement = candidate - state
                     slope = float(np.vdot(gradient, displacement).real)
                     row = {
@@ -234,13 +235,15 @@ def nonlinear_least_squares(
                         continue
                     try:
                         trial = control.call(
-                            "line_search", forward.linearize, candidate
+                            "line_search", problem.linearize, candidate
                         )
                         trial_cost = objective(candidate, trial.value)
                     except FloatingPointError:
-                        row["rejection"] = "nonfinite_trial_prediction"
+                        nonfinite_trial_seen = True
+                        row["rejection"] = "nonfinite_trial_prediction_or_objective"
                         attempts.append(row)
                         continue
+                    finite_trial_seen = True
                     accepted = bool(
                         np.isfinite(trial_cost) and trial_cost <= cost + 1e-4 * slope
                     )
@@ -254,19 +257,24 @@ def nonlinear_least_squares(
                 if accepted:
                     break
             if not accepted:
-                control.monitor.finish("line_search_failed")
+                control.monitor.finish(
+                    "numerical_failure"
+                    if nonfinite_trial_seen and not finite_trial_seen
+                    else "line_search_failed"
+                )
                 break
-            update = float(np.linalg.norm(candidate - state) / np.linalg.norm(state))
+            physical = problem.physical_model(state)
+            update = float(
+                norm((problem.physical_model(candidate) - physical).ravel())
+                / norm(physical.ravel())
+            )
             state, linearization, cost = candidate, trial, trial_cost
-            control.work.counts["background_builds"] = forward.background_builds
-            control.work.counts["eikonal_source_solves"] = forward.eikonal_solves
             control.observe(
                 iteration,
                 state,
                 trial.value,
                 objective=cost,
                 update_relative=update,
-                sound_speed=1 / np.sqrt(state),
             )
         if control.monitor.reason is None:
             control.monitor.finish("max_iterations")
@@ -274,33 +282,18 @@ def nonlinear_least_squares(
         control.monitor.finish(exc.reason)
     except FloatingPointError as exc:
         control.fail(exc)
-    control.work.counts["background_builds"] = forward.background_builds
-    control.work.counts["eikonal_source_solves"] = forward.eikonal_solves
-    control.work.counts["green_source_solves"] = getattr(forward, "green_solves", 0)
-    control.work.counts["green_matvecs"] = getattr(forward, "green_matvecs", 0)
     selected, metrics = control.output(initial_state)
-    metrics["prior_reference_source"] = (
-        "initial" if prior_reference is None else "explicit"
+    metrics.update(
+        prior_reference_source=problem.prior_source,
+        line_search_history=attempts,
+        direction_checks=direction_checks,
+        gradient_checks=gradient_checks,
+        gradient_rtol=gradient_rtol,
+        inner_solver=inner_solver,
+        inner_options=inner_options,
+        line_search_acceptance="projected_step_armijo_1e-4",
+        line_search_constraints=problem.constraints,
+        derivative_kind=derivative_kind,
+        nonlinear_background_updates=max(0, len(control.monitor.history) - 1),
     )
-    metrics["line_search_history"] = attempts
-    metrics["direction_checks"] = direction_checks
-    metrics["gradient_checks"] = gradient_checks
-    metrics["gradient_rtol"] = gradient_rtol
-    metrics["inner_solver"] = inner_solver
-    metrics["inner_options"] = inner_options
-    metrics["gradient_scope"] = (
-        "provided_jacobian_regularized_training_gradient_at_listed_iterates_not_necessarily_selected_checkpoint"
-    )
-    metrics["line_search_acceptance"] = "projected_step_armijo_1e-4"
-    metrics["line_search_constraints"] = {
-        "strategy": "project_once_then_backtrack_feasible_displacement",
-        "step_length_applies_to": "raw_proposal_before_projection",
-        "backtracking_fraction_applies_to": "initial_feasible_displacement",
-        "sound_speed_bounds_mps": [float(bound) for bound in bounds],
-        "max_update_mps": float(max_update_mps),
-        "roi_fixed": roi is not None,
-        "displacement_parameter": "squared_slowness",
-    }
-    metrics["derivative_kind"] = derivative_kind
-    metrics["nonlinear_background_updates"] = max(0, len(control.monitor.history) - 1)
     return selected, metrics

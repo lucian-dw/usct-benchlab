@@ -5,8 +5,6 @@ from __future__ import annotations
 from usctbench.core.config import prepared_run
 
 import numpy as np
-from scipy.linalg import norm
-from scipy.ndimage import gaussian_filter
 
 from usctbench.algorithms._control import InversionControl
 from usctbench.algorithms.ray import (
@@ -23,7 +21,68 @@ from usctbench.operators.model_space import (
     ReducedLinearOperator,
 )
 from usctbench.solvers.linear import solve_linearized
-from usctbench.operators.regularization import normal_regularizer, regularizer
+from usctbench.operators.base import Linearization
+from usctbench.solvers.nonlinear import (
+    GaussNewtonProblem,
+    project_each_trial,
+    gauss_newton,
+)
+
+
+def prepare_bent_problem(
+    forward,
+    initial,
+    reference,
+    bounds,
+    offset,
+    *,
+    basis=None,
+    regularization="identity",
+    roi=None,
+):
+    """Prepare s or theta with s=s0+B theta, J_theta=J_s B and L_theta=L B."""
+    lower = 1 / bounds[1] - (0 if basis is None else reference.flat[0])
+    upper = 1 / bounds[0] - (0 if basis is None else reference.flat[0])
+    starting = initial if basis is None else np.zeros(basis.shape)
+    prior = reference if basis is None else np.zeros(basis.shape)
+
+    def physical(model):
+        return model if basis is None else reference + basis.forward(model)
+
+    def project(proposal, current):
+        bounded = np.clip(proposal, lower, upper)
+        return bounded if roi is None else np.where(roi, bounded, reference)
+
+    def linearize(model):
+        lin = forward.linearize(physical(model))
+        jacobian = (
+            lin.jacobian
+            if basis is None
+            else ReducedLinearOperator(lin.jacobian, basis)
+        )
+        return Linearization(
+            lin.value.reshape(offset.shape) - offset, jacobian, lin.derivative_kind
+        )
+
+    return GaussNewtonProblem(
+        starting,
+        prior,
+        lower,
+        upper,
+        linearize,
+        project,
+        physical,
+        project_each_trial,
+        regularization if basis is None else FineGridRegularizer(basis, regularization),
+        roi,
+        1e-3 * np.sqrt(starting.size) * reference.flat[0],
+        "water_reference",
+        {
+            "strategy": "project_each_shortened_direction",
+            "displacement_parameter": "slowness" if basis is None else "coefficients",
+            "roi_fixed": roi is not None,
+        },
+    )
 
 
 class BentRayAlgorithm:
@@ -117,8 +176,6 @@ class BentRayAlgorithm:
         initialization_iterations = p.initialization_iterations
 
         basis = None
-        coefficients = None
-        solver_kind = kind
         if p.model_grid_shape is not None:
             if roi is not None:
                 raise ValueError("reduced model currently requires no inversion ROI")
@@ -129,29 +186,6 @@ class BentRayAlgorithm:
             if not bounds[0] <= c0 <= bounds[1]:
                 raise ValueError("reference speed must lie within sound-speed bounds")
             basis = BilinearBasis(case.grid, p.model_grid_shape)
-            coefficients = np.zeros(basis.shape)
-            solver_kind = FineGridRegularizer(basis, kind)
-
-        attempts = []
-        direction_checks = []
-        gradient_checks = []
-        initial_gradient_norm = None
-
-        def objective(state, prediction):
-            active = control.split.train | control.split.validation
-            if not np.isfinite(prediction[active]).all():
-                raise FloatingPointError("non-finite Eikonal prediction on active data")
-            residual = np.where(
-                control.split.train, control.safe_observed - prediction, 0
-            )
-            reg = regularizer(state - s0, kind)
-            value = float(
-                0.5 * np.sum(control.precision * residual**2)
-                + 0.5 * damping * np.vdot(reg, reg).real
-            )
-            if not np.isfinite(value):
-                raise FloatingPointError("non-finite Eikonal objective")
-            return value
 
         try:
             if initialization == "cgls":
@@ -182,207 +216,40 @@ class BentRayAlgorithm:
                 s = np.clip(s0 + seed_update, 1 / bounds[1], 1 / bounds[0])
                 if roi is not None:
                     s = np.where(roi, s, s0)
-            lin = control.call("forward", forward.linearize, s)
-            prediction = lin.value.reshape(observed.shape) - offset
-            cost = objective(s, prediction)
-            control.observe(0, s, prediction, objective=cost, sound_speed=1 / s)
-            for iteration in range(1, control.policy.max_iterations + 1):
-                if control.monitor.reason:
-                    break
-                jacobian = (
-                    lin.jacobian
-                    if basis is None
-                    else ReducedLinearOperator(lin.jacobian, basis)
-                )
-                current = s - s0 if basis is None else coefficients
-                residual = control.weighted_residual(prediction)
-                # The reduced gradient uses B^T J^T W (prediction - observed)
-                # and damping B^T L^T L B x, not a coarse-grid penalty.
-                gradient = -control.call("adjoint", jacobian.adjoint, residual)
-                gradient += damping * normal_regularizer(current, solver_kind)
-                if roi is not None:
-                    gradient = np.where(roi, gradient, 0)
-                # Flatten to preserve the Frobenius norm using scale-safe BLAS.
-                gradient_norm = float(norm(gradient.ravel(), check_finite=False))
-                if not np.isfinite(gradient_norm):
-                    raise FloatingPointError("non-finite Eikonal objective gradient")
-                if initial_gradient_norm is None:
-                    initial_gradient_norm = gradient_norm
-                gradient_relative = gradient_norm / max(
-                    initial_gradient_norm, np.finfo(float).tiny
-                )
-                gradient_checks.append(
-                    {
-                        "iteration": control.monitor.history[-1]["iteration"],
-                        "norm": gradient_norm,
-                        "relative_to_initial": gradient_relative,
-                    }
-                )
-                if gradient_relative <= gradient_rtol:
-                    control.monitor.finish("stationary_gradient")
-                    break
-                model = s if basis is None else coefficients
-                lower = 1 / bounds[1] - (0 if basis is None else 1 / c0)
-                upper = 1 / bounds[0] - (0 if basis is None else 1 / c0)
-                feasible_gradient = np.where(
-                    ((model <= lower) & (gradient > 0))
-                    | ((model >= upper) & (gradient < 0)),
-                    0,
-                    gradient,
-                )
-                feasible_norm = float(norm(feasible_gradient.ravel()))
-                if feasible_norm == 0:
-                    control.monitor.finish("stationary_projected_gradient")
-                    break
-                update, info = solve_linearized(
-                    jacobian,
-                    residual,
-                    current,
-                    control,
-                    weights=control.precision,
-                    iterations=inner,
-                    method=inner_solver,
-                    **inner_options,
-                    damping=damping,
-                    regularization=solver_kind,
-                    roi=roi,
-                )
-                control.record_linear(info)
-                if not np.isfinite(update).all():
-                    raise FloatingPointError("non-finite Eikonal update")
-                if roi is not None:
-                    update = np.where(roi, update, 0)
-                raw_update = update.copy()
-                with np.errstate(over="raise", invalid="raise"):
-                    raw_slope = float(np.vdot(gradient, raw_update).real)
-                    scale = float(norm(raw_update.ravel()))
-                if not np.isfinite([raw_slope, scale]).all():
-                    raise FloatingPointError("non-finite Eikonal update norm or slope")
-                smoothed_slope = None
-                smoothing_rejected = False
-                if sigma > 0:
-                    if basis is None:
-                        smoothed = gaussian_filter(update, sigma=sigma, mode="nearest")
-                    else:
-                        smoothed = gaussian_filter(
-                            update,
-                            tuple(
-                                sigma * k / n
-                                for k, n in zip(basis.shape, case.grid.shape)
-                            ),
-                            mode="nearest",
-                        )
-                    if roi is not None:
-                        smoothed = np.where(roi, smoothed, 0)
-                    smoothed_slope = float(np.vdot(gradient, smoothed).real)
-                    smoothing_rejected = (
-                        not np.isfinite(smoothed).all()
-                        or not np.isfinite(smoothed_slope)
-                        or smoothed_slope >= 0
-                    )
-                    if not smoothing_rejected:
-                        update = smoothed
-                direction_checks.append(
-                    {
-                        "iteration": iteration,
-                        "raw_directional_derivative": raw_slope,
-                        "smoothed_directional_derivative": (
-                            smoothed_slope
-                            if smoothed_slope is not None
-                            and np.isfinite(smoothed_slope)
-                            else None
-                        ),
-                        "smoothing_rejected": smoothing_rejected,
-                    }
-                )
-                proposals = [("newton_proposal", update)]
-                if not np.array_equal(update, raw_update):
-                    proposals.append(("unsmoothed_newton", raw_update))
-                # Match the Newton scale, including when clipping destroys its
-                # descent. A zero inner step is not a stationarity certificate.
-                if scale == 0:
-                    scale = 1e-3 * np.sqrt(current.size) / c0
-                proposals.append(
-                    ("projected_gradient", -feasible_gradient * (scale / feasible_norm))
-                )
-                accepted = False
-                finite_trial_seen = False
-                nonfinite_trial_seen = False
-                for proposal_name, proposal in proposals:
-                    for trial in range(10 if line_search else 1):
-                        alpha = step * 0.5**trial
-                        candidate_model = np.clip(
-                            model + alpha * proposal, lower, upper
-                        )
-                        if basis is None:
-                            candidate = candidate_model
-                            if roi is not None:
-                                candidate = np.where(roi, candidate, s0)
-                            displacement = candidate - s
-                        else:
-                            candidate_coefficients = candidate_model
-                            candidate = s0 + basis.forward(candidate_coefficients)
-                            displacement = candidate_coefficients - coefficients
-                        slope = float(np.vdot(gradient, displacement).real)
-                        row = {
-                            "iteration": iteration,
-                            "proposal": proposal_name,
-                            "step_length": alpha,
-                            "projected_directional_derivative": slope,
-                            "objective": None,
-                            "accepted": False,
-                        }
-                        if not np.isfinite(slope) or slope >= 0:
-                            row["rejection"] = "non_descent_projected_step"
-                            attempts.append(row)
-                            continue
-                        try:
-                            new_lin = control.call(
-                                "line_search", forward.linearize, candidate
-                            )
-                            new_prediction = (
-                                new_lin.value.reshape(observed.shape) - offset
-                            )
-                            new_cost = objective(candidate, new_prediction)
-                        except FloatingPointError:
-                            nonfinite_trial_seen = True
-                            row["rejection"] = "nonfinite_trial_prediction_or_objective"
-                            attempts.append(row)
-                            continue
-                        finite_trial_seen = True
-                        accepted = bool(new_cost <= cost + 1e-4 * slope)
-                        row.update(objective=new_cost, accepted=accepted)
-                        attempts.append(row)
-                        if accepted:
-                            break
-                    if accepted:
-                        break
-                if not accepted:
-                    control.monitor.finish(
-                        "numerical_failure"
-                        if nonfinite_trial_seen and not finite_trial_seen
-                        else "line_search_failed"
-                    )
-                    break
-                relative = float(np.linalg.norm(candidate - s) / np.linalg.norm(s))
-                s, lin, prediction, cost = candidate, new_lin, new_prediction, new_cost
-                if basis is not None:
-                    coefficients = candidate_coefficients
-                control.observe(
-                    iteration,
-                    s,
-                    prediction,
-                    objective=cost,
-                    update_relative=relative,
-                    sound_speed=1 / s,
-                )
-            if not control.monitor.reason:
-                control.monitor.finish("max_iterations")
+            problem = prepare_bent_problem(
+                forward,
+                s,
+                s0,
+                bounds,
+                offset,
+                basis=basis,
+                regularization=kind,
+                roi=roi,
+            )
+            smooth_scale = (
+                sigma
+                if basis is None
+                else tuple(sigma * k / n for k, n in zip(basis.shape, case.grid.shape))
+            )
+            selected, metrics = gauss_newton(
+                problem,
+                control,
+                inner_iterations=inner,
+                inner_solver=inner_solver,
+                inner_options=inner_options,
+                damping=damping,
+                step_length=step,
+                smooth_sigma=smooth_scale,
+                max_backtracks=9 if line_search else 0,
+                gradient_rtol=gradient_rtol,
+            )
+            s = problem.physical_model(selected)
         except BudgetExhausted as exc:
             control.monitor.finish(exc.reason)
+            s, metrics = control.output(initial)
         except FloatingPointError as exc:
             control.fail(exc)
-        s, metrics = control.output(initial)
+            s, metrics = control.output(initial)
         sound_speed = 1 / s
         metrics.update(
             {
@@ -413,9 +280,6 @@ class BentRayAlgorithm:
                 "regularization_lambda_squared": damping,
                 "line_search": line_search,
                 "line_search_acceptance": "projected_step_armijo_1e-4",
-                "line_search_history": attempts,
-                "direction_checks": direction_checks,
-                "gradient_checks": gradient_checks,
                 "gradient_rtol": gradient_rtol,
                 "gradient_space": "pixels" if basis is None else "coefficients",
                 "gradient_scope": (

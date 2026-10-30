@@ -17,7 +17,70 @@ from usctbench.core.stopping import BudgetExhausted
 from usctbench.operators.ray_born import RayBornForward, RayBornOperator
 from usctbench.solvers.linear import solve_linearized
 from usctbench.solvers.projected_cg import projected_cg
-from usctbench.solvers.nonlinear import nonlinear_least_squares
+from usctbench.solvers.nonlinear import (
+    GaussNewtonProblem,
+    backtrack_feasible_displacement,
+    gauss_newton,
+)
+
+
+def prepare_born_problem(
+    forward,
+    initial,
+    bounds,
+    *,
+    prior_reference=None,
+    regularization="laplacian",
+    roi=None,
+    max_update_mps=12.0,
+):
+    """Squared-slowness GN with initial-model exterior and a separate prior."""
+    initial = np.array(initial, dtype=float, copy=True)
+    reference = initial if prior_reference is None else np.asarray(prior_reference)
+    if (
+        reference.shape != initial.shape
+        or np.iscomplexobj(reference)
+        or not np.isfinite(reference).all()
+        or np.any(reference <= 0)
+    ):
+        raise ValueError(
+            "prior_reference must be a finite positive real model of the same shape"
+        )
+    reference = np.array(reference, dtype=float, copy=True)
+    lower, upper = 1 / bounds[1] ** 2, 1 / bounds[0] ** 2
+
+    def project(proposal, current):
+        candidate = np.clip(proposal, lower, upper)
+        speed = 1 / np.sqrt(current)
+        candidate_speed = np.clip(
+            1 / np.sqrt(candidate), speed - max_update_mps, speed + max_update_mps
+        )
+        candidate = 1 / candidate_speed**2
+        return candidate if roi is None else np.where(roi, candidate, initial)
+
+    return GaussNewtonProblem(
+        initial,
+        reference,
+        lower,
+        upper,
+        forward.linearize,
+        project,
+        physical_model=lambda x: x,
+        trials=backtrack_feasible_displacement,
+        regularization=regularization,
+        roi=roi,
+        fallback_step_norm=1e-3 * float(np.linalg.norm(initial)),
+        prior_source="initial" if prior_reference is None else "explicit",
+        constraints={
+            "strategy": "project_once_then_backtrack_feasible_displacement",
+            "step_length_applies_to": "raw_proposal_before_projection",
+            "backtracking_fraction_applies_to": "initial_feasible_displacement",
+            "sound_speed_bounds_mps": list(bounds),
+            "max_update_mps": max_update_mps,
+            "roi_fixed": roi is not None,
+            "displacement_parameter": "squared_slowness",
+        },
+    )
 
 
 def initialize_from_phase(case, parameters, control, distances, c0, bounds, roi):
@@ -339,24 +402,34 @@ class RayBornAlgorithm:
                 max_cache_bytes=int(p.max_cache_bytes),
                 **green_settings,
             )
-            state, metrics = nonlinear_least_squares(
+            problem = prepare_born_problem(
                 forward,
+                initial_model,
+                bounds,
+                regularization=regularization,
+                roi=roi,
+                max_update_mps=float(p.max_update_mps),
+            )
+            state, metrics = gauss_newton(
+                problem,
                 control,
-                initial=initial_model,
-                bounds=bounds,
                 inner_iterations=p.inner_iterations,
                 inner_solver=str(p.inner_solver),
                 inner_options=p.inner_options.model_dump(),
                 damping=damping,
-                regularization=regularization,
-                roi=roi,
                 step_length=float(p.step_length),
                 smooth_sigma=float(p.smooth_sigma),
-                max_update_mps=float(p.max_update_mps),
                 max_backtracks=p.max_backtracks,
                 gradient_rtol=float(p.gradient_rtol),
             )
             sound_speed = 1 / np.sqrt(state)
+            control.work.counts.update(
+                background_builds=forward.background_builds,
+                eikonal_source_solves=forward.eikonal_solves,
+                green_source_solves=forward.green_solves,
+                green_matvecs=forward.green_matvecs,
+            )
+            metrics["stopping"]["work"] = dict(control.work.counts)
             metrics["initialization"] = initialization
             metrics["initialization_qc"] = initialization_qc
         if control.last_prediction is not None:

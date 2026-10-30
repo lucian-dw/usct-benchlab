@@ -312,3 +312,15 @@ large-data rerun or clinical validation is included in this delivery.
   prior, scales 1e-6/1/1e6, all three solvers and both preconditioners agree with
   independent dense least squares to 1e-9 relative / 1e-23 absolute tolerance.
 - Next: F09-F10 shared GN, two explicit trial policies and accepted work state.
+
+## Final taskbook F09
+
+- Replaced the separate Bent and nonlinear Born loops with `gauss_newton`, two
+  named problem preparers and two explicit trial generators. Kept the Bent
+  coarse basis, water prior, ROI, physical update norm and fine-grid penalty;
+  kept Born's initial/explicit prior and per-update speed constraints.
+- Regularization has one prepared forward/adjoint implementation. Accepted
+  trial linearizations are reused, not recomputed at the next iteration.
+- Validation: nonlinear, Bent, nonlinear Born and reduced-model tests: 52 passed.
+  A first invocation referenced a nonexistent test filename; it ran no tests.
+- Next: F10 complete accepted-state ownership and boundary budget handling.

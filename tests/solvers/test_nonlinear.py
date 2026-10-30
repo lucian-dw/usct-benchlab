@@ -8,6 +8,7 @@ import pytest
 from scipy.linalg import norm
 
 import usctbench.solvers.nonlinear as nonlinear
+from usctbench.algorithms.rwave import prepare_born_problem
 from usctbench.algorithms._control import InversionControl
 from usctbench.core.schema import (
     AlgorithmConfig,
@@ -86,9 +87,19 @@ def solve(monkeypatch):
             max_backtracks=8,
         )
         settings.update(options)
-        state, metrics = nonlinear.nonlinear_least_squares(
-            forward, control, initial=initial, **settings
-        )
+        problem_settings = {
+            key: settings.pop(key)
+            for key in (
+                "bounds",
+                "regularization",
+                "roi",
+                "prior_reference",
+                "max_update_mps",
+            )
+            if key in settings
+        }
+        problem = prepare_born_problem(forward, initial, **problem_settings)
+        state, metrics = nonlinear.gauss_newton(problem, control, **settings)
         return state, metrics, forward, directions, control
 
     return run
@@ -302,7 +313,7 @@ def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution(
         USCTCase,
     )
     from usctbench.operators.base import Linearization
-    from usctbench.solvers.nonlinear import nonlinear_least_squares
+    from usctbench.solvers.nonlinear import gauss_newton
 
     shape = (2, 2)
     initial = np.full(shape, 1 / 1500**2)
@@ -347,11 +358,10 @@ def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution(
     control = InversionControl(
         case, prepare_config("straight_cgls", config), observed, default_iterations=3
     )
-    result, metrics = nonlinear_least_squares(
-        Forward(),
+    problem = prepare_born_problem(Forward(), initial, (1400, 1600))
+    result, metrics = gauss_newton(
+        problem,
         control,
-        initial=initial,
-        bounds=(1400, 1600),
         inner_iterations=8,
         damping=0,
         smooth_sigma=1,

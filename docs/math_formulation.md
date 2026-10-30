@@ -70,6 +70,12 @@ the actual projected trial point with Armijo acceptance. Water-relative data use
 the same explicit $c_0$. With a reduced basis $B$, updates use $JB$ and the fine
 grid penalty $LB$, not a newly invented coarse-grid regularizer.
 
+Bent and nonlinear Born share `gauss_newton`, including the augmented solve and
+the true-objective acceptance test. Their preparation functions retain distinct
+model spaces, priors and trial policies: Bent projects each shortened step,
+$P(q+\alpha 2^{-k}d)$; Born first forms a feasible displacement and then shortens
+it, $q+2^{-k}(P(q+\alpha d)-q)$. Armijo uses the actual feasible displacement.
+
 ## Born scattering
 
 Let $m=1/c^2$ and $m_0$ be the background. With time convention
