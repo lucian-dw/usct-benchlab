@@ -59,22 +59,34 @@ def test_conservative_transport_converges_for_radial_energy_flux():
     assert errors[1] < 0.03
 
 
-def test_volume_convolution_is_linear_not_periodic():
-    op = setup_operator()
+def test_volume_convolution_matches_anisotropic_dense_nonperiodic_reference():
+    from scipy.integrate import quad
+
+    grid = GridSpec(shape=(4, 7), spacing_m=(1e-4, 8e-4), origin_m=(0, 0))
     solver = VolumeIntegralGreen(
-        op.grid, 180e3, op.background, 1500, rtol=1e-10, maxiter=20
+        grid, 180e3, np.full(grid.shape, 1500.0), 1500, rtol=1e-10, maxiter=20
     )
-    impulse = np.zeros(op.grid.shape)
-    impulse[-1, -1] = 1
-    result = solver.convolve(impulse)
-    points = np.indices(op.grid.shape).transpose(1, 2, 0)
-    distance = np.linalg.norm(
-        (points - np.array(op.grid.shape) + 1) * op.grid.spacing_m, axis=-1
+    points = np.indices(grid.shape).reshape(2, -1).T * grid.spacing_m
+    distance = np.linalg.norm(points[:, None] - points[None, :], axis=-1)
+    k = 2 * np.pi * 180e3 / 1500
+    dense = np.zeros(distance.shape, complex)
+    nonzero = distance > 0
+    dense[nonzero] = 0.25j * hankel1(0, k * distance[nonzero])
+    # Independent quadrature for the singular equal-area disk self cell.
+    radius = np.sqrt(np.prod(grid.spacing_m) / np.pi)
+    def integral(r):
+        return 0.25j * hankel1(0, k * r) * 2 * r / radius**2
+
+    self_term = (
+        quad(lambda r: integral(r).real, 0, radius)[0]
+        + 1j * quad(lambda r: integral(r).imag, 0, radius)[0]
     )
-    exact = 0.25j * hankel1(
-        0, 2 * np.pi * 180e3 / 1500 * np.maximum(distance, op.source_radius_m)
+    np.fill_diagonal(dense, self_term)
+    rng = np.random.default_rng(5)
+    values = rng.normal(size=grid.shape) + 1j * rng.normal(size=grid.shape)
+    np.testing.assert_allclose(
+        solver.convolve(values).ravel(), dense @ values.ravel(), atol=2e-14, rtol=2e-14
     )
-    np.testing.assert_allclose(result[:-1], exact[:-1], atol=1e-14)
 
 
 def test_volume_born_derivative_matches_nonlinear_finite_difference():

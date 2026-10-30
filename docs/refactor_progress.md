@@ -259,3 +259,16 @@ large-data rerun or clinical validation is included in this delivery.
   explicit coordinates, saved round-trip and CLI regressions. Ruff/Black passed
   on changed Python files.
 - Next: F03 training-frequency support and F04 anisotropic Green discretization.
+
+## Final taskbook F03-F04
+
+- Phase unwrap now rejects channels outside the training-frequency/physical-delay
+  support and records unwrap_range_rejected_channels. The 8 us -> -2 us alias
+  has zero confidence, without inspecting held-out observations.
+- Nonzero Green displacements use their true distance. Only the self cell uses
+  the equal-area disk integral; FFT padding is explicitly zero.
+- Focused arrival/phase and Born operator suite: 26 passed (0.66 s). The Green
+  test compares a complex field on an anisotropic rectangular grid against an
+  independently assembled dense convolution and quadrature self term, with
+  2e-14 absolute/relative tolerance. Existing derivative tests remain intact.
+- Next: F05 shared bounded real/complex solve and explicit IRLS step budgets.

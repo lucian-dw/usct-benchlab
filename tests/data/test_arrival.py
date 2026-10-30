@@ -28,6 +28,27 @@ def test_phase_initialization_uses_only_three_training_frequencies():
         phase_slope_delays(observed, reference, f, np.full((2, 2), 0.05), train)
 
 
+def test_phase_unwrap_rejects_aliased_delay_even_with_zero_fit_error():
+    f = np.array([100e3, 200e3, 300e3, 310e3])
+    reference = np.ones((4, 1, 2), complex)
+    delays = np.array([[8e-6, 1e-6]])
+    observed = reference * np.exp(2j * np.pi * f[:, None, None] * delays)
+    train = np.ones(observed.shape, bool)
+    train[-1] = False
+    result, confidence, qc = phase_slope_delays(
+        observed, reference, f, [[0.09, 0.02]], train
+    )
+    assert np.isnan(result[0, 0]) and confidence[0, 0] == 0
+    np.testing.assert_allclose(result[0, 1], 1e-6, atol=1e-18)
+    assert confidence[0, 1] > 0.99
+    assert qc["unwrap_range_rejected_channels"] == 1
+    # With only unsupported channels, initialization sees no usable delays.
+    result, confidence, qc = phase_slope_delays(
+        observed[:, :, :1], reference[:, :, :1], f, [[0.09]], train[:, :, :1]
+    )
+    assert np.isnan(result).all() and not confidence.any()
+
+
 def test_bounded_water_lag_sign_nonzero_time_origin_and_missing_traces():
     time = np.arange(1200) * 1e-7 - 10e-6
     arrival = 0.06 / 1500 + 6e-6

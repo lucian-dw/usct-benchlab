@@ -69,6 +69,12 @@ and fits complex source scales from independent water using explicit training
 masks. A completely held-out frequency may require separately supplied source
 calibration. Specimen validation pressure must not fill that gap.
 
+Phase-slope initialization only fits training frequencies. Direct unwrap
+requires `max(diff(f_train)) * max(abs(delay_bounds)) < 0.5` per channel.
+Unsupported channels have zero confidence and are counted in
+`unwrap_range_rejected_channels`; a small phase-fit RMS alone does not establish
+that the selected phase branch is physically identifiable.
+
 WUST fits its own per-source/per-frequency scale from admitted specimen
 receivers; it does not require the Born source spectrum.
 

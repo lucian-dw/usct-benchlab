@@ -56,10 +56,14 @@ class VolumeIntegralGreen:
         )
         k = omega / exterior_speed
         radius = np.sqrt(area / np.pi)
-        kernel = 0.25j * hankel1(0, k * np.maximum(distance, radius))
+        kernel = np.zeros(self.fft_shape, dtype=complex)
+        nonzero = distance > 0
+        kernel[nonzero] = 0.25j * hankel1(0, k * distance[nonzero])
         # Disk-cell average of the logarithmic Green singularity. The equal-area
         # disk is an explicit quadrature approximation for the rectangular cell.
         kernel[0, 0] = 0.5j * hankel1(1, k * radius) / (k * radius) - 1 / (k * k * area)
+        kernel[ny : self.fft_shape[0] - ny + 1, :] = 0
+        kernel[:, nx : self.fft_shape[1] - nx + 1] = 0
         self.kernel_fft = fft2(kernel)
         n = ny * nx
         self.operator = LinearOperator((n, n), matvec=self._matvec, dtype=complex)

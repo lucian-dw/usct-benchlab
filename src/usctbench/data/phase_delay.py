@@ -49,6 +49,17 @@ def phase_slope_delays(
     water_amplitude = np.abs(water)
     active &= np.all(water_amplitude > np.finfo(float).tiny, axis=0)
     active &= np.all(np.abs(p) > min_amplitude_ratio * water_amplitude, axis=0)
+    distance = np.broadcast_to(np.asarray(distances, float), p.shape[1:])
+    lower = distance * (1 / bounds[1] - 1 / c0)
+    upper = distance * (1 / bounds[0] - 1 / c0)
+    # Direct unwrap only identifies delays in this training-band support.
+    # A small fit RMS cannot distinguish a phase-aliased branch.
+    supported = (
+        np.max(np.diff(frequencies[indices])) * np.maximum(np.abs(lower), np.abs(upper))
+        < 0.5
+    )
+    rejected = int(np.count_nonzero(active & ~supported))
+    active &= supported
     x = 2 * np.pi * frequencies[indices]
     x -= x.mean()
     delay = np.full(p.shape[1:], np.nan)
@@ -60,10 +71,9 @@ def phase_slope_delays(
         residual = phase - phase.mean(axis=0) - x[:, None] * slope
         delay[active] = slope
         rms[active] = np.sqrt(np.mean(residual**2, axis=0))
-    distance = np.broadcast_to(np.asarray(distances, float), delay.shape)
     active &= (distance > 0) & (rms <= max_phase_rms)
-    active &= delay >= distance * (1 / bounds[1] - 1 / c0)
-    active &= delay <= distance * (1 / bounds[0] - 1 / c0)
+    active &= delay >= lower
+    active &= delay <= upper
     confidence[active] = np.exp(-((rms[active] / max_phase_rms) ** 2))
     delay[~active] = np.nan
     return (
@@ -72,6 +82,7 @@ def phase_slope_delays(
         {
             "method": "training_only_reference_relative_phase_slope",
             "valid_frequency_count": int(len(indices)),
+            "unwrap_range_rejected_channels": rejected,
             "frequencies_hz": frequencies[indices].tolist(),
             "valid_fraction": float(active.sum() / max(np.all(train, axis=0).sum(), 1)),
             "phase_rms_median": float(np.median(rms[active])) if active.any() else None,
