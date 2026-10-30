@@ -133,7 +133,7 @@ def reconstruct(case, config, algorithm):
             regularization_roi=case.grid.roi_mask if roi_laplacian else None,
             preconditioner=preconditioner,
             huber_delta=(float(p.huber_delta_s) if robust_loss != "none" else None),
-            irls_stages=p.irls_iterations if robust_loss != "none" else 1,
+            irls_max_inner_steps=p.irls_max_inner_steps,
             optimality_rtol=float(p.gradient_rtol),
         )
     else:

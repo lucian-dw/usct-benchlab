@@ -272,3 +272,17 @@ large-data rerun or clinical validation is included in this delivery.
   independently assembled dense convolution and quadrature self term, with
   2e-14 absolute/relative tolerance. Existing derivative tests remain intact.
 - Next: F05 shared bounded real/complex solve and explicit IRLS step budgets.
+
+## Final taskbook F05
+
+- Fixed Born now uses projected_cg with a constant pressure offset, real-model
+  complex-data gradient and explicit squared-slowness bounds. Deleted the old
+  clipped linear_cgls implementation and its unused projection closure.
+- IRLS consumes irls_max_inner_steps directly; default 30/3 migrated to 10.
+  Training-only refreshes, activity restarts and true Huber acceptance remain.
+- `pytest -q tests/solvers/test_projected_cg.py tests/algorithms`: 144 passed
+  (9.50 s). Includes the two-pixel complex analytic solution [0, 1e-9/65],
+  monotone true objective, independent Huber/box references and existing native
+  algorithm regressions. An initial command named nonexistent test files and
+  collected nothing; the corrected directory-based command above was executed.
+- Next: F06 explicit operator data dtype and native linear-solver diagnostics.

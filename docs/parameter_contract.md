@@ -47,3 +47,11 @@ update_rtol is injected. See [evaluation](evaluation.md).
 
 Names removed during this refactor are listed once in [migration notes](../CHANGELOG.md);
 old YAML aliases are not permanent runtime APIs.
+# IRLS migration
+
+`irls_max_inner_steps` is the maximum CG steps between robust weight refreshes.
+It replaces `irls_iterations`, which encoded a stage count indirectly. For an
+existing resolved total budget K and old stage count S, use `max(1, ceil(K/S))`.
+The old default K=30, S=3 becomes 10. The runtime has no legacy alias; changed
+budgets do not silently change the explicit new inner-step limit.
+

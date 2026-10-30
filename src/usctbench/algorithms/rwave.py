@@ -15,7 +15,8 @@ from usctbench.data.calibration import fit_water_source, prepare_source_spectrum
 from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, USCTCase
 from usctbench.core.stopping import BudgetExhausted
 from usctbench.operators.ray_born import RayBornForward, RayBornOperator
-from usctbench.solvers.linear import linear_cgls, solve_linearized
+from usctbench.solvers.linear import solve_linearized
+from usctbench.solvers.projected_cg import projected_cg
 from usctbench.solvers.nonlinear import nonlinear_least_squares
 
 
@@ -234,17 +235,6 @@ class RayBornAlgorithm:
             return exhausted_result(exc)
         control.work.counts["setup_eikonal_source_solves"] = operator.eikonal_solves
 
-        def project(delta):
-            value = (
-                np.clip(
-                    delta + operator.background_squared_slowness,
-                    1 / bounds[1] ** 2,
-                    1 / bounds[0] ** 2,
-                )
-                - operator.background_squared_slowness
-            )
-            return np.where(roi, value, 0) if roi is not None else value
-
         def to_speed(delta):
             return 1 / np.sqrt(operator.background_squared_slowness + delta)
 
@@ -316,13 +306,14 @@ class RayBornAlgorithm:
                 (physical_length / h) ** 2 for h in case.grid.spacing_m
             )
         if mode == "fixed_background":
-            delta, metrics = linear_cgls(
+            delta, metrics = projected_cg(
                 operator,
                 control,
                 initial=np.zeros(case.grid.shape),
                 offset=offset,
-                to_speed=to_speed,
-                project=project,
+                to_image=to_speed,
+                lower=1 / bounds[1] ** 2 - operator.background_squared_slowness,
+                upper=1 / bounds[0] ** 2 - operator.background_squared_slowness,
                 reference=operator.background_squared_slowness,
                 damping=damping,
                 regularization=regularization,

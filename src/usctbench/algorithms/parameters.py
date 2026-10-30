@@ -86,8 +86,8 @@ class CGLSParameters(RayParameters):
     huber_delta_s: Positive = parameter(
         5e-7, "Huber transition on travel-time residual.", "s"
     )
-    irls_iterations: PositiveInt = parameter(
-        3, "Maximum robust reweighting stages, only used with Huber.", "stages"
+    irls_max_inner_steps: PositiveInt = parameter(
+        10, "Maximum CG steps per weight refresh, only used with Huber.", "steps"
     )
     gradient_rtol: Nonnegative = parameter(
         1e-10, "Relative projected optimality tolerance."

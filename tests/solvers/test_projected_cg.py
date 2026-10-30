@@ -65,7 +65,7 @@ def parameters(robust):
         return {
             "robust_loss": "huber",
             "huber_delta_s": 1e-8,
-            "irls_iterations": 3,
+            "irls_max_inner_steps": 10,
         }
     return {
         "sound_speed_bounds_mps": [1 / (1 / 1500 + 1e-5), 1 / (1 / 1500 - 1e-5)],
@@ -90,9 +90,11 @@ def perturbation(result):
     return 1 / result.sound_speed_mps - 1 / 1500
 
 
-@pytest.mark.parametrize("stages", [1, 3, 30])
-def test_huber_inner_convergence_refreshes_before_global_stopping(stages):
-    result = run(huber_case(), {**parameters(True), "irls_iterations": stages})
+@pytest.mark.parametrize("inner_steps", [30, 10, 1])
+def test_huber_inner_convergence_refreshes_before_global_stopping(inner_steps):
+    result = run(
+        huber_case(), {**parameters(True), "irls_max_inner_steps": inner_steps}
+    )
     # In units x=delta_s/1e-5, min rho(x-1)+rho(2*x-4) has x=1.8.
     np.testing.assert_allclose(perturbation(result), [[1.8e-5]], rtol=1e-10)
     assert result.metrics["iteration_history"][-1]["objective"] == pytest.approx(
@@ -209,7 +211,7 @@ def test_coupled_weighted_bounded_penalty_matches_independent_lbfgsb(robust):
         "regularization_lambda": np.sqrt(0.2e-6),
     }
     if robust:
-        params.update(robust_loss="huber", huber_delta_s=1e-8, irls_iterations=3)
+        params.update(robust_loss="huber", huber_delta_s=1e-8, irls_max_inner_steps=34)
     result = run(case, params, run_controls={"max_iterations": 100})
     x = perturbation(result).ravel() / 1e-5
     np.testing.assert_allclose(x, expected.x, rtol=1e-8, atol=1e-9)
@@ -356,6 +358,45 @@ class Identity:
         return y.copy()
 
 
+def test_bounded_complex_fixed_born_offset_has_analytic_kkt_solution():
+    matrix = (0.6 + 0.8j) * np.array([[1.0, 8.0], [0.0, 1.0]])
+    offset = np.array([[2e-8j], [3e-8]])
+    observed = offset + (0.6 + 0.8j) * 1e-9 * np.array([[-8.0], [65.0]])
+
+    class ComplexOperator:
+        def forward(self, x):
+            return matrix @ x.ravel()
+
+        def adjoint(self, y):
+            return (matrix.conj().T @ y.ravel()).real.reshape(1, 2)
+
+    case = SimpleNamespace(
+        geometry=SimpleNamespace(tx_pos_m=None, rx_pos_m=None),
+        grid=SimpleNamespace(roi_mask=None),
+    )
+    config = prepare_config(
+        "straight_cgls", AlgorithmConfig(run_controls={"max_iterations": 10})
+    )
+    control = InversionControl(case, config, observed, default_iterations=10)
+    actual, metrics = projected_cg(
+        ComplexOperator(),
+        control,
+        initial=np.zeros((1, 2)),
+        offset=offset,
+        reference=np.full((1, 2), 1700.0**-2),
+        lower=0,
+        upper=1300.0**-2 - 1700.0**-2,
+        to_image=lambda x: x,
+    )
+    np.testing.assert_allclose(actual, [[0, 1e-9 / 65]], rtol=1e-12, atol=1e-24)
+    np.testing.assert_allclose(
+        control.last_prediction, offset + (matrix @ actual.ravel())[:, None]
+    )
+    costs = np.array([row["objective"] for row in metrics["iteration_history"]])
+    assert np.all(np.diff(costs) <= 0)
+    assert metrics["solver_optimality"]["converged"]
+
+
 def test_exact_data_fit_does_not_bypass_regularizer():
     from usctbench.algorithms.parameters import CGLSParameters
 
@@ -422,7 +463,7 @@ def test_huber_preconditioning_uses_only_training_data_and_global_budget():
         evaluation={"receiver_indices": [2]},
         robust_loss="huber",
         huber_delta_s=1e-8,
-        irls_iterations=3,
+        irls_max_inner_steps=2,
         coverage_preconditioning=True,
     )
     first = StraightRayCGLSAlgorithm().run(case, cfg)

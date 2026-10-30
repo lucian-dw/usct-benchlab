@@ -1,4 +1,4 @@
-"""Projected, optionally preconditioned CGLS/IRLS for real linear inverse problems."""
+"""Bounded CGLS/IRLS for real models and real or complex observations."""
 
 from __future__ import annotations
 
@@ -17,20 +17,20 @@ def projected_cg(
     lower,
     upper,
     to_image,
+    offset=0.0,
     damping=0.0,
     regularization="identity",
     roi=None,
     regularization_roi=None,
     preconditioner=None,
     huber_delta=None,
-    irls_stages=1,
+    irls_max_inner_steps=10,
     optimality_rtol=1e-10,
 ):
     """All CG steps share one global budget, including across IRLS restarts.
 
-    IRLS freezes its training-only weights within each stage, but refreshes them
-    early on inner convergence or loss of descent. The requested stage count
-    sets the maximum stage length, not a cap on these corrective restarts.
+    Prediction is offset + J x. IRLS freezes training-only weights for at most
+    irls_max_inner_steps, refreshing early on inner stationarity or restart.
     Huber objective and validation residuals use the original precision.
     Backtracking handles physical bound projection; rejected trials never
     replace a valid checkpoint. Preconditioner is a physical-coordinate scale D.
@@ -42,11 +42,11 @@ def projected_cg(
     if huber_delta is not None and (not np.isfinite(huber_delta) or huber_delta <= 0):
         raise ValueError("huber_delta_s must be finite and positive")
     if (
-        isinstance(irls_stages, bool)
-        or int(irls_stages) != irls_stages
-        or irls_stages <= 0
+        isinstance(irls_max_inner_steps, bool)
+        or int(irls_max_inner_steps) != irls_max_inner_steps
+        or irls_max_inner_steps <= 0
     ):
-        raise ValueError("irls_iterations must be a positive integer")
+        raise ValueError("irls_max_inner_steps must be a positive integer")
     scale = (
         np.ones_like(x)
         if preconditioner is None
@@ -98,7 +98,17 @@ def projected_cg(
     def negative_gradient(weights):
         return control.call(
             "adjoint", operator.adjoint, weights * residual(prediction)
-        ) - damping * normal(x)
+        ).real - damping * normal(x)
+
+    def refresh_weights(current_weights):
+        control.work.counts["cg_restarts"] = (
+            control.work.counts.get("cg_restarts", 0) + 1
+        )
+        if huber_delta is not None:
+            control.work.counts["irls_reweights"] = (
+                control.work.counts.get("irls_reweights", 0) + 1
+            )
+        return current_weights
 
     def project(value):
         bounded = np.clip(value, lower, upper)
@@ -133,13 +143,13 @@ def projected_cg(
     try:
         if huber_delta is not None:
             control.monitor.set_stage("irls_0")
-        prediction = control.call("forward", operator.forward, x).reshape(
+        prediction = offset + control.call("forward", operator.forward, x).reshape(
             control.observed.shape
         )
         cost = objective(x, prediction)
         if control.observe(0, x, prediction, objective=cost, sound_speed=to_image(x)):
             return output()
-        block = max(1, int(np.ceil(control.policy.max_iterations / irls_stages)))
+        block = irls_max_inner_steps
         weights = precision(prediction)
         direction, gamma, previous_free = None, None, None
         stage_gamma = 0.0
@@ -180,14 +190,7 @@ def projected_cg(
             # Retries consume operator budgets, not extra completed iterations.
             for _ in range(2):
                 if restart:
-                    weights = current_weights
-                    control.work.counts["cg_restarts"] = (
-                        control.work.counts.get("cg_restarts", 0) + 1
-                    )
-                    if huber_delta is not None:
-                        control.work.counts["irls_reweights"] = (
-                            control.work.counts.get("irls_reweights", 0) + 1
-                        )
+                    weights = refresh_weights(current_weights)
                 stale_weights = not np.array_equal(weights, current_weights)
                 raw_gradient = (
                     negative_gradient(weights) if stale_weights else true_gradient
@@ -237,7 +240,8 @@ def projected_cg(
                     candidate = project(raw)
                     projected = not np.array_equal(candidate, raw)
                     next_prediction = (
-                        control.call(
+                        offset
+                        + control.call(
                             "line_search", operator.forward, candidate
                         ).reshape(control.observed.shape)
                         if projected
