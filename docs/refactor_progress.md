@@ -297,3 +297,18 @@ large-data rerun or clinical validation is included in this delivery.
   86 passed (2.60 s). An initial run found nine test doubles missing the newly
   required dtype; their interfaces were migrated without removing assertions.
 - Next: F07 WUST update validation, then F08 ordinary scalar normalization.
+
+## Final taskbook F08
+
+- Replaced exponent scaling with rhs_scale/operator_scale for the complete
+  real-stacked augmented system. Normal CG, LSMR and LSQR share preparation,
+  optional once-per-subproblem column_rms probes, and physical step recovery.
+- Removed inner-product checked scans and duplicate normal-CG assembly.
+  Native data/normal residual estimates have explicit physical/transformed
+  scopes; no forced exit J/J* evaluation. Normal-CG preparation/count test
+  verifies one setup pair plus one iteration pair.
+- Focused solvers, Bent, relinearized Born and reduced-model suite: 131 passed
+  (2.72 s). Complex 8x3 Jacobian plus real 5x3 penalty, weighted data, nonzero
+  prior, scales 1e-6/1/1e6, all three solvers and both preconditioners agree with
+  independent dense least squares to 1e-9 relative / 1e-23 absolute tolerance.
+- Next: F09-F10 shared GN, two explicit trial policies and accepted work state.

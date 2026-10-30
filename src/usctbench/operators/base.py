@@ -42,3 +42,5 @@ class LinearSolveInfo:
     converged: bool
     scipy_stop_code: int | None = None
     condition_estimate: float | None = None
+    normal_residual_norm: float | None = None
+    normal_residual_scope: str | None = None

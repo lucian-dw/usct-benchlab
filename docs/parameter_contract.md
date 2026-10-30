@@ -47,11 +47,21 @@ update_rtol is injected. See [evaluation](evaluation.md).
 
 Names removed during this refactor are listed once in [migration notes](../CHANGELOG.md);
 old YAML aliases are not permanent runtime APIs.
-# IRLS migration
+## IRLS migration
 
 `irls_max_inner_steps` is the maximum CG steps between robust weight refreshes.
 It replaces `irls_iterations`, which encoded a stage count indirectly. For an
 existing resolved total budget K and old stage count S, use `max(1, ceil(K/S))`.
 The old default K=30, S=3 becomes 10. The runtime has no legacy alias; changed
 budgets do not silently change the explicit new inner-step limit.
+
+## Linear solve scaling
+
+GN prepares the complete real-stacked data/penalty system before scaling.
+`rhs_scale = max(abs(b_aug))` and a one-direction `operator_scale` normalize
+both terms consistently. LSMR, LSQR and normal CG share this preparation and
+recover physical steps as `(rhs_scale/operator_scale) * D * z`.
+`none` keeps D=I; `column_rms` prepares D once (eight adjoint probes by default).
+Residual norms are native solver estimates, not extra exit evaluations.
+Nonuniform D normal residuals are explicitly labeled transformed-system estimates.
 

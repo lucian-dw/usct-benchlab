@@ -122,17 +122,19 @@ def test_rank_deficient_masked_complex_problem_matches_minimum_norm(method):
     assert info.converged
 
 
-@pytest.mark.parametrize("method", ["lsmr", "lsqr"])
+@pytest.mark.parametrize("method", ["normal_cg", "lsmr", "lsqr"])
+@pytest.mark.parametrize("preconditioner", ["none", "column_rms"])
 @pytest.mark.parametrize("scale", [1e-6, 1.0, 1e6])
-def test_scaled_rectangular_penalty_column_preconditioning(method, scale):
+def test_scaled_rectangular_penalty_column_preconditioning(
+    method, preconditioner, scale
+):
     rng = np.random.default_rng(189)
-    a = rng.normal(size=(15, 6)) * scale
-    penalty_matrix = rng.normal(size=(9, 6)) * scale
-    current = rng.normal(size=(2, 3))
-    residual = rng.normal(size=15) * scale
-    roi = np.ones((2, 3), dtype=bool)
-    roi[0, 0] = False
-    weight = rng.uniform(0.3, 2, 15)
+    a = (rng.normal(size=(8, 3)) + 1j * rng.normal(size=(8, 3))) * scale
+    penalty_matrix = rng.normal(size=(5, 3)) * scale
+    current = rng.normal(size=(1, 3)) * 1e-9
+    residual = (rng.normal(size=8) + 1j * rng.normal(size=8)) * scale * 1e-9
+    roi = np.ones((1, 3), dtype=bool)
+    weight = rng.uniform(0.3, 2, 8)
     damping = 0.2
     penalty = DenseJacobian(penalty_matrix, current.shape)
     step, info = solve_linearized(
@@ -146,35 +148,43 @@ def test_scaled_rectangular_penalty_column_preconditioning(method, scale):
         regularization=penalty,
         roi=roi,
         method=method,
-        preconditioner="column_rms",
+        preconditioner=preconditioner,
     )
     design = np.vstack(
-        [np.sqrt(weight)[:, None] * a, np.sqrt(damping) * penalty_matrix]
+        [
+            np.sqrt(weight)[:, None] * a.real,
+            np.sqrt(weight)[:, None] * a.imag,
+            np.sqrt(damping) * penalty_matrix,
+        ]
     )[:, roi.ravel()]
     target = np.r_[
-        np.sqrt(weight) * residual, -np.sqrt(damping) * penalty_matrix @ current.ravel()
+        np.sqrt(weight) * residual.real,
+        np.sqrt(weight) * residual.imag,
+        -np.sqrt(damping) * penalty_matrix @ current.ravel(),
     ]
     expected = np.linalg.lstsq(design, target, rcond=None)[0]
-    np.testing.assert_allclose(step[roi], expected, rtol=1e-8, atol=1e-10)
+    np.testing.assert_allclose(step[roi], expected, rtol=1e-9, atol=1e-23)
     np.testing.assert_array_equal(step[~roi], 0)
     assert info.converged
 
 
-def test_normal_cg_reports_squared_rhs_underflow():
+def test_normal_cg_scale_preparation_counts_work_without_exit_recomputation():
     control = controls(np.ones(1))
     step, info = solve_linearized(
-        DenseJacobian(np.array([[1e-90]]), (1, 1)),
-        np.array([1e-90]),
+        DenseJacobian(np.array([[1e-6]]), (1, 1)),
+        np.array([1e-15]),
         np.zeros((1, 1)),
         control,
         weights=np.ones(1),
         iterations=8,
         method="normal_cg",
     )
-    assert not info.converged
-    assert info.stop_reason == "arithmetic_precision_limit"
-    assert info.relative_residual == 1
-    np.testing.assert_array_equal(step, 0)
+    assert info.converged
+    assert info.stop_reason == "normal_residual_target"
+    np.testing.assert_allclose(step, 1e-9, rtol=1e-14)
+    # One normalization pair and one Krylov iteration. No exit J/J* pair.
+    assert control.work.counts["forward_calls"] == 2
+    assert control.work.counts["adjoint_calls"] == 2
 
 
 def test_iteration_limit_is_not_convergence():
