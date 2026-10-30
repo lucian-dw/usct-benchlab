@@ -1,7 +1,7 @@
 # Property-map conversion
 
 Current input paths and conventions are maintained in [datasets.md](datasets.md).
-OpenBreastUS selection is explicit: files and sample indices, sample axis, image
+OpenBreastUS selection is explicit: files, dataset_name and sample indices, sample axis, image
 axes, units and output spacing. Inspection does not select cases or assign labels.
 
 Continuous maps and nearest-neighbor labels share physical cell-center sampling.

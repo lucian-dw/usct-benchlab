@@ -29,3 +29,7 @@ not moved or deleted. Their locations remain in the archived experiment records.
 
 Browse the [local archive](../../research_archive/usct-benchlab/).
 Current examples are in [examples/README.md](../examples/README.md).
+
+The P1-P6 and F01-F22 unit-by-unit progress record is preserved in the local
+archive at `docs/final_refactor_progress.md`. Current interfaces remain in the
+user docs; final acceptance commands/results are in [validation](validation.md).

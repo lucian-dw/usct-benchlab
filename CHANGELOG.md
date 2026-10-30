@@ -1,4 +1,4 @@
-# P1-P6 refactor
+# Refactor changelog
 
 ## Current public workflow
 
@@ -39,7 +39,27 @@ Homogeneous Eikonal object/water times are subtracted before adding the geometri
 reference, avoiding a roundoff-only failure at an exactly constant model.
 The WUST native launcher now applies each TX's local pressure-source scale,
 instead of reusing the first TX scale in a heterogeneous source region.
-Other solver updates retain their declared mathematical ordering.
+The final numerical corrections below intentionally change the affected defective behavior.
 
 See [usage](docs/usage.md), [parameters](docs/parameter_contract.md) and the
-[execution record](docs/refactor_progress.md) for actual validation and limits.
+[execution record](docs/validation.md) for actual validation and limits.
+
+## Final numerical and interface consolidation
+
+- Fixed Born now uses bounded projected CG with its complex pressure offset.
+  Real model gradients use Re(J*Wr); constrained active-set and Huber refresh
+  behavior share the straight-CGLS implementation.
+- One GN driver preserves Bent coarse-space/water priors and Born model priors,
+  with distinct feasible trial formulas. Accepted Linearizations are reused.
+- Real/complex augmented solves declare data dtype, use ordinary scalar
+  normalization and optional column_rms scaling; no exit-time J/J* recomputation.
+- Corrected anisotropic Green distances and phase-unwrap support filtering.
+- `irls_iterations` migrates to `irls_max_inner_steps`; explicit speed-volume
+  `dataset_name` replaces largest-array guessing. Removed unused
+  `boundary_band_pixels` and WUST `model_reference_speed_mps`.
+- `prepare_config` owns runtime preparation; direct algorithm calls require its
+  result. Agent admission and case facts do not resolve host deployment/policy.
+- Dataset readers own their formats, pressure units share one contract,
+  codecs use `publish_result`, and suites load each case once.
+- Detailed traces require `diagnostics: true`. Undefined relative improvement
+  is null with a status; accepted histories and work counters remain available.
