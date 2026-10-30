@@ -46,9 +46,6 @@ def reconstruct(case, config, algorithm):
         case,
         config,
         target.reshape(projector.ray_shape),
-        default_iterations=(
-            30 if is_cg else (10 if algorithm == "straight_sart" else 50)
-        ),
         weights=weights.reshape(projector.ray_shape),
         valid_mask=mask.reshape(projector.ray_shape),
         iteration_unit="cgls_step" if is_cg else "full_sweep",
@@ -125,7 +122,6 @@ def reconstruct(case, config, algorithm):
             reference=s0,
             lower=1.0 / high - 1.0 / c0,
             upper=1.0 / low - 1.0 / c0,
-            to_image=to_speed,
             damping=lambda_value**2,
             regularization=solver_kind,
             roi=roi,
@@ -160,7 +156,6 @@ def reconstruct(case, config, algorithm):
             initial=initial,
             reference=s0,
             project=project,
-            to_image=to_speed,
             relaxation=float(p.relaxation),
             subsets=p.subsets if algorithm == "straight_sart" else 1,
             postprocess=smooth,

@@ -14,7 +14,6 @@ def row_action(
     initial,
     reference,
     project,
-    to_image,
     relaxation,
     subsets=1,
     postprocess=None,
@@ -59,9 +58,7 @@ def row_action(
         prediction = control.call("forward", operator.forward, x).reshape(
             control.observed.shape
         )
-        if control.observe(
-            0, x, prediction, objective=objective(prediction), sound_speed=to_image(x)
-        ):
+        if control.observe(0, x, prediction, objective=objective(prediction)):
             return output()
         ids = np.flatnonzero(control.split.train)
         groups = np.array_split(ids, min(int(subsets), len(ids)))
@@ -115,7 +112,6 @@ def row_action(
                 prediction,
                 objective=objective(prediction),
                 update_relative=relative_update,
-                sound_speed=to_image(x),
             ):
                 break
         if control.monitor.reason is None:

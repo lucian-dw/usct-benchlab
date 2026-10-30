@@ -362,3 +362,22 @@ large-data rerun or clinical validation is included in this delivery.
 - Migrated direct callers, integration script, admission tests and Agent docs.
   Focused algorithm/CLI/solver/calibration tests: 167 passed; Ruff passed.
 - Next: F17 dataset reader ownership and pressure-contract preparation.
+
+## Final taskbook F17-F19
+
+- Dataset-specific readers now live in openbreastus/nbpslice2d; conversion keeps
+  shared resampling/coordinates. Readers derive ToF before their single save.
+  Pressure conventions and units have one data helper, with explicit unknowns.
+- Both codecs directly read declared datasets and publish arrays before manifest;
+  WUST FIELDS remains the schema source. Removed duplicate schema/link auditing.
+- Default histories keep accepted iterations and compact solver summaries.
+  Detailed trial diagnostics are opt-in. Zero baseline relative improvement is
+  null with zero_baseline status. Suites load a case once for all algorithms.
+  Removed unused control/image arguments and static self-assertion metrics.
+- Focused validation: data/CLI 90 passed; codec/FWI/core 37 passed;
+  solvers/control/Bent/Born/metrics/runner 196 passed; subsequent independent
+  references and interface regressions 122 and 42 passed respectively.
+  WUST transport 11 passed with 8 subtests.
+- Completed the static WKB geometry cache in the shared reference owner.
+- Next: F20 current docs and archive index, F21 full suites and hardware gates,
+  F22 shared-fixture public save/evaluate/read.

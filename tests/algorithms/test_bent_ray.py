@@ -23,6 +23,7 @@ from usctbench.operators.regularization import regularizer
 
 def _config(*, max_iterations=4, run_controls=None, evaluation=None, **parameters):
     return AlgorithmConfig(
+        diagnostics=True,
         parameters={
             "inner_iterations": 80,
             "regularization_lambda": 0.0,

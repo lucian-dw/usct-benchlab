@@ -285,6 +285,11 @@ class AlgorithmConfig(_ArrayModel):
     """Algorithm configuration passed to registry entries."""
 
     name: str | None = None
+    diagnostics: bool = Field(
+        False,
+        strict=True,
+        description="Record detailed trial and inner-solver diagnostics",
+    )
     run_controls: RunControls = Field(default_factory=RunControls)
     parameters: SerializeAsAny[Parameters] | dict[str, Any] = Field(
         default_factory=dict

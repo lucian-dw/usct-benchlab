@@ -25,7 +25,6 @@ class InversionControl:
         config,
         observed,
         *,
-        default_iterations,
         weights=None,
         valid_mask=None,
         iteration_unit="iteration",
@@ -59,6 +58,7 @@ class InversionControl:
         self.last_prediction = self.best_prediction = None
         self.current_state = None
         self.inner_solver_history = []
+        self.pending_linear_info = None
         self.numerical_error = None
         self.update_semantics = {
             "optimization_variable": None,
@@ -97,7 +97,9 @@ class InversionControl:
         self.monitor.finish("numerical_failure")
 
     def record_linear(self, info):
-        self.inner_solver_history.append(asdict(info))
+        self.pending_linear_info = asdict(info)
+        if self.config.diagnostics:
+            self.inner_solver_history.append(self.pending_linear_info)
 
     def weighted_residual(self, prediction):
         # Index first: 0 * NaN must never poison gradients on excluded channels.
@@ -114,7 +116,6 @@ class InversionControl:
         *,
         objective=None,
         update_relative=None,
-        sound_speed=None,
         optimizer_diagnostics=None,
         linearization=None,
     ):
@@ -152,6 +153,9 @@ class InversionControl:
         # A rejected nonfinite state/objective cannot advance the data cache.
         # Its image and its prediction must refer to the same complete iterate.
         if len(self.monitor.history) > previous_history_length:
+            if self.pending_linear_info is not None:
+                self.monitor.history[-1]["linear_solve"] = self.pending_linear_info
+                self.pending_linear_info = None
             if optimizer_diagnostics is not None:
                 self.monitor.history[-1]["optimizer_diagnostics"] = dict(
                     optimizer_diagnostics
@@ -196,7 +200,7 @@ class InversionControl:
             metrics["numerical_error"] = (
                 f"{type(self.numerical_error).__name__}: {self.numerical_error}"
             )
-        if self.inner_solver_history:
+        if self.config.diagnostics and self.inner_solver_history:
             metrics["inner_solver_history"] = self.inner_solver_history
         if prediction is not None:
             evaluation = self.split.evaluate(prediction, self.observed)

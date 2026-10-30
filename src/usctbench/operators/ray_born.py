@@ -273,12 +273,14 @@ class RayBornOperator:
                 self.green_method = "full_green_volume_integral"
 
     def _heterogeneous_fields(self):
-        geometry = GeometrySpec(
-            tx_pos_m=self.positions, rx_pos_m=self.geometry.rx_pos_m
-        )
-        model = EikonalForward(
-            self.grid, geometry, background_speed_mps=self.exterior_speed_mps
-        )
+        if "eikonal_geometry" not in self.reference_cache:
+            geometry = GeometrySpec(
+                tx_pos_m=self.positions, rx_pos_m=self.geometry.rx_pos_m
+            )
+            self.reference_cache["eikonal_geometry"] = EikonalForward(
+                self.grid, geometry, background_speed_mps=self.exterior_speed_mps
+            )
+        model = self.reference_cache["eikonal_geometry"]
         slowness = model.extend(
             1 / self.background, background=1 / self.exterior_speed_mps
         )

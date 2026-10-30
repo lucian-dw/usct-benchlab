@@ -212,7 +212,7 @@ def compute_baseline_improvement_metrics(
     *,
     mask: np.ndarray | None = None,
     prefix: str = "water_",
-) -> dict[str, float | bool]:
+) -> dict[str, float | bool | str | None]:
     """Compare reconstruction RMSE against a baseline image or scalar."""
 
     pred, truth = _masked_values(prediction, target, mask)
@@ -225,7 +225,7 @@ def compute_baseline_improvement_metrics(
     reconstruction_rmse = math.sqrt(float(np.mean((pred - truth) ** 2)))
     baseline_rmse = math.sqrt(float(np.mean((base_values - truth) ** 2)))
     if baseline_rmse == 0.0:
-        relative = math.inf if reconstruction_rmse < baseline_rmse else 0.0
+        relative = None
     else:
         relative = (baseline_rmse - reconstruction_rmse) / baseline_rmse
     return {
@@ -233,6 +233,9 @@ def compute_baseline_improvement_metrics(
         f"{prefix}reconstruction_rmse": reconstruction_rmse,
         f"{prefix}absolute_rmse_improvement": baseline_rmse - reconstruction_rmse,
         f"{prefix}relative_rmse_improvement": relative,
+        f"{prefix}relative_rmse_improvement_status": (
+            "zero_baseline" if baseline_rmse == 0 else "available"
+        ),
         f"{prefix}improved": reconstruction_rmse < baseline_rmse,
     }
 

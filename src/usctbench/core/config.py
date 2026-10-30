@@ -94,19 +94,6 @@ def expand_config_value(value: Any) -> Any:
     return value
 
 
-def coerce_bool(value: Any) -> bool:
-    """Parse config booleans from YAML scalars or environment-string values."""
-
-    if isinstance(value, bool):
-        return value
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off", ""}:
-        return False
-    raise ValueError(f"invalid boolean: {value!r}")
-
-
 def _expand_env(value: str) -> str:
     def replace_default(match: re.Match[str]) -> str:
         name, default = match.group(1), match.group(2)

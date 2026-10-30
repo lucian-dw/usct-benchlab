@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Manual BenchLab/WUST acceptance: one fixture generation, one reconstruction."""
 
-from usctbench.core.config import prepare_config
-
 import argparse
 import json
 from pathlib import Path
 import sys
 import time
 
-from usctbench.algorithms.fwi.algorithm import WUSTFWIAlgorithm
+import numpy as np
+
+from usctbench import run, evaluate
 from usctbench.algorithms.fwi.io import read_artifact
-from usctbench.core.io import write_case_hdf5, write_result_hdf5
+from usctbench.core.io import write_case_hdf5, read_result_hdf5
 from usctbench.core.schema import (
     AlgorithmConfig,
     GeometrySpec,
@@ -99,11 +99,7 @@ def main():
         },
     )
     (args.out / "config.json").write_text(config.model_dump_json(indent=2))
-    result = WUSTFWIAlgorithm().run(
-        case, prepare_config(WUSTFWIAlgorithm().name, config, case=case)
-    )
-    write_result_hdf5(result, args.out / "result.h5")
-    (args.out / "metrics.json").write_text(json.dumps(result.metrics, indent=2))
+    result = run("fwi_wust", case, config, out=args.out / "run")
     if result.status not in {"completed", "budget_exhausted"}:
         raise RuntimeError(result.failure_reason)
     fixture.check_reconstruction(
@@ -112,6 +108,10 @@ def main():
     preparation = result.metrics["wust"]["observation_preparation"]
     assert preparation["conversion"] == "conjugate"
     assert preparation["canonical_to_input_permutation_1based"] == [2, 1]
+    saved = read_result_hdf5(args.out / "run" / "result.h5")
+    np.testing.assert_array_equal(saved.sound_speed_mps, result.sound_speed_mps)
+    summary = evaluate(args.out / "run")
+    assert summary["passed"] and len(summary["records"]) == 1
     report = {
         "passed": True,
         "backend": args.backend,
@@ -122,6 +122,7 @@ def main():
         "reconstruction_matlab_invocations": 1,
         "stop_reason": result.metrics["stop_reason"],
         "environment": result.metrics["wust"]["environment"],
+        "public_save_evaluate_read_passed": summary["passed"],
     }
     (args.out / "gate.json").write_text(json.dumps(report, indent=2))
     print(json.dumps(report))

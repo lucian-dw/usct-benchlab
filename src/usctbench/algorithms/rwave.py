@@ -11,6 +11,7 @@ from usctbench.algorithms.ray import (
     speed_bounds,
 )
 from usctbench.data.calibration import fit_water_source, prepare_source_spectrum
+from usctbench.data.pressure import pressure_units
 from usctbench.core.schema import AlgorithmConfig, ReconstructionResult, USCTCase
 from usctbench.core.stopping import BudgetExhausted
 from usctbench.operators.ray_born import RayBornForward, RayBornOperator, born_jacobian
@@ -232,7 +233,6 @@ class RayBornAlgorithm:
             case,
             config,
             observed,
-            default_iterations=4 if mode == "nonlinear" else 30,
             weights=weights,
             valid_mask=valid,
             iteration_unit=(
@@ -350,7 +350,6 @@ class RayBornAlgorithm:
                     control,
                     initial=np.zeros(case.grid.shape),
                     offset=offset,
-                    to_image=to_speed,
                     lower=1 / bounds[1] ** 2 - operator.background_squared_slowness,
                     upper=1 / bounds[0] ** 2 - operator.background_squared_slowness,
                     reference=operator.background_squared_slowness,
@@ -433,10 +432,7 @@ class RayBornAlgorithm:
                     "background_relinearization": mode == "nonlinear",
                     "forward_model": green_settings["green_backend"],
                     "observation_domain": "complex_pressure",
-                    "observation_units": case.metadata.get("pressure_contract", {}).get(
-                        "data_units",
-                        case.metadata.get("frequency_data_units", "unknown"),
-                    ),
+                    "observation_units": pressure_units(case.metadata),
                     "nonlinear_prediction_model": (
                         green_settings["green_backend"]
                         if mode == "nonlinear"

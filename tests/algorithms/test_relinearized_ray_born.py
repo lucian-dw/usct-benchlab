@@ -34,6 +34,7 @@ def nonlinear_case():
 
 def config(*, max_iterations=3, run_controls=None, evaluation=None, **parameters):
     return AlgorithmConfig(
+        diagnostics=True,
         parameters={
             "variant": "wkb_nonlinear",
             "inner_iterations": 4,

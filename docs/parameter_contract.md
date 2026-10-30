@@ -14,6 +14,8 @@ Python calls resolve through **core.config.prepare_config** to the same objects.
 - **image_evaluation**: foreground/full-image reporting policy.
 - **deployment**: explicit backend, runtime root, MATLAB executable, device and
   scratch root. These are host settings, not algorithm hyperparameters.
+- **diagnostics**: host opt-in to detailed trial/direction/inner-solve traces;
+  defaults to false. Accepted-iteration history and work counts remain available.
 
 Unknown names fail. There is one regularization name,
 **regularization_lambda**; the quadratic objective coefficient is its square.
@@ -47,6 +49,14 @@ update_rtol is injected. See [evaluation](evaluation.md).
 
 Names removed during this refactor are listed once in [migration notes](../CHANGELOG.md);
 old YAML aliases are not permanent runtime APIs.
+
+Public `run` prepares the request once. A direct algorithm call must pass
+`prepare_config(name, request, case=case)`; it does not implicitly re-prepare.
+`make_agent_config` only admits scientific parameters and requested budgets.
+Case capabilities report observations, not resolved host policy.
+`deployment.green_device` is the optional zero-based CuPy device for Full-Green;
+it is separate from WUST's explicit CPU/GPU backend.
+
 ## IRLS migration
 
 `irls_max_inner_steps` is the maximum CG steps between robust weight refreshes.

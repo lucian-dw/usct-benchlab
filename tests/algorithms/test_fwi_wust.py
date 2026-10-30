@@ -11,7 +11,7 @@ from usctbench.algorithms.fwi import algorithm as module
 from usctbench.algorithms.fwi.io import (
     frequency_input,
     read_artifact,
-    write_artifact,
+    publish_result,
 )
 from usctbench.algorithms.fwi.parameters import WUSTParameters
 from usctbench.core.algorithm_specs import make_agent_config, SPECS
@@ -110,7 +110,7 @@ class FakeClient:
             "records": [{"loss_before_update": 1.0} for _ in range(n)],
             "final_data_residual": None,
         }
-        return write_artifact(
+        return publish_result(
             req["output_manifest"],
             "wust.reconstruction",
             meta,

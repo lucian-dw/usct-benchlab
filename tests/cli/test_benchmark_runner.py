@@ -25,6 +25,8 @@ def test_native_algorithm_public_run(synthetic_case, name):
     assert result.status in {"completed", "budget_exhausted"}
     assert np.isfinite(result.sound_speed_mps).all()
     assert result.metrics["data_relative_residual"] >= 0
+    assert "direction_checks" not in result.metrics
+    assert "gradient_checks" not in result.metrics
 
 
 def test_pressure_algorithm_rejects_tof_only_case(synthetic_case):
@@ -204,20 +206,32 @@ def test_suite_resolves_all_paths_relative_to_yaml(
     (tmp_path / "algorithm.yaml").write_text(
         "name: straight_sirt\nrun_controls:\n  max_iterations: 2\n"
     )
+    (tmp_path / "cgls.yaml").write_text(
+        "name: straight_cgls\nrun_controls:\n  max_iterations: 2\n"
+    )
     path = tmp_path / "suite.yaml"
     path.write_text(
         yaml.safe_dump(
             {
                 "case_glob": "cases/*.h5",
                 "outputs": {"root": "runs"},
-                "algorithms": [{"name": "straight_sirt", "config": "algorithm.yaml"}],
+                "algorithms": [
+                    {"name": "straight_sirt", "config": "algorithm.yaml"},
+                    {"name": "straight_cgls", "config": "cgls.yaml"},
+                ],
             }
         )
     )
     monkeypatch.chdir(tmp_path.parent)
+    from usctbench.benchmark import runner
+    from unittest.mock import Mock
+
+    reader = Mock(wraps=runner.read_case_hdf5)
+    monkeypatch.setattr(runner, "read_case_hdf5", reader)
     result = suite(path)
     assert result["passed"]
-    assert len(result["records"]) == 1
+    assert len(result["records"]) == 2
+    assert reader.call_count == 1
     assert result["num_cases"] == 1
     assert result["run_root"].startswith(str(tmp_path / "runs"))
     empty = tmp_path / "empty.yaml"

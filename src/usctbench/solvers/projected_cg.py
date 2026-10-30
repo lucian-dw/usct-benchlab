@@ -16,7 +16,6 @@ def projected_cg(
     reference,
     lower,
     upper,
-    to_image,
     offset=0.0,
     damping=0.0,
     regularization="identity",
@@ -147,7 +146,7 @@ def projected_cg(
             control.observed.shape
         )
         cost = objective(x, prediction)
-        if control.observe(0, x, prediction, objective=cost, sound_speed=to_image(x)):
+        if control.observe(0, x, prediction, objective=cost):
             return output()
         block = irls_max_inner_steps
         weights = precision(prediction)
@@ -286,7 +285,6 @@ def projected_cg(
                 prediction,
                 objective=cost,
                 update_relative=relative_update,
-                sound_speed=to_image(x),
             ):
                 break
             if projected or trial:

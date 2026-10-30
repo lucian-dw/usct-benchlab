@@ -129,7 +129,6 @@ class BentRayAlgorithm:
             case,
             config,
             observed,
-            default_iterations=4,
             weights=weights,
             valid_mask=valid,
             iteration_unit="Gauss-Newton outer step",
@@ -259,8 +258,6 @@ class BentRayAlgorithm:
                 "model_parameterization": (
                     {"kind": "pixels"} if basis is None else basis.metadata()
                 ),
-                "true_bent_ray": True,
-                "uses_true_bent_rays": True,
                 "surrogate_travel_time_backend": False,
                 "full_external_eikonal_solver": False,
                 "method_family": "first_arrival_eikonal",
@@ -288,7 +285,6 @@ class BentRayAlgorithm:
                 ),
                 "roi_update_only": roi_only,
                 "roi_laplacian": False,
-                "ground_truth_used_for_initialization": False,
             }
         )
 

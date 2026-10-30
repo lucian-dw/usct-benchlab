@@ -290,7 +290,7 @@ def test_control_rejected_objective_cannot_mismatch_image_and_prediction():
     cfg = prepare_config(
         "straight_cgls", AlgorithmConfig(run_controls={"max_iterations": 4})
     )
-    control = InversionControl(case, cfg, obs, default_iterations=4)
+    control = InversionControl(case, cfg, obs)
     initial = np.zeros((4, 4))
     control.observe(0, initial, initial, objective=1)
     control.observe(1, np.ones((4, 4)), obs, objective=np.nan)

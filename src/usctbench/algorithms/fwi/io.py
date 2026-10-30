@@ -9,7 +9,7 @@ import h5py
 import numpy as np
 
 
-def write_artifact(path, schema, metadata, arrays, axes, units):
+def publish_result(path, schema, metadata, arrays, axes, units):
     path = Path(path)
     data = path.with_suffix(".h5")
     if path.exists() or data.exists():
@@ -67,16 +67,7 @@ def read_artifact(path, schema):
         for key, spec in doc["arrays"].items():
 
             def read(dataset):
-                if not isinstance(handle.get(dataset, getlink=True), h5py.HardLink):
-                    raise ValueError("External HDF5 links forbidden")
-                value = handle[dataset]
-                if (
-                    value.is_virtual
-                    or value.external
-                    or Path(value.file.filename).resolve() != data
-                ):
-                    raise ValueError("External HDF5 storage forbidden")
-                return value[...]
+                return handle[dataset][...]
 
             if spec["dtype"].startswith("complex"):
                 value = read(spec["real_dataset"]) + 1j * read(spec["imag_dataset"])
@@ -118,40 +109,9 @@ def frequency_input(case, path):
     valid = np.broadcast_to(mask, shape)
     if not np.isfinite(pressure[valid]).all():
         raise ValueError("Nonfinite valid pressure")
-    declared = dict(case.metadata.get("pressure_contract", {}))
-    if (
-        not declared
-        and case.metadata.get("conversion") == "pressure_preserving_kwave_v73"
-        and case.metadata.get("spectrum_quadrature")
-        == "dt * sum(p(t) * exp(+i*2*pi*f*t))"
-    ):
-        declared = {
-            "fourier_sign": 1,
-            "real_pressure": True,
-            "pressure_type": "total_pressure",
-            "data_units": "unknown",
-            "spectrum_normalization": "dtft_dt",
-        }
-    required = {
-        "fourier_sign",
-        "real_pressure",
-        "pressure_type",
-        "data_units",
-        "spectrum_normalization",
-    }
-    if set(declared) != required or declared["pressure_type"] != "total_pressure":
-        raise ValueError(
-            "Explicit total-pressure contract required; ToF/scattered/ratio data are not FWI pressure"
-        )
-    if type(declared["fourier_sign"]) is not int or declared["fourier_sign"] not in (
-        -1,
-        1,
-    ):
-        raise ValueError(
-            "Unknown DTFT sign; time-harmonic convention alone is insufficient"
-        )
-    if declared["fourier_sign"] == 1 and declared["real_pressure"] is not True:
-        raise ValueError("Positive-sign conversion requires declared real pressure")
+    from usctbench.data.pressure import require_total_pressure_contract
+
+    declared = require_total_pressure_contract(case.metadata)
     metadata = {
         **declared,
         "grid": {
@@ -187,4 +147,4 @@ def frequency_input(case, path):
         "tx_xy_m": "m",
         "rx_xy_m": "m",
     }
-    return write_artifact(path, "wust.frequency_input", metadata, arrays, axes, units)
+    return publish_result(path, "wust.frequency_input", metadata, arrays, axes, units)

@@ -320,7 +320,6 @@ def test_quadratic_weights_roi_and_penalty_match_dense_augmented_reference(
         prepare_config("straight_cgls", config),
         observed,
         weights=weights,
-        default_iterations=30,
     )
     actual, metrics = projected_cg(
         DenseOperator(),
@@ -329,7 +328,6 @@ def test_quadratic_weights_roi_and_penalty_match_dense_augmented_reference(
         reference=np.ones(shape),
         lower=-np.inf,
         upper=np.inf,
-        to_image=lambda x: x,
         damping=0.4,
         regularization=kind,
         roi=roi,
@@ -381,7 +379,7 @@ def test_bounded_complex_fixed_born_offset_has_analytic_kkt_solution():
     config = prepare_config(
         "straight_cgls", AlgorithmConfig(run_controls={"max_iterations": 10})
     )
-    control = InversionControl(case, config, observed, default_iterations=10)
+    control = InversionControl(case, config, observed)
     actual, metrics = projected_cg(
         ComplexOperator(),
         control,
@@ -390,7 +388,6 @@ def test_bounded_complex_fixed_born_offset_has_analytic_kkt_solution():
         reference=np.full((1, 2), 1700.0**-2),
         lower=0,
         upper=1300.0**-2 - 1700.0**-2,
-        to_image=lambda x: x,
     )
     np.testing.assert_allclose(actual, [[0, 1e-9 / 65]], rtol=1e-12, atol=1e-24)
     np.testing.assert_allclose(
@@ -423,7 +420,6 @@ def test_exact_data_fit_does_not_bypass_regularizer():
             },
         ),
         np.ones((2, 2)),
-        default_iterations=4,
     )
     result, metrics = projected_cg(
         Identity(),
@@ -432,7 +428,6 @@ def test_exact_data_fit_does_not_bypass_regularizer():
         reference=np.zeros((2, 2)),
         lower=-np.inf,
         upper=np.inf,
-        to_image=lambda x: x,
         damping=1,
     )
     np.testing.assert_allclose(result, 0.5, atol=1e-15)

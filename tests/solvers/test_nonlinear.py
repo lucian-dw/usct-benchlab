@@ -1,7 +1,7 @@
 """Nonlinear outer-loop scale, feasible-step and acceptance regressions."""
 
 from types import SimpleNamespace
-from tests.solvers.test_linear import DenseJacobian
+from tests.helpers import DenseJacobian
 
 import numpy as np
 import pytest
@@ -65,6 +65,7 @@ def solve(monkeypatch):
             measurement=MeasurementSpec(domain="features", tof_s=observed),
         )
         config = AlgorithmConfig(
+            diagnostics=True,
             parameters={},
             run_controls={
                 "max_iterations": 1,
@@ -76,7 +77,7 @@ def solve(monkeypatch):
         from usctbench.core.config import prepare_config
 
         control = InversionControl(
-            case, prepare_config("bent_ray_gn", config), observed, default_iterations=1
+            case, prepare_config("bent_ray_gn", config), observed
         )
         forward = _DenseForward(matrix, initial)
         settings = dict(
@@ -366,6 +367,7 @@ def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution(
         measurement=MeasurementSpec(domain="features", delta_tof_s=observed),
     )
     config = AlgorithmConfig(
+        diagnostics=True,
         parameters={},
         run_controls={
             "max_iterations": 3,
@@ -375,9 +377,7 @@ def test_nonlinear_solver_rejects_uphill_smoothing_and_recovers_dense_solution(
     )
     from usctbench.core.config import prepare_config
 
-    control = InversionControl(
-        case, prepare_config("straight_cgls", config), observed, default_iterations=3
-    )
+    control = InversionControl(case, prepare_config("straight_cgls", config), observed)
     problem = prepare_born_problem(Forward(), initial, (1400, 1600))
     result, metrics = gauss_newton(
         problem,

@@ -105,9 +105,6 @@ class CGLSParameters(RayParameters):
     coverage_preconditioner_normalize: bool = parameter(
         True, "Normalize positive ROI coverage scales by their median."
     )
-    boundary_band_pixels: NonnegativeInt = parameter(
-        4, "Post-hoc boundary diagnostic width; never used for stopping.", "pixels"
-    )
 
 
 class SIRTParameters(RayParameters):
@@ -121,9 +118,6 @@ class SIRTParameters(RayParameters):
     )
     smooth_every: NonnegativeInt = parameter(
         0, "Smoothing interval; zero disables smoothing.", "complete iterations"
-    )
-    boundary_band_pixels: NonnegativeInt = parameter(
-        4, "Post-hoc boundary diagnostic width.", "pixels"
     )
 
 

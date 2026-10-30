@@ -18,3 +18,12 @@ Runtime includes preparation and solve. process_peak_rss_mib is the current
 process's cumulative peak RSS, not incremental per-case or GPU memory.
 
 See [evaluation](evaluation.md) for image metrics and missing-GT semantics.
+
+Default history is one compact record per accepted iteration, including the
+actual objective, update/optimality measures and inner solve summary. Setting
+`diagnostics: true` on the run configuration adds trial/direction checks; it
+does not change the numerical decisions. The current accepted Linearization is
+reused by the next step and is not stored in historical snapshots.
+
+Zero observation energy or zero baseline RMSE yields a null relative measure
+with its availability status; absolute errors remain reported.

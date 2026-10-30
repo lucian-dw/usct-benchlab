@@ -218,15 +218,18 @@ def suite(path):
         or f"{definition.get('name', path.stem)}_{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
     )
     root = relative(definition.get("outputs", {}).get("root", "../../runs")) / run_id
-    for item in algorithms:
-        config = relative(item["config"])
-        for case_path in cases:
-            case = read_case_hdf5(case_path)
+    configs = [
+        (item["name"], expand_config_value(load_yaml(relative(item["config"]))))
+        for item in algorithms
+    ]
+    for case_path in cases:
+        case = read_case_hdf5(case_path)
+        for name, config in configs:
             run(
-                item["name"],
+                name,
                 case,
                 config,
-                root / item["name"] / case.case_id,
+                root / name / case.case_id,
                 host_limits=definition.get("host_limits"),
                 deployment=definition.get("deployment"),
             )

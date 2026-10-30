@@ -7,6 +7,16 @@ import pytest
 from usctbench.metrics import compute_regional_image_metrics, non_water_tissue_mask
 
 
+def test_zero_baseline_has_no_relative_improvement():
+    from usctbench.metrics import compute_baseline_improvement_metrics
+
+    truth = np.full((3, 3), 1500.0)
+    result = compute_baseline_improvement_metrics(truth + 2, truth, 1500.0)
+    assert result["water_relative_rmse_improvement"] is None
+    assert result["water_relative_rmse_improvement_status"] == "zero_baseline"
+    assert result["water_absolute_rmse_improvement"] == -2.0
+
+
 def phantom():
     truth = np.full((40, 40), 1500.0)
     truth[8:32, 8:32] = 1450

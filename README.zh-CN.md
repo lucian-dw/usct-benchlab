@@ -74,6 +74,12 @@ usct bench --suite configs/benchmarks/synthetic_demo.yaml
 静态 schema，高级求解选项、运行时路径不开放给默认自主 Agent。
 详见 [Agent API](docs/agent_algorithm_api.md)。
 
+公开 runner 每次只准备一次配置；直接调用底层算法需传
+`prepare_config(name, config, case=case)` 的结果。Bent 与非线性 Born 共用
+GN 主循环，但保留各自的可行 trial 定义；直线 CGLS 与固定背景 Born 共用有界投影 CG，
+后者明确处理实模型、复观测。默认只记录接受迭代及实际工作量，详细试探记录由
+`diagnostics: true` 显式开启。
+
 ## 输入与结果
 
 - 属性图生成带明确来源的模型 ToF；不能称作已采集压力。

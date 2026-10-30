@@ -78,6 +78,13 @@ Unknown parameters fail explicitly. Agent permissions come from the static
 schema; advanced numerical settings and runtime paths are not autonomous Agent
 inputs. See [Agent API](docs/agent_algorithm_api.md).
 
+The public runner prepares each request once; direct low-level calls use
+`algorithm.run(case, prepare_config(name, config, case=case))`.
+Bent and nonlinear Born share one Gauss-Newton driver with distinct feasible
+trial policies. Straight CGLS and fixed Born share bounded projected CG, including
+real-model/complex-data gradients. Detailed trial traces require
+`diagnostics: true`; default results retain accepted iterations and actual work.
+
 ## Inputs and outputs
 
 - Property maps become explicitly labeled model-generated ToF cases.

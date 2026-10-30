@@ -8,7 +8,7 @@ import pytest
 
 from usctbench.core.io import read_case_hdf5
 from usctbench.data.conversion import _grid_from_coordinates
-from usctbench.data.conversion import convert_nbp_slice2d_mat
+from usctbench.data.nbpslice2d import convert_nbp_slice2d_mat
 from usctbench.operators.straight_ray import StraightRayProjector
 from usctbench.data.nbpslice2d import (
     inspect_nbp_slice2d_zip,
@@ -40,7 +40,7 @@ def test_prepare_synthetic_demo_writes_hdf5_cases(tmp_path):
 
 
 def test_volume_axes_units_and_missing_coordinates_are_explicit(tmp_path):
-    from usctbench.data.conversion import convert_speed_mat_volume
+    from usctbench.data.openbreastus import convert_speed_mat_volume
 
     source = tmp_path / "volume.mat"
     image = np.arange(24).reshape(4, 6) + 1480.0
@@ -112,7 +112,7 @@ def test_rectangular_maps_and_labels_share_physical_cell_centers():
 
 
 def test_reader_does_not_intercept_caller_oserror(tmp_path):
-    from usctbench.data.conversion import _open_speed_volume
+    from usctbench.data.openbreastus import _open_speed_volume
 
     path = tmp_path / "speed.mat"
     with h5py.File(path, "w") as handle:

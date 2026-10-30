@@ -75,6 +75,7 @@ def gauss_newton(
     penalty = prepare_regularizer(problem.regularization)
     roi = problem.roi
     attempts, direction_checks, gradient_checks = [], [], []
+    diagnostics = control.config.diagnostics
     initial_gradient_norm = None
     derivative_kind = None
 
@@ -131,13 +132,18 @@ def gauss_newton(
             gradient_relative = gradient_norm / max(
                 initial_gradient_norm, np.finfo(float).tiny
             )
-            gradient_checks.append(
-                {
-                    "iteration": control.monitor.history[-1]["iteration"],
-                    "norm": gradient_norm,
-                    "relative_to_initial": gradient_relative,
-                }
-            )
+            control.monitor.history[-1]["optimizer_diagnostics"] = {
+                "gradient_norm": gradient_norm,
+                "gradient_relative": gradient_relative,
+            }
+            if diagnostics:
+                gradient_checks.append(
+                    {
+                        "iteration": control.monitor.history[-1]["iteration"],
+                        "norm": gradient_norm,
+                        "relative_to_initial": gradient_relative,
+                    }
+                )
             if gradient_relative <= gradient_rtol:
                 control.monitor.finish(
                     "stationary_surrogate_gradient"
@@ -204,15 +210,16 @@ def gauss_newton(
                 direction_scale = problem.fallback_step_norm
             gradient_step = -feasible_gradient * (direction_scale / feasible_norm)
             proposals.append(("projected_gradient", gradient_step))
-            direction_checks.append(
-                {
-                    "iteration": iteration,
-                    "raw_directional_derivative": raw_slope,
-                    "smoothed_directional_derivative": smoothed_slope,
-                    "smoothing_rejected": smoothed_slope is not None
-                    and smoothed_slope >= 0,
-                }
-            )
+            if diagnostics:
+                direction_checks.append(
+                    {
+                        "iteration": iteration,
+                        "raw_directional_derivative": raw_slope,
+                        "smoothed_directional_derivative": smoothed_slope,
+                        "smoothing_rejected": smoothed_slope is not None
+                        and smoothed_slope >= 0,
+                    }
+                )
             finite_trial_seen = nonfinite_trial_seen = False
             for proposal_name, proposal in proposals:
                 for backtrack, (candidate, fraction) in enumerate(
@@ -237,7 +244,8 @@ def gauss_newton(
                     }
                     if not np.isfinite(slope) or slope >= 0:
                         row["rejection"] = "non_descent_projected_step"
-                        attempts.append(row)
+                        if diagnostics:
+                            attempts.append(row)
                         continue
                     try:
                         trial = control.call(
@@ -247,7 +255,8 @@ def gauss_newton(
                     except FloatingPointError:
                         nonfinite_trial_seen = True
                         row["rejection"] = "nonfinite_trial_prediction_or_objective"
-                        attempts.append(row)
+                        if diagnostics:
+                            attempts.append(row)
                         continue
                     finite_trial_seen = True
                     accepted = bool(
@@ -257,7 +266,8 @@ def gauss_newton(
                         objective=trial_cost if np.isfinite(trial_cost) else None,
                         accepted=accepted,
                     )
-                    attempts.append(row)
+                    if diagnostics:
+                        attempts.append(row)
                     if accepted:
                         break
                 if accepted:
@@ -290,9 +300,6 @@ def gauss_newton(
     selected, metrics = control.output(initial_state)
     metrics.update(
         prior_reference_source=problem.prior_source,
-        line_search_history=attempts,
-        direction_checks=direction_checks,
-        gradient_checks=gradient_checks,
         gradient_rtol=gradient_rtol,
         inner_solver=inner_solver,
         inner_options=inner_options,
@@ -301,4 +308,10 @@ def gauss_newton(
         derivative_kind=derivative_kind,
         nonlinear_background_updates=max(0, len(control.monitor.history) - 1),
     )
+    if diagnostics:
+        metrics.update(
+            line_search_history=attempts,
+            direction_checks=direction_checks,
+            gradient_checks=gradient_checks,
+        )
     return selected, metrics

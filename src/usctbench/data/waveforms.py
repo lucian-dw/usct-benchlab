@@ -14,6 +14,7 @@ import h5py
 import numpy as np
 
 from usctbench.core.io import write_case_hdf5
+from usctbench.data.pressure import dtft_pressure_contract
 from usctbench.core.provenance import MeasurementProvenance, stamp_measurement_metadata
 from usctbench.core.schema import (
     GeometrySpec,
@@ -294,6 +295,7 @@ def convert_kwave_pressure_mat(
             "spectrum_quadrature": "dt * sum(p(t) * exp(+i*2*pi*f*t))",
             "pressure_axes": ["time", "tx", "rx"],
             "frequency_axes": ["frequency", "tx", "rx"],
+            "pressure_contract": dtft_pressure_contract(),
             "source_channel_axes": list(axes),
             "selected_tx_indices": tx.tolist(),
             "selected_rx_indices": rx.tolist(),

@@ -10,7 +10,7 @@ import numpy as np
 
 from usctbench.core.schema import ReconstructionResult, ResultStatus
 
-from .io import frequency_input, read_artifact, write_artifact
+from .io import frequency_input, read_artifact, publish_result
 from .runtime import Deadline, RuntimeFailure, WUSTClient
 
 
@@ -68,7 +68,7 @@ def prepare_request(case, p, folder, max_updates, backend):
     input_path = folder / "frequency.json"
     initial_path = folder / "initial.json"
     frequency_input(case, input_path)
-    write_artifact(
+    publish_result(
         initial_path,
         "wust.initial_model",
         {"initialization": p.initialization, "mask_policy": mask_policy},
@@ -167,7 +167,7 @@ class WUSTFWIAlgorithm:
                 "forward_model": "WUST_Helmholtz",
                 "observation_domain": "complex_pressure",
                 "observation_units": case.metadata["pressure_contract"]["data_units"],
-                "final_data_residual": None,
+                "final_data_residual": meta.get("final_data_residual"),
                 "stop_reason": "schedule_complete" if complete else "max_iterations",
                 "termination_category": "completion" if complete else "budget",
                 "converged": False,

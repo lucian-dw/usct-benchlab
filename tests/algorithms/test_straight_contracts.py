@@ -46,16 +46,13 @@ def test_inconsistent_row_action_matches_its_documented_model(subsets, expected)
     )
     from usctbench.core.config import prepare_config
 
-    control = InversionControl(
-        case, prepare_config("straight_cgls", config), observed, default_iterations=40
-    )
+    control = InversionControl(case, prepare_config("straight_cgls", config), observed)
     state, metrics = row_action(
         Operator(),
         control,
         initial=np.zeros((1, 1)),
         reference=np.ones((1, 1)),
         project=lambda x: x,
-        to_image=lambda x: x,
         relaxation=1,
         subsets=subsets,
     )

@@ -9,18 +9,7 @@ from usctbench.core.stopping import WorkLedger
 from usctbench.core.run_controls import RunControls
 from usctbench.solvers.linear import solve_linearized
 from usctbench.operators.regularization import regularizer
-
-
-class DenseJacobian:
-    def __init__(self, matrix, shape):
-        self.matrix, self.shape = matrix, shape
-        self.data_dtype = matrix.dtype
-
-    def forward(self, x):
-        return self.matrix @ x.ravel()
-
-    def adjoint(self, y):
-        return (self.matrix.conj().T @ y).real.reshape(self.shape)
+from tests.helpers import DenseJacobian
 
 
 def controls(precision):
