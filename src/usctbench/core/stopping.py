@@ -8,6 +8,27 @@ import numpy as np
 
 from usctbench.core.run_controls import RunControls
 
+STOP_CATEGORIES = {
+    "not_terminated": "not_terminated",
+    "max_iterations": "budget",
+    "time_budget": "budget",
+    "forward_calls_budget": "budget",
+    "adjoint_calls_budget": "budget",
+    "numerical_failure": "failure",
+    "linear_solver_breakdown": "failure",
+    "line_search_failed": "failure",
+    "exact_data_fit": "quality_target",
+    "target_residual": "quality_target",
+    "noise_discrepancy": "quality_target",
+    "stationary_gradient": "stationarity",
+    "stationary_projected_gradient": "stationarity",
+    "stationary_surrogate_gradient": "stationarity",
+    "stationary_surrogate_projected_gradient": "stationarity",
+    "small_model_update": "stagnation",
+    "objective_plateau": "stagnation",
+    "validation_plateau": "stagnation",
+}
+
 
 class BudgetExhausted(RuntimeError):
     def __init__(self, reason):
@@ -27,6 +48,7 @@ class WorkLedger:
         self.policy, self.clock = policy, clock
         self.started = clock()
         self.counts = {"forward_calls": 0, "adjoint_calls": 0}
+        self.seconds = {}
 
     @property
     def elapsed_s(self):
@@ -48,7 +70,11 @@ class WorkLedger:
             raise BudgetExhausted(f"{counter}_budget")
         self.counts[counter] += 1
         self.counts[kind] = self.counts.get(kind, 0) + 1
-        return function(*args, **kwargs)
+        started = self.clock()
+        try:
+            return function(*args, **kwargs)
+        finally:
+            self.seconds[kind] = self.seconds.get(kind, 0.0) + self.clock() - started
 
 
 class StopMonitor:
@@ -253,35 +279,6 @@ class StopMonitor:
             "budget_scope": "operator_calls; time_checked_between_calls",
             "has_complete_checkpoint": self.last_state is not None,
             "quality_target_met": selected_quality_target_met,
-            "termination_category": (
-                "not_terminated"
-                if self.reason is None
-                else (
-                    "budget"
-                    if "budget" in self.reason or self.reason == "max_iterations"
-                    else (
-                        "failure"
-                        if self.reason
-                        in {
-                            "numerical_failure",
-                            "linear_solver_breakdown",
-                            "line_search_failed",
-                        }
-                        else (
-                            "quality_target"
-                            if self.reason
-                            in {
-                                "exact_data_fit",
-                                "target_residual",
-                                "noise_discrepancy",
-                            }
-                            else (
-                                "stationarity"
-                                if self.reason == "stationary_gradient"
-                                else "stagnation"
-                            )
-                        )
-                    )
-                )
-            ),
+            "operator_seconds": dict(self.work.seconds),
+            "termination_category": STOP_CATEGORIES[self.reason or "not_terminated"],
         }

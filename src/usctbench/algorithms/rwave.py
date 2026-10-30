@@ -266,22 +266,8 @@ class RayBornAlgorithm:
         roi_only = p.roi_update_only
         roi = case.grid.roi_mask if roi_only else None
 
-        def exhausted_result(exc):
-            control.monitor.finish(exc.reason)
-            _, metrics = control.output(1 / background**2)
-            metrics.update(
-                backend="native_ray_born",
-                calibration_completed=False,
-            )
-
-            return ReconstructionResult(
-                algorithm=self.name,
-                case_id=case.case_id,
-                sound_speed_mps=background.copy(),
-                metrics=metrics,
-            )
-
         try:
+            control.monitor.set_stage("setup_background")
             operator = control.call(
                 "setup_background",
                 RayBornOperator,
@@ -294,210 +280,216 @@ class RayBornAlgorithm:
                 max_cache_bytes=int(p.max_cache_bytes),
                 **green_settings,
             )
-        except BudgetExhausted as exc:
-            return exhausted_result(exc)
-        control.work.counts["setup_eikonal_source_solves"] = operator.eikonal_solves
+            control.work.counts["setup_eikonal_source_solves"] = operator.eikonal_solves
 
-        def to_speed(delta):
-            return 1 / np.sqrt(operator.background_squared_slowness + delta)
+            def to_speed(delta):
+                return 1 / np.sqrt(operator.background_squared_slowness + delta)
 
-        calibration = {
-            "method": "configured_source" if source is not None else "unit_source",
-            "specimen_data_used": False,
-        }
-        # An independently acquired water trace identifies source amplitude and
-        # phase. Scale the Jacobian too; replacing only the additive background
-        # is incorrect whenever the actual source differs from unity.
-        if case.measurement.water_reference is not None and source is None:
-            water_operator = RayBornOperator(
-                case.grid,
-                case.geometry,
-                case.measurement.frequencies_hz,
-                background_sound_speed_mps=c0,
-                exterior_speed_mps=c0,
-                max_cache_bytes=0,
-            )
-            try:
+            calibration = {
+                "method": "configured_source" if source is not None else "unit_source",
+                "specimen_data_used": False,
+            }
+            # An independently acquired water trace identifies source amplitude and
+            # phase. Scale the Jacobian too; replacing only the additive background
+            # is incorrect whenever the actual source differs from unity.
+            if case.measurement.water_reference is not None and source is None:
+                water_operator = RayBornOperator(
+                    case.grid,
+                    case.geometry,
+                    case.measurement.frequencies_hz,
+                    background_sound_speed_mps=c0,
+                    exterior_speed_mps=c0,
+                    max_cache_bytes=0,
+                )
                 water_prediction = control.call(
                     "source_calibration", water_operator.background_data
                 )
-            except BudgetExhausted as exc:
-                return exhausted_result(exc)
-            source, calibration = fit_water_source(
-                water_prediction,
-                case.measurement.water_reference,
-                train_mask=np.broadcast_to(
-                    operator.valid_pair_mask, water_prediction.shape
-                ),
-            )
-            operator.source_spectrum = source.copy()
-        try:
+                source, calibration = fit_water_source(
+                    water_prediction,
+                    case.measurement.water_reference,
+                    train_mask=np.broadcast_to(
+                        operator.valid_pair_mask, water_prediction.shape
+                    ),
+                )
+                operator.source_spectrum = source.copy()
             offset = control.call("background_prediction", operator.background_data)
-        except BudgetExhausted as exc:
-            return exhausted_result(exc)
-        damping = p.regularization_lambda**2
-        scaling = str(p.regularization_scaling)
-        penalty_scale = 1.0
-        if scaling == "relative_jacobian_diagonal":
-            try:
+            damping = p.regularization_lambda**2
+            scaling = str(p.regularization_scaling)
+            penalty_scale = 1.0
+            if scaling == "relative_jacobian_diagonal":
                 diagonal = control.call(
                     "normal_diagonal", operator.normal_diagonal, control.precision
                 )
-            except BudgetExhausted as exc:
-                return exhausted_result(exc)
-            active_diagonal = diagonal[roi] if roi is not None else diagonal.ravel()
-            positive = active_diagonal[active_diagonal > 0]
-            if not positive.size:
-                raise ValueError("no illuminated training pixels")
-            penalty_scale = float(np.median(positive))
-            damping *= penalty_scale
-        regularization = str(p.regularization)
-        length_wavelengths = float(p.regularization_length_wavelengths)
-        physical_length = None
-        if length_wavelengths:
-            if regularization not in {"laplacian", "roughness"}:
-                raise ValueError(
-                    "physical regularization length requires a Laplacian penalty"
+                active_diagonal = diagonal[roi] if roi is not None else diagonal.ravel()
+                positive = active_diagonal[active_diagonal > 0]
+                if not positive.size:
+                    raise ValueError("no illuminated training pixels")
+                penalty_scale = float(np.median(positive))
+                damping *= penalty_scale
+            regularization = str(p.regularization)
+            length_wavelengths = float(p.regularization_length_wavelengths)
+            physical_length = None
+            if length_wavelengths:
+                if regularization not in {"laplacian", "roughness"}:
+                    raise ValueError(
+                        "physical regularization length requires a Laplacian penalty"
+                    )
+                train_frequency = np.any(control.split.train, axis=(1, 2))
+                physical_length = (
+                    length_wavelengths
+                    * c0
+                    / np.max(case.measurement.frequencies_hz[train_frequency])
                 )
-            train_frequency = np.any(control.split.train, axis=(1, 2))
-            physical_length = (
-                length_wavelengths
-                * c0
-                / np.max(case.measurement.frequencies_hz[train_frequency])
-            )
-            regularization = tuple(
-                (physical_length / h) ** 2 for h in case.grid.spacing_m
-            )
-        if mode == "fixed_background":
-            delta, metrics = projected_cg(
-                operator,
-                control,
-                initial=np.zeros(case.grid.shape),
-                offset=offset,
-                to_image=to_speed,
-                lower=1 / bounds[1] ** 2 - operator.background_squared_slowness,
-                upper=1 / bounds[0] ** 2 - operator.background_squared_slowness,
-                reference=operator.background_squared_slowness,
-                damping=damping,
-                regularization=regularization,
-                roi=roi,
-            )
-            sound_speed = to_speed(delta)
-        else:
-            initial_model = operator.background_squared_slowness
-            initialization_qc = None
-            if initialization == "phase_cgls":
-                try:
+                regularization = tuple(
+                    (physical_length / h) ** 2 for h in case.grid.spacing_m
+                )
+            control.monitor.set_stage("reconstruction")
+            if mode == "fixed_background":
+                delta, metrics = projected_cg(
+                    operator,
+                    control,
+                    initial=np.zeros(case.grid.shape),
+                    offset=offset,
+                    to_image=to_speed,
+                    lower=1 / bounds[1] ** 2 - operator.background_squared_slowness,
+                    upper=1 / bounds[0] ** 2 - operator.background_squared_slowness,
+                    reference=operator.background_squared_slowness,
+                    damping=damping,
+                    regularization=regularization,
+                    roi=roi,
+                )
+                sound_speed = to_speed(delta)
+            else:
+                initial_model = operator.background_squared_slowness
+                initialization_qc = None
+                if initialization == "phase_cgls":
                     initial_model, initialization_qc = initialize_from_phase(
                         case, p, control, operator.direct_distance, c0, bounds, roi
                     )
-                except BudgetExhausted as exc:
-                    return exhausted_result(exc)
-            forward = RayBornForward(
-                case.grid,
-                case.geometry,
-                case.measurement.frequencies_hz,
-                exterior_speed_mps=c0,
-                source_spectrum=operator.source_spectrum,
-                max_cache_bytes=int(p.max_cache_bytes),
-                **green_settings,
+                forward = RayBornForward(
+                    case.grid,
+                    case.geometry,
+                    case.measurement.frequencies_hz,
+                    exterior_speed_mps=c0,
+                    source_spectrum=operator.source_spectrum,
+                    max_cache_bytes=int(p.max_cache_bytes),
+                    **green_settings,
+                )
+                problem = prepare_born_problem(
+                    forward,
+                    initial_model,
+                    bounds,
+                    regularization=regularization,
+                    roi=roi,
+                    max_update_mps=float(p.max_update_mps),
+                )
+                state, metrics = gauss_newton(
+                    problem,
+                    control,
+                    inner_iterations=p.inner_iterations,
+                    inner_solver=str(p.inner_solver),
+                    inner_options=p.inner_options.model_dump(),
+                    damping=damping,
+                    step_length=float(p.step_length),
+                    smooth_sigma=float(p.smooth_sigma),
+                    max_backtracks=p.max_backtracks,
+                    gradient_rtol=float(p.gradient_rtol),
+                )
+                sound_speed = 1 / np.sqrt(state)
+                control.work.counts.update(
+                    background_builds=forward.background_builds,
+                    eikonal_source_solves=forward.eikonal_solves,
+                    green_source_solves=forward.green_solves,
+                    green_matvecs=forward.green_matvecs,
+                )
+                metrics["stopping"]["work"] = dict(control.work.counts)
+                metrics["initialization"] = initialization
+                metrics["initialization_qc"] = initialization_qc
+            if control.last_prediction is not None:
+                selected_prediction = (
+                    control.best_prediction
+                    if control.policy.restore_best_validation
+                    and control.best_prediction is not None
+                    else control.last_prediction
+                )
+                # The incident field can dominate full-pressure relative residuals.
+                # A second denominator measures the information-bearing contrast.
+                metrics["contrast_evaluation"] = control.split.evaluate(
+                    selected_prediction - offset, observed - offset
+                )
+            metrics.update(
+                {
+                    "backend": (
+                        "native_relinearized_ray_born"
+                        if mode == "nonlinear"
+                        else "native_fixed_background_ray_born"
+                    ),
+                    "method_family": (
+                        "distorted_born_volume_integral"
+                        if mode == "nonlinear"
+                        and green_settings["green_backend"] == "volume_integral"
+                        else "finite_frequency_ray_born"
+                    ),
+                    "background_relinearization": mode == "nonlinear",
+                    "forward_model": green_settings["green_backend"],
+                    "observation_domain": "complex_pressure",
+                    "observation_units": case.metadata.get("pressure_contract", {}).get(
+                        "data_units",
+                        case.metadata.get("frequency_data_units", "unknown"),
+                    ),
+                    "nonlinear_prediction_model": (
+                        green_settings["green_backend"]
+                        if mode == "nonlinear"
+                        else "fixed_background_born"
+                    ),
+                    "green_backend": green_settings["green_backend"],
+                    "uses_geometrical_ray_green_approximation": green_settings[
+                        "green_backend"
+                    ]
+                    == "eikonal_wkb",
+                    "green_method": operator.green_method,
+                    "green_method_scope": "initial_background",
+                    "model_parameter": "squared_slowness_s2_per_m2",
+                    "frequency_convention": "exp(-i omega t)",
+                    "source_spectrum_assumed_unit": source is None,
+                    "source_calibration": calibration,
+                    "pressure_uses_feature_weights": weights is not None,
+                    "inverse_grid_points_per_wavelength": inverse_ppw,
+                    "inverse_grid_resolved": inverse_ppw >= 4,
+                    "regularization_scaling": scaling,
+                    "regularization_length_m": physical_length,
+                    "regularization_length_uses_training_band_only": physical_length
+                    is not None,
+                    "penalty_scale": penalty_scale,
+                    "effective_damping": damping,
+                    "roi_update_only": roi_only,
+                }
             )
-            problem = prepare_born_problem(
-                forward,
-                initial_model,
-                bounds,
-                regularization=regularization,
-                roi=roi,
-                max_update_mps=float(p.max_update_mps),
-            )
-            state, metrics = gauss_newton(
-                problem,
-                control,
-                inner_iterations=p.inner_iterations,
-                inner_solver=str(p.inner_solver),
-                inner_options=p.inner_options.model_dump(),
-                damping=damping,
-                step_length=float(p.step_length),
-                smooth_sigma=float(p.smooth_sigma),
-                max_backtracks=p.max_backtracks,
-                gradient_rtol=float(p.gradient_rtol),
-            )
-            sound_speed = 1 / np.sqrt(state)
-            control.work.counts.update(
-                background_builds=forward.background_builds,
-                eikonal_source_solves=forward.eikonal_solves,
-                green_source_solves=forward.green_solves,
-                green_matvecs=forward.green_matvecs,
-            )
-            metrics["stopping"]["work"] = dict(control.work.counts)
-            metrics["initialization"] = initialization
-            metrics["initialization_qc"] = initialization_qc
-        if control.last_prediction is not None:
-            selected_prediction = (
-                control.best_prediction
-                if control.policy.restore_best_validation
-                and control.best_prediction is not None
-                else control.last_prediction
-            )
-            # The incident field can dominate full-pressure relative residuals.
-            # A second denominator measures the information-bearing contrast.
-            metrics["contrast_evaluation"] = control.split.evaluate(
-                selected_prediction - offset, observed - offset
-            )
-        metrics.update(
-            {
-                "backend": (
-                    "native_relinearized_ray_born"
-                    if mode == "nonlinear"
-                    else "native_fixed_background_ray_born"
-                ),
-                "method_family": (
-                    "distorted_born_volume_integral"
-                    if mode == "nonlinear"
-                    and green_settings["green_backend"] == "volume_integral"
-                    else "finite_frequency_ray_born"
-                ),
-                "background_relinearization": mode == "nonlinear",
-                "forward_model": green_settings["green_backend"],
-                "observation_domain": "complex_pressure",
-                "observation_units": case.metadata.get("pressure_contract", {}).get(
-                    "data_units", case.metadata.get("frequency_data_units", "unknown")
-                ),
-                "nonlinear_prediction_model": (
-                    green_settings["green_backend"]
-                    if mode == "nonlinear"
-                    else "fixed_background_born"
-                ),
-                "green_backend": green_settings["green_backend"],
-                "uses_geometrical_ray_green_approximation": green_settings[
-                    "green_backend"
-                ]
-                == "eikonal_wkb",
-                "green_method": operator.green_method,
-                "green_method_scope": "initial_background",
-                "model_parameter": "squared_slowness_s2_per_m2",
-                "frequency_convention": "exp(-i omega t)",
-                "source_spectrum_assumed_unit": source is None,
-                "source_calibration": calibration,
-                "pressure_uses_feature_weights": weights is not None,
-                "inverse_grid_points_per_wavelength": inverse_ppw,
-                "inverse_grid_resolved": inverse_ppw >= 4,
-                "regularization_scaling": scaling,
-                "regularization_length_m": physical_length,
-                "regularization_length_uses_training_band_only": physical_length
-                is not None,
-                "penalty_scale": penalty_scale,
-                "effective_damping": damping,
-                "roi_update_only": roi_only,
-            }
-        )
 
-        return ReconstructionResult(
-            algorithm=self.name,
-            case_id=case.case_id,
-            sound_speed_mps=sound_speed,
-            metrics=metrics,
-        )
+            return ReconstructionResult(
+                algorithm=self.name,
+                case_id=case.case_id,
+                sound_speed_mps=sound_speed,
+                metrics=metrics,
+            )
+        except BudgetExhausted as exc:
+            control.monitor.finish(exc.reason)
+            fallback = (
+                np.zeros(case.grid.shape)
+                if mode == "fixed_background"
+                else 1 / background**2
+            )
+            state, metrics = control.output(fallback)
+            model = state + 1 / background**2 if mode == "fixed_background" else state
+            metrics.update(
+                backend="native_ray_born", completed_stage=control.monitor.stage_id
+            )
+            return ReconstructionResult(
+                algorithm=self.name,
+                case_id=case.case_id,
+                sound_speed_mps=1 / np.sqrt(model),
+                metrics=metrics,
+            )
 
 
 __all__ = ["RayBornAlgorithm"]

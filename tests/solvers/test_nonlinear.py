@@ -105,6 +105,26 @@ def solve(monkeypatch):
     return run
 
 
+def test_accepted_linearization_is_current_work_state(solve):
+    state, metrics, forward, _, control = solve(np.eye(2), np.array([1e-9, -1e-9]))
+    current = control.current_state
+    np.testing.assert_array_equal(current.model, state)
+    np.testing.assert_array_equal(current.prediction, current.linearization.value)
+    assert current.objective == metrics["iteration_history"][-1]["objective"]
+    assert current.iteration == metrics["iterations"]
+    # One initial build and one accepted trial, no new build at iteration start.
+    assert forward.background_builds == 2
+    previous = current
+    control.monitor.reason = None
+    with pytest.raises(FloatingPointError, match="non-finite prediction") as error:
+        control.observe(
+            current.iteration + 1, state, np.full_like(current.prediction, np.nan)
+        )
+    control.fail(error.value)
+    assert control.current_state is previous
+    assert control.monitor.reason == "numerical_failure"
+
+
 def _original_first_trial(initial, proposal, step_length, bounds, max_update, roi=None):
     candidate = np.clip(
         initial + step_length * proposal, 1 / bounds[1] ** 2, 1 / bounds[0] ** 2

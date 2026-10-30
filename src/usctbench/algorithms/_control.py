@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import numpy as np
 
 from usctbench.core.stopping import StopMonitor, WorkLedger
 from usctbench.evaluation.data import make_data_split, residual_statistics
+
+
+@dataclass
+class AcceptedState:
+    model: np.ndarray
+    prediction: np.ndarray
+    objective: float
+    iteration: int
+    linearization: object = None
 
 
 class InversionControl:
@@ -48,6 +57,7 @@ class InversionControl:
         self.precision = np.where(self.split.train, self.split.weights, 0.0)
         self.safe_observed = np.where(self.split.train, self.observed, 0)
         self.last_prediction = self.best_prediction = None
+        self.current_state = None
         self.inner_solver_history = []
         self.numerical_error = None
         self.update_semantics = {
@@ -106,6 +116,7 @@ class InversionControl:
         update_relative=None,
         sound_speed=None,
         optimizer_diagnostics=None,
+        linearization=None,
     ):
         if self.monitor.reason is not None:
             return self.monitor.reason
@@ -146,6 +157,13 @@ class InversionControl:
                     optimizer_diagnostics
                 )
             self.last_prediction = np.array(prediction, copy=True)
+            self.current_state = AcceptedState(
+                self.monitor.last_state,
+                self.last_prediction,
+                self.monitor.history[-1]["objective"],
+                iteration,
+                linearization,
+            )
             if self.monitor.best_iteration != previous_best:
                 self.best_prediction = self.last_prediction.copy()
         return reason

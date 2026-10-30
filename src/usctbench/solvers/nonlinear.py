@@ -9,7 +9,6 @@ import numpy as np
 from scipy.linalg import norm
 from scipy.ndimage import gaussian_filter
 
-from usctbench.core.stopping import BudgetExhausted
 from usctbench.solvers.linear import solve_linearized
 from usctbench.operators.regularization import prepare_regularizer
 
@@ -102,10 +101,17 @@ def gauss_newton(
             state,
             linearization.value,
             objective=cost,
+            linearization=linearization,
         )
         for iteration in range(1, control.policy.max_iterations + 1):
             if control.monitor.reason is not None:
                 break
+            current = control.current_state
+            state, linearization, cost = (
+                current.model,
+                current.linearization,
+                current.objective,
+            )
             residual = control.weighted_residual(linearization.value)
             gradient = -control.call(
                 "adjoint", linearization.jacobian.adjoint, residual
@@ -275,11 +281,10 @@ def gauss_newton(
                 trial.value,
                 objective=cost,
                 update_relative=update,
+                linearization=trial,
             )
         if control.monitor.reason is None:
             control.monitor.finish("max_iterations")
-    except BudgetExhausted as exc:
-        control.monitor.finish(exc.reason)
     except FloatingPointError as exc:
         control.fail(exc)
     selected, metrics = control.output(initial_state)

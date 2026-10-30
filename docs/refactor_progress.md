@@ -324,3 +324,18 @@ large-data rerun or clinical validation is included in this delivery.
 - Validation: nonlinear, Bent, nonlinear Born and reduced-model tests: 52 passed.
   A first invocation referenced a nonexistent test filename; it ran no tests.
 - Next: F10 complete accepted-state ownership and boundary budget handling.
+
+## Final taskbook F10
+
+- The current accepted work state owns model, prediction, objective, iteration
+  and Linearization. History and best-validation snapshots remain lightweight.
+- Born budget handling is at its run boundary, replacing five setup catches;
+  exits retain the complete accepted state or the initial model/setup stage.
+- WorkLedger retains pre-call caps and measures actual call time including
+  exceptions. CPU Green source and GMRES callback boundaries check deadlines.
+- All four exact/approximate gradient/projected-gradient reasons map explicitly
+  to stationarity. Related solver/operator/control tests: 174 passed; additional
+  ownership and classification regressions: 63 passed. The new failure test
+  initially expected a status instead of the intentional raised numerical error;
+  it now checks that exception and that the accepted state is retained.
+- Next: F11 avoid unused FMM storage and route fixed/nonlinear GPU Jacobians alike.

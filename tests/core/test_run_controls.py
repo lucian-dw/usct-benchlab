@@ -23,10 +23,19 @@ def test_minimal_policy_disables_optional_quality_rules():
     assert not policy.restore_best_validation
 
 
-def test_stationarity_is_not_update_stagnation():
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "stationary_gradient",
+        "stationary_projected_gradient",
+        "stationary_surrogate_gradient",
+        "stationary_surrogate_projected_gradient",
+    ],
+)
+def test_stationarity_is_not_update_stagnation(reason):
     policy = RunControls().capped(default_iterations=3)
     monitor = StopMonitor(policy, WorkLedger(policy))
-    monitor.reason = "stationary_gradient"
+    monitor.reason = reason
     assert monitor.record()["termination_category"] == "stationarity"
     monitor.reason = "small_model_update"
     assert monitor.record()["termination_category"] == "stagnation"

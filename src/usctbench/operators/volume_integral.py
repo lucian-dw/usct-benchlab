@@ -88,10 +88,14 @@ class VolumeIntegralGreen:
             return solve_fields(self, incident, self.device)
         result = np.empty_like(incident)
         for index, rhs in enumerate(incident):
+            if self.budget_check is not None:
+                self.budget_check()
             iteration_count = 0
 
             def completed_iteration(_):
                 nonlocal iteration_count
+                if self.budget_check is not None:
+                    self.budget_check()
                 iteration_count += 1
 
             value, info = gmres(
