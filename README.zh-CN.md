@@ -1,5 +1,10 @@
 # usct-benchlab
 
+本仓库还提供独立的 **`eitbench`** 包与 `eit` 命令，用于电阻抗层析：
+P1 有限元 CEM/连续边界正演、精确离散伴随、L-BFGS-B 与平滑 TV。
+沿用 USCT 的发现、配置、运行、评价结构，使用独立电导率与边界电压类型。
+数据导入与完整调用方式见 [EIT 接入指南](docs/eit.md)。
+
 [English](README.md)
 
 **面向二维超声计算机断层成像（USCT）的数值重建与基准评测库。**
@@ -25,6 +30,7 @@
 | `straight_sirt` | 相对水参考的差分走时 | 直线射线模型；归一化同时迭代更新 | [sirt.yaml](configs/algorithms/sirt.yaml) |
 | `straight_sart` | 相对水参考的差分走时 | 直线射线模型；有序子集更新，每次迭代完整遍历全部子集 | [sart.yaml](configs/algorithms/sart.yaml) |
 | `bent_ray_gn` | 绝对首波走时或相对水参考的首波走时 | 快速行进程函模型；离散切线/伴随与有界 Gauss–Newton | [bent_ray.yaml](configs/algorithms/bent_ray.yaml) |
+| `fttt` | 绝对首波走时或相对水参考的首波走时 | DIP / INR / 预训练先验 DPS，共用原生 Eikonal 与反向传播接口 | [FTTT 接入说明](docs/fttt.md) |
 | `born` | 具有源校准信息的复数总声压 | 有限频 Born 模型；固定背景或逐步重新线性化 | [born.yaml](configs/algorithms/born.yaml) |
 | `fwi_wust` | 复数总声压 | 通过 WUST 执行带频率延拓的 Helmholtz 全波形反演 | [fwi_wust.yaml](configs/algorithms/fwi_wust.yaml) |
 

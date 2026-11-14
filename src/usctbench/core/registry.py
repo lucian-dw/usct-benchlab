@@ -25,6 +25,12 @@ from usctbench.algorithms.parameters import (
     FixedBornParameters,
 )
 from usctbench.algorithms.fwi.parameters import WUSTParameters
+from usctbench.algorithms.fttt import FTTTAlgorithm
+from usctbench.algorithms.fttt.parameters import (
+    DIPParameters,
+    INRParameters,
+    DPSParameters,
+)
 from usctbench.core.run_controls import BUDGET_FIELDS, RunControls
 
 
@@ -69,6 +75,12 @@ class AlgorithmEntry:
             else getattr(parameters, "variant", None)
         )
         rule = self.iteration_defaults[self.specification.variant(selected).id]
+        if rule == "sampling_steps":
+            return (
+                parameters.get("sampling_steps", 64)
+                if isinstance(parameters, dict)
+                else getattr(parameters, "sampling_steps", 64)
+            )
         if rule != "frequency_schedule":
             return rule
         schedule = (
@@ -215,6 +227,15 @@ _REGISTRY["fwi_wust"] = AlgorithmEntry(
             "timeout cap is required."
         ),
     },
+)
+
+
+_REGISTRY["fttt"] = AlgorithmEntry(
+    "fttt",
+    FTTTAlgorithm,
+    SPECS["fttt"],
+    {"dip": DIPParameters, "inr": INRParameters, "dps": DPSParameters},
+    {"dip": 1000, "inr": 1000, "dps": "sampling_steps"},
 )
 
 

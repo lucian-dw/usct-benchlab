@@ -1,0 +1,12 @@
+{
+  "source": "user attachment eit_submission.zip",
+  "archive_sha256": "4c70cacbd3548fd6ad1484cac8b0fa2c0e7e6f5a0b3ea1edd31a4f1f0cf265b2",
+  "files": {
+    "eit_core.py": "c84c6e249f10c43e50aef4e123daeedff45bdcbae04e068406cddb9d5fab077d",
+    "inverse.py": "c6468840bcb013ac7040e8d13163f7ad600f2090dc38364b46203f35020d314e",
+    "run.py": "d0666a5f87c91a821f24a7c22a176fe1cc071530f0bf6e88c2ec484fec15257f",
+    "prepare_data.py": "d783c00a1134cf74649ae1058db2b4d63da4dfa72b95b16f06e509081de03785"
+  },
+  "migration": "P1 FEM, boundary assembly, TV and adjoint formulas preserved; orchestration and budgeted optimization rewritten.",
+  "data_notice": "CC-BY-4.0; see THIRD_PARTY_NOTICES.md and data/eit/kit4/manifest.json"
+}

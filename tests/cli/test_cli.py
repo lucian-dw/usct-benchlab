@@ -211,7 +211,7 @@ def test_json_stdout_cli_and_case_capabilities(capsys, tmp_path):
     output = capsys.readouterr()
     entries = json.loads(output.out)
     assert output.err == ""
-    assert len(entries) == 6
+    assert len(entries) == 7
     ids = {entry["algorithm_id"] for entry in entries}
     assert ids == {
         "straight_cgls",
@@ -220,6 +220,7 @@ def test_json_stdout_cli_and_case_capabilities(capsys, tmp_path):
         "bent_ray_gn",
         "born",
         "fwi_wust",
+        "fttt",
     }
     path = tmp_path / "case.h5"
     write_case_hdf5(make_sound_speed_case(shape=(8, 8), n_transducers=8), path)

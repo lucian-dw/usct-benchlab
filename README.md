@@ -6,6 +6,12 @@
 
 `usct-benchlab` reconstructs sound speed from travel times and complex pressure measurements. It brings together physical operators, iterative solvers, data preparation and evaluation through a common case format. Researchers and inverse-problem agents use the same algorithms through the command line or Python API.
 
+The repository also provides the independent **`eitbench`** package and `eit`
+CLI for electrical impedance tomography: P1 FEM with CEM/continuum boundary
+models, exact discrete adjoints and L-BFGS-B with smoothed TV. It follows the
+same discovery/config/run/evaluate structure, with its own conductivity and
+boundary-voltage types. See the [EIT guide](docs/eit.md).
+
 The project works with two complementary repositories:
 
 | Repository | Role |
@@ -25,6 +31,7 @@ All algorithms produce a sound-speed image in m/s. Straight-ray methods estimate
 | `straight_sirt` | Water-relative travel times | Straight-ray model; simultaneous normalized row-action updates | [sirt.yaml](configs/algorithms/sirt.yaml) |
 | `straight_sart` | Water-relative travel times | Straight-ray model; ordered subsets with one complete sweep per iteration | [sart.yaml](configs/algorithms/sart.yaml) |
 | `bent_ray_gn` | Absolute or water-relative first-arrival times | Fast-marching Eikonal model; discrete tangent/adjoint and bounded Gauss–Newton | [bent_ray.yaml](configs/algorithms/bent_ray.yaml) |
+| `fttt` | Absolute or water-relative first-arrival times | DIP / INR / pretrained-prior DPS with the native Eikonal autograd bridge | [FTTT guide](docs/fttt.md) |
 | `born` | Complex total pressure with source calibration | Finite-frequency Born model; fixed-background or relinearized reconstruction | [born.yaml](configs/algorithms/born.yaml) |
 | `fwi_wust` | Complex total pressure | Helmholtz FWI with frequency continuation through WUST | [fwi_wust.yaml](configs/algorithms/fwi_wust.yaml) |
 

@@ -7,4 +7,5 @@
 - [Agent API](agent_algorithm_api.md) and [parameters](parameter_contract.md).
 - [Evaluation](evaluation.md) and [result lifecycle](result_lifecycle.md).
 - [WUST FWI](fwi.md): independent runtime deployment and invocation.
+- [EIT](eit.md): independent conductivity model, L-BFGS-B/TV, data and Agent interface.
 - [References](references.bib).

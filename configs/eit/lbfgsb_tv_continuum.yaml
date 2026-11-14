@@ -1,0 +1,8 @@
+name: lbfgsb_tv
+parameters:
+  variant: continuum
+  mode: difference
+run_controls:
+  max_iterations: 500
+deployment:
+  device: cpu

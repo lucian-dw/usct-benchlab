@@ -1,0 +1,17 @@
+{
+  "schema_version": "usct.diffusion.weights.v1",
+  "dataset_id": "nbpslice2d",
+  "backend": "score_sde_pytorch",
+  "status": "untrained",
+  "checkpoint": null,
+  "sha256": null,
+  "training": {
+    "repository": "https://github.com/yang-song/score_sde_pytorch",
+    "guide": "../../README.md",
+    "config": "training_config.py",
+    "workdir": ".",
+    "data": "Prepare independent training/validation sos images from NBPslices2D; split by source specimen before selecting slices.",
+    "normalization": "Record physical variable, bounds, centered scaler, resolution, VP/VE/subVP SDE and schedule before training."
+  },
+  "notes": "Reserved dataset weight location. No NBPslices2D-specific pretrained weights are supplied."
+}

@@ -1,0 +1,154 @@
+{
+  "dataset": "2D electrical impedance tomography dataset",
+  "version": "1.0.0",
+  "doi": "10.5281/zenodo.1203914",
+  "license": "CC-BY-4.0",
+  "citation": "Hauptmann, Kolehmainen, Mach, Savolainen, Seppänen, Siltanen (2017).",
+  "selection": "Fixed diverse cases selected before inversion; no target-specific tuning.",
+  "reference": {
+    "file": "source/datamat_1_0.mat",
+    "sha256": "f91ab0c5edea5e06c8895b0d03597f801ecff4a59d72eaa4bf4914fac94fc9d9"
+  },
+  "archives": {
+    "data_mat_files.zip": {
+      "url": "https://zenodo.org/records/1203914/files/data_mat_files.zip",
+      "md5": "ad9f03325cafc9aae8c0149927de8e06",
+      "sha256": "b7634f4e4056caa4b96e8d60b7fc22da765a2008c22313e568cbb5877fb7adac"
+    },
+    "target_photos.zip": {
+      "url": "https://zenodo.org/records/1203914/files/target_photos.zip",
+      "md5": "dbebe6df5c3c8e8f6bcaa0cb0e703915",
+      "sha256": "edba957aec9c3823c11d96e677f335e39267a0a1ba41f2a315d510902c2a8486"
+    }
+  },
+  "cases": [
+    {
+      "case_id": "1_1",
+      "description": "one plastic circle",
+      "input": "phantom_1_1.npz",
+      "source": {
+        "file": "source/datamat_1_1.mat",
+        "sha256": "6be1ff36c89cf77dca00364231c27b1f5d0a9470511135f67fd0869d50782a47"
+      },
+      "photo": "photos/fantom_1_1.jpg",
+      "photo_sha256": "310457b12767ad03c59aaba19a4b5a78f12d0e86ece705f7f713a55921388bf5",
+      "selected_measurements": 966
+    },
+    {
+      "case_id": "1_2",
+      "description": "one hollow metal circle",
+      "input": "phantom_1_2.npz",
+      "source": {
+        "file": "source/datamat_1_2.mat",
+        "sha256": "6e397892808fd42d60037d34d84878c4d50aeb1804260c548813f4a2d3aeb35d"
+      },
+      "photo": "photos/fantom_1_2.jpg",
+      "photo_sha256": "7bf7e8d83a5f555975bb7c762946943920fafdc2fecfd6c4478c8322c4a1e43f",
+      "selected_measurements": 966
+    },
+    {
+      "case_id": "2_1",
+      "description": "two plastic objects: triangle and circle",
+      "input": "phantom_2_1.npz",
+      "source": {
+        "file": "source/datamat_2_1.mat",
+        "sha256": "d578b2c1cf4c2ae76541cd1e4fdf95bcd6088bc403ead16ee5f49def36e8f65e"
+      },
+      "photo": "photos/fantom_2_1.jpg",
+      "photo_sha256": "c08a04039e733670238e04d7b286f98c80697b2686007751600ce8ec1e260383",
+      "selected_measurements": 966
+    },
+    {
+      "case_id": "2_3",
+      "description": "two hollow metal circles",
+      "input": "phantom_2_3.npz",
+      "source": {
+        "file": "source/datamat_2_3.mat",
+        "sha256": "cc1af68aef5db9c81e1555fe1d95917bb715f6d60b54d36ca28437ba6c633439"
+      },
+      "photo": "photos/fantom_2_3.jpg",
+      "photo_sha256": "bebc7ae1404be3ad9ba86572d59b8613f62a8ddfd6b53c5faf291b31fb1ef246",
+      "selected_measurements": 966
+    },
+    {
+      "case_id": "3_1",
+      "description": "three plastic objects: rectangle, triangle, circle",
+      "input": "phantom_3_1.npz",
+      "source": {
+        "file": "source/datamat_3_1.mat",
+        "sha256": "6259deac99aa66d33cdb1c09cf91b7a8e57bed1aff405e0987f654cef4503648"
+      },
+      "photo": "photos/fantom_3_1.jpg",
+      "photo_sha256": "030ab1909307a68e4ac98a38fe0f8daac3b439de747d19fe2e27f7298a794645",
+      "selected_measurements": 966
+    },
+    {
+      "case_id": "3_4",
+      "description": "three hollow metal circles",
+      "input": "phantom_3_4.npz",
+      "source": {
+        "file": "source/datamat_3_4.mat",
+        "sha256": "c1d0874c63736a0efc36bdcf0c7842a2346d0c919fee32f9681746efcd5f948c"
+      },
+      "photo": "photos/fantom_3_4.jpg",
+      "photo_sha256": "6e9d1ca2d2392b1ba419b48b3a8907d9240ed9b9bb8a38cd810a43e1a9d4265e",
+      "selected_measurements": 966
+    },
+    {
+      "case_id": "4_1",
+      "description": "metal circle and plastic triangle",
+      "input": "phantom_4_1.npz",
+      "source": {
+        "file": "source/datamat_4_1.mat",
+        "sha256": "59c4ff80f799860f9597966b02b684ae889fac53f8b79285b159ac7acc6c0827"
+      },
+      "photo": "photos/fantom_4_1.jpg",
+      "photo_sha256": "557dc7821363841e86d74066e2eb38f3e91decf74288f66cf3afcd432190e03b",
+      "selected_measurements": 966
+    },
+    {
+      "case_id": "4_3",
+      "description": "metal circle and plastic circle",
+      "input": "phantom_4_3.npz",
+      "source": {
+        "file": "source/datamat_4_3.mat",
+        "sha256": "c51f121e5a5f89a8ce6ad86bdab54166c26c5b424343a6fc7b399cee462b8f8d"
+      },
+      "photo": "photos/fantom_4_3.jpg",
+      "photo_sha256": "743b526c39bc4b87a5a6bd3f4a628a0e97072780de75fdf56dcdc6d73768e029",
+      "selected_measurements": 966
+    },
+    {
+      "case_id": "5_1",
+      "description": "one metal and two plastic objects",
+      "input": "phantom_5_1.npz",
+      "source": {
+        "file": "source/datamat_5_1.mat",
+        "sha256": "15bce81729e698ad17f7a2bf352162e52beee1838c24f0c320711e1fbccfff0a"
+      },
+      "photo": "photos/fantom_5_1.jpg",
+      "photo_sha256": "15575a829a12b59bb78c6e1ca6dc85d8dfc407f742d263e904bba4e71632a726",
+      "selected_measurements": 966
+    },
+    {
+      "case_id": "5_2",
+      "description": "two metal and one plastic objects",
+      "input": "phantom_5_2.npz",
+      "source": {
+        "file": "source/datamat_5_2.mat",
+        "sha256": "208fa34532762d32d154191c0763066b95a35169da9a87c330954ed6f2afa446"
+      },
+      "photo": "photos/fantom_5_2.jpg",
+      "photo_sha256": "893e97124322ca5481f7088df012ad64c22554adc4785d8b48fe31eea1afa130",
+      "selected_measurements": 966
+    }
+  ],
+  "preprocessing": {
+    "CurrentPattern": "stored values times 1e-3, mA -> A convention; sqrt(2) preserved",
+    "MeasPattern": "transpose: original columns become measurement rows",
+    "Uel": "stored signed values interpreted as V; no abs, sign flip, normalization or resimulation",
+    "mask": "per injection discard voltage pairs touching either current electrode",
+    "geometry": "new deterministic 2D mesh; dimensions from dataset report",
+    "scale_caveat": "The report gives 2 mA amplitude whereas MAT stores sqrt(2). RMS interpretation is an inference. Calibrated absolute S/m depends on this current-unit convention."
+  }
+}

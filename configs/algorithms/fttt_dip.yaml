@@ -1,0 +1,13 @@
+name: fttt
+parameters:
+  variant: dip
+  learning_rate: 0.001
+  seed: 0
+  input_channels: 8
+  base_channels: 16
+  residual_scale_s: 1.0e-6
+  sound_speed_bounds_mps: [1300.0, 1700.0]
+run_controls:
+  max_iterations: 1000
+deployment:
+  neural_device: cpu

@@ -105,6 +105,46 @@ def _born_variant(identifier, mode, backend):
 
 
 SPECS = {
+    "fttt": AlgorithmSpecification(
+        "fttt",
+        "eikonal",
+        "First-arrival travel-time DIP, INR and pretrained-prior DPS baselines.",
+        tuple(
+            Variant(
+                method,
+                "Eikonal_first_arrival_" + method,
+                selectors={"variant": method},
+                required_observations=(),
+                observation_alternatives=(("tof_s",), ("delta_tof_s",)),
+                runtime_requirements=("torch>=2.0", "numpy", "scipy")
+                + (
+                    ("compatible_usct.fttt.prior.v1_checkpoint",)
+                    if method == "dps"
+                    else ()
+                ),
+                iteration_unit=(
+                    "reverse sampling update"
+                    if method == "dps"
+                    else "Adam parameter update"
+                ),
+                deterministic="fixed_seed_input_config_device_and_torch_environment",
+                limitations=(
+                    "First-arrival geometrical acoustics; Eikonal physics runs on CPU.",
+                    "Discrete derivatives are local to the active fast-marching stencil.",
+                    "Requires declared first-arrival semantics; correlation/phase delays are not interchangeable.",
+                )
+                + (
+                    (
+                        "Requires a trained compatible prior or dataset manifest; missing weights guide to Yang Song score_sde_pytorch.",
+                        "Sampling residuals need not decrease monotonically; objective-plateau stopping is unsupported.",
+                    )
+                    if method == "dps"
+                    else ()
+                ),
+            )
+            for method in ("dip", "inr", "dps")
+        ),
+    ),
     "straight_cgls": AlgorithmSpecification(
         "straight_cgls",
         "straight_ray",

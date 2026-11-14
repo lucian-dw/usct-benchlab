@@ -22,6 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+neural = ["torch>=2.0"]
 performance = ["numba>=0.61"]
 cuda11 = ["cupy-cuda11x>=13.6,<14"]
 cuda12 = ["cupy-cuda12x>=13.6,<14"]
@@ -37,9 +38,13 @@ viz = [
 
 [project.scripts]
 usct = "usctbench.cli:main"
+eit = "eitbench.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+usctbench = ["_vendor/inv_framework/SOURCE.json", "_vendor/inv_framework/NOTICE.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

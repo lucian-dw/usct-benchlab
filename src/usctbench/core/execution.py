@@ -11,6 +11,11 @@ class Deployment(BaseModel):
     cuda_visible_devices: str | None = None
     backend: Literal["cpu", "gpu"] = "gpu"
     scratch_root: str | None = None
+    neural_device: str = Field(
+        "cpu",
+        pattern=r"^(cpu|cuda(:[0-9]+)?)$",
+        description="Explicit PyTorch device for FTTT; Eikonal physics stays on CPU.",
+    )
     green_device: int | None = Field(
         None,
         ge=0,

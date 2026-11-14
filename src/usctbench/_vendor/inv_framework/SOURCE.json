@@ -1,0 +1,56 @@
+{
+  "repository": "https://github.com/peterw634/inv_framework",
+  "commit": "b258fa90d284f0105259aeffbfd43814f4cd3085",
+  "license_declaration": "Upstream README declares MIT; no separate LICENSE file was present in this revision. No additional copyright holder is inferred.",
+  "files": [
+    {
+      "path": "inv_framework/solvers/dip.py",
+      "blob_sha": "7d5e711f2f73d52be08815c3215259e359d1a0e6"
+    },
+    {
+      "path": "inv_framework/solvers/inr.py",
+      "blob_sha": "aedf9676ec0e79a8b39e9243f127582a444d5a1a"
+    },
+    {
+      "path": "inv_framework/solvers/diffusion/dps.py",
+      "blob_sha": "51ce23b3edf579b5af51030d8b8d4a1eaa4e293e"
+    },
+    {
+      "path": "inv_framework/solvers/diffusion/scheduler.py",
+      "blob_sha": "ee4445e5ff87e1c72d488a559600a515409a1607"
+    },
+    {
+      "path": "inv_framework/solvers/diffusion/conditioning.py",
+      "blob_sha": "42e9f828adcb202a54b06effbcb2701436fd6bf6"
+    },
+    {
+      "path": "inv_framework/models/skip_unet.py",
+      "blob_sha": "b7020ae4d6a876c0f38f642639aeb81b29ae4299"
+    },
+    {
+      "path": "inv_framework/models/siren.py",
+      "blob_sha": "19d7d841094582a3134d9632ac64fb62c4d7b3c4"
+    },
+    {
+      "path": "inv_framework/models/tiny_unet.py",
+      "blob_sha": "82192e76faa6073a4da049cc9c3b0cf525a843c9"
+    },
+    {
+      "path": "inv_framework/operators/base.py",
+      "blob_sha": "235970ff9b5110639015a5c514e2734eb2cb5be2"
+    },
+    {
+      "path": "inv_framework/operators/noise.py",
+      "blob_sha": "38bf7d2d3ab0a5cc0e11b0e4cfb2ef30fcc09fe3"
+    },
+    {
+      "path": "inv_framework/solvers/base.py",
+      "blob_sha": "acaa0e6bf0aac565e79eeb5b97d40e43e38ea14a"
+    }
+  ],
+  "local_changes": [
+    "Package initializers expose only the extracted subset.",
+    "DIP/INR/DPS add optional loss, observation and work-control hooks.",
+    "VPSchedule fixes the final clean step and rejects duplicate inference timesteps."
+  ]
+}
