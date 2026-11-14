@@ -1,0 +1,19 @@
+{
+  "schema_version": "usct.diffusion.weights.v1",
+  "dataset_id": "synthetic_ellipses",
+  "backend": "native_tiny_unet",
+  "status": "ready",
+  "checkpoint": "reference.pt",
+  "sha256": "5f86fa62c41525d0879ee7c7ddd0b0b25d70707026f031ed6d2f4ce80814cf72",
+  "training": {
+    "repository": "local:usctbench.algorithms.fttt.train_prior",
+    "steps": 5000,
+    "seed": 70,
+    "image_shape": [
+      16,
+      16
+    ],
+    "noise_timesteps": 1000
+  },
+  "notes": "Synthetic interface example only; reconstruction quality not accepted. Independent of OpenBreastUS/NBPslices2D weights."
+}

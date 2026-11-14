@@ -1,0 +1,9 @@
+name: fttt
+parameters:
+  variant: dps
+  prior_manifest: diffusion/weights/openbreastus/manifest.json
+  sampling_steps: 64
+  guidance_scale: 0.1
+  seed: 0
+deployment:
+  neural_device: cpu

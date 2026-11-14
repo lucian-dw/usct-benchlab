@@ -1,0 +1,9 @@
+# Keep manifests, recipes and documentation; model files are local artifacts.
+weights/**/checkpoints/
+weights/**/checkpoints-meta/
+weights/**/samples/
+weights/**/tensorboard/
+weights/**/*.pt
+weights/**/*.pth
+weights/**/*.ckpt
+weights/**/*.npz

@@ -45,6 +45,8 @@ def prepare_config(name, config, *, case=None, host_limits=None, deployment=None
     elif host_limits is not None:
         raise ValueError(f"case required to resolve inherited {name} iteration budget")
     entry.validate_controls(controls)
+    if hasattr(parameters, "validate_run_controls"):
+        parameters.validate_run_controls(controls)
     context = config.deployment
     if deployment is not None:
         overrides = Deployment.model_validate(deployment).model_dump(exclude_unset=True)

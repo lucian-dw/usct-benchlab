@@ -1,0 +1,12 @@
+name: fttt
+parameters:
+  variant: dps
+  prior_manifest: diffusion/weights/synthetic_ellipses/manifest.json
+  sampling_steps: 64
+  guidance_scale: 0.1
+  eta: 0.0
+  seed: 0
+  residual_scale_s: 1.0e-6
+  sound_speed_bounds_mps: [1300.0, 1700.0]
+deployment:
+  neural_device: cpu

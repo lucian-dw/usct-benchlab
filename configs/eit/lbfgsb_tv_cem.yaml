@@ -1,0 +1,15 @@
+name: lbfgsb_tv
+parameters:
+  variant: cem
+  mode: difference
+  alpha: 0.03
+  tv_epsilon: 0.1
+  lower: 0.05
+  upper: 5.0
+  ftol: 1.0e-8
+  gtol: 1.0e-6
+  calibration_max_iterations: 400
+run_controls:
+  max_iterations: 500
+deployment:
+  device: cpu

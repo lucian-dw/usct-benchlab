@@ -10,7 +10,7 @@ c(x)^{-2}\partial_{tt}p_s(t,x)-\Delta p_s(t,x)=q_s(t,x),
 $$
 
 The maintained reconstruction target is $c(x)$ in m/s. Data generation may
-involve additional medium physics, but none of the six algorithms estimates
+involve additional medium physics, but none of the maintained algorithms estimates
 attenuation. A model-generated surrogate and an imported pressure acquisition
 are different observations, even if they share a property map.
 
